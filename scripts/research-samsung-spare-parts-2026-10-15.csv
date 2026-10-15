@@ -1,0 +1,457 @@
+model,part,price_inr,includes_gst,labour_note,source_url,source_date
+"Galaxy Z Fold8 Ultra (SM-F976B)",screen_main_assembly,59670,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold8 Ultra (SM-F976B)",screen_component_main_screen_oled,40560,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold8 Ultra (SM-F976B)",back_glass_cover,2570,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold8 Ultra (SM-F976B)",battery,2340,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold8 (SM-F971B)",screen_main_assembly,54130,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold8 (SM-F971B)",screen_component_main_screen_oled,35490,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold8 (SM-F971B)",back_glass_cover,2300,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold8 (SM-F971B)",battery,2300,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip8 (SM-F776B)",screen_main_assembly,26760,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip8 (SM-F776B)",screen_component_main_screen_oled,18270,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip8 (SM-F776B)",back_glass_cover,520,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip8 (SM-F776B)",battery,2410,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold7 (SM-F966B)",screen_main_assembly,51810,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold7 (SM-F966B)",screen_component_repair,36279,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold7 (SM-F966B)",sub_screen_cover_display,7940,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold7 (SM-F966B)",back_glass_cover,2610,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold7 (SM-F966B)",battery,1690,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip7 (SM-F766B)",screen_main_assembly,27300,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip7 (SM-F766B)",screen_component_repair,14296,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip7 (SM-F766B)",sub_screen_cover_display,5810,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip7 (SM-F766B)",back_glass_cover,1240,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip7 (SM-F766B)",battery,1760,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip7 FE (SM-F761B)",screen_main_assembly,21900,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip7 FE (SM-F761B)",screen_component_repair,12385,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip7 FE (SM-F761B)",sub_screen_cover_display,4640,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip7 FE (SM-F761B)",back_glass_cover,930,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip7 FE (SM-F761B)",battery,1560,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold6 (SM-F956B)",screen_main_assembly,47420,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold6 (SM-F956B)",screen_component_repair,34578,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold6 (SM-F956B)",sub_screen_cover_display,6300,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold6 (SM-F956B)",back_glass_cover,2670,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold6 (SM-F956B)",battery,1630,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip6 (SM-F741B)",screen_main_assembly,19830,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip6 (SM-F741B)",screen_component_repair,13438,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip6 (SM-F741B)",screen_component_frame,9700,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip6 (SM-F741B)",sub_screen_cover_display,6030,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip6 (SM-F741B)",back_glass_cover,1540,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip6 (SM-F741B)",battery,1640,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold5 (SM-F946B)",screen_main_assembly,48160,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold5 (SM-F946B)",screen_component_repair,33235,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold5 (SM-F946B)",sub_screen_cover_display,6420,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold5 (SM-F946B)",back_glass_cover,2520,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold5 (SM-F946B)",battery,1560,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip5 (SM-F731B)",screen_main_assembly,26740,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip5 (SM-F731B)",screen_component_repair,19510,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip5 (SM-F731B)",sub_screen_cover_display,5510,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip5 (SM-F731B)",back_glass_cover,1350,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip5 (SM-F731B)",battery,1800,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold4 (SM-F936B)",screen_main_assembly,46420,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold4 (SM-F936B)",screen_component_repair,40341,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold4 (SM-F936B)",sub_screen_cover_display,6450,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold4 (SM-F936B)",back_glass_cover,2520,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Fold4 (SM-F936B)",battery,950,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip4 (SM-F721B)",screen_main_assembly,31180,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip4 (SM-F721B)",screen_component_repair,23074,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip4 (SM-F721B)",sub_screen_cover_display,4430,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip4 (SM-F721B)",back_glass_cover,1520,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy Z Flip4 (SM-F721B)",battery,910,no,"excl labour; L2 Rs525+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26 FE (SM-S741B)",screen_component_main_screen_oled,4940,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26 FE (SM-S741B)",back_glass_cover,1820,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26 FE (SM-S741B)",battery,2380,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26 Ultra (SM-S948B)",screen_component_main_screen_oled,16790,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26 Ultra (SM-S948B)",screen_component_frame,5190,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26 Ultra (SM-S948B)",back_glass_cover,3460,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26 Ultra (SM-S948B)",battery,3240,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26+ (SM-S947B)",screen_component_main_screen_oled,11780,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26+ (SM-S947B)",screen_component_frame,3690,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26+ (SM-S947B)",back_glass_cover,2770,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26+ (SM-S947B)",battery,2600,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26 (SM-S942B)",screen_component_main_screen_oled,8190,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26 (SM-S942B)",screen_component_frame,4030,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26 (SM-S942B)",back_glass_cover,2700,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S26 (SM-S942B)",battery,2590,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 Edge (SM-S937B)",screen_main_assembly,19900,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 Edge (SM-S937B)",back_glass_cover,2830,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 Edge (SM-S937B)",battery,1920,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 FE (SM-S731B)",screen_component_main_screen_oled,5530,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 FE (SM-S731B)",screen_component_frame,3590,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 FE (SM-S731B)",back_glass_cover,2100,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 FE (SM-S731B)",battery,2380,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 Ultra (SM-S938B)",screen_component_main_screen_oled,15270,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 Ultra (SM-S938B)",screen_component_frame,6740,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 Ultra (SM-S938B)",back_glass_cover,3080,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 Ultra (SM-S938B)",battery,2960,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25+ (SM-S936B)",screen_component_main_screen_oled,10710,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25+ (SM-S936B)",screen_component_frame,3600,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25+ (SM-S936B)",back_glass_cover,2710,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25+ (SM-S936B)",battery,2650,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 (SM-S931B)",screen_component_main_screen_oled,7450,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 (SM-S931B)",screen_component_frame,3460,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 (SM-S931B)",back_glass_cover,2700,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S25 (SM-S931B)",battery,2470,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 FE (SM-S721B)",screen_component_main_screen_oled,5130,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 FE (SM-S721B)",screen_component_frame,3020,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 FE (SM-S721B)",back_glass_cover,1510,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 FE (SM-S721B)",battery,2310,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 Ultra (SM-S928B)",screen_component_main_screen_oled,16160,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 Ultra (SM-S928B)",screen_component_frame,8880,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 Ultra (SM-S928B)",back_glass_cover,2820,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 Ultra (SM-S928B)",battery,2400,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24+ (SM-S926B)",screen_component_main_screen_oled,12520,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24+ (SM-S926B)",screen_component_frame,3460,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24+ (SM-S926B)",back_glass_cover,2600,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24+ (SM-S926B)",battery,2370,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 (SM-S921B)",screen_component_main_screen_oled,8600,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 (SM-S921B)",screen_component_frame,2760,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 (SM-S921B)",back_glass_cover,2450,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S24 (SM-S921B)",battery,2610,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 FE (SM-S711B)",screen_component_main_screen_oled,5290,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 FE (SM-S711B)",screen_component_frame,3110,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 FE (SM-S711B)",back_glass_cover,1500,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 FE (SM-S711B)",battery,1900,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 Ultra (SM-S918B)",screen_main_assembly,28470,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 Ultra (SM-S918B)",screen_component_main_screen_oled,15450,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 Ultra (SM-S918B)",screen_component_frame,3180,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 Ultra (SM-S918B)",back_glass_cover,3470,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 Ultra (SM-S918B)",battery,2760,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23+ (SM-S916B)",screen_main_assembly,13540,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23+ (SM-S916B)",screen_component_main_screen_oled,10930,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23+ (SM-S916B)",screen_component_frame,2440,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23+ (SM-S916B)",back_glass_cover,2440,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23+ (SM-S916B)",battery,2810,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 (SM-S911B)",screen_main_assembly,19220,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 (SM-S911B)",screen_component_main_screen_oled,8990,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 (SM-S911B)",screen_component_frame,2950,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 (SM-S911B)",back_glass_cover,2520,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S23 (SM-S911B)",battery,2930,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 Ultra (SM-S908E)",screen_main_assembly,21010,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 Ultra (SM-S908E)",screen_component_repair,13688,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 Ultra (SM-S908E)",back_glass_cover,3370,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 Ultra (SM-S908E)",battery,2120,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 Ultra (SM-S908E)",front_camera,2390,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 Ultra (SM-S908E)",rear_camera,4880,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22+ (SM-S906E)",screen_main_assembly,14030,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22+ (SM-S906E)",screen_component_main_screen_oled,9290,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22+ (SM-S906E)",back_glass_cover,2570,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22+ (SM-S906E)",battery,1990,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22+ (SM-S906E)",front_camera,6800,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22+ (SM-S906E)",rear_camera,2200,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 (SM-S901E)",screen_main_assembly,14000,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 (SM-S901E)",screen_component_main_screen_oled,8730,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 (SM-S901E)",back_glass_cover,2200,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 (SM-S901E)",battery,1730,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 (SM-S901E)",front_camera,6800,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S22 (SM-S901E)",rear_camera,2200,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 FE (SM-G990E)",screen_main_assembly,10730,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 FE (SM-G990E)",back_glass_cover,1220,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 FE (SM-G990E)",battery,2130,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 (SM-G991B)",screen_main_assembly,14020,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 (SM-G991B)",screen_component_main_screen_oled,12840,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 (SM-G991B)",back_glass_cover,2100,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 (SM-G991B)",battery,1590,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 (SM-G991B)",front_camera,2010,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 (SM-G991B)",rear_camera,8110,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21+ (SM-G996B)",screen_main_assembly,17380,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21+ (SM-G996B)",screen_component_main_screen_oled,9890,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21+ (SM-G996B)",back_glass_cover,3100,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21+ (SM-G996B)",battery,2170,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21+ (SM-G996B)",front_camera,2010,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21+ (SM-G996B)",rear_camera,6500,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 Ultra (SM-G998B)",screen_main_assembly,23870,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 Ultra (SM-G998B)",screen_component_repair,15132,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 Ultra (SM-G998B)",back_glass_cover,3500,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 Ultra (SM-G998B)",battery,2640,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 Ultra (SM-G998B)",front_camera,2230,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy S21 Ultra (SM-G998B)",rear_camera,2610,no,"excl labour; L2 Rs425+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A27 5G (SM-A276B)",screen_main_assembly,4900,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A27 5G (SM-A276B)",back_glass_cover,1070,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A27 5G (SM-A276B)",battery,1780,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A57 5G (SM-A576B)",screen_main_assembly,4940,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A57 5G (SM-A576B)",back_glass_cover,1300,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A57 5G (SM-A576B)",battery,1870,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A37 5G (SM-A376E)",screen_main_assembly,5810,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A37 5G (SM-A376E)",back_glass_cover,1280,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A37 5G (SM-A376E)",battery,1890,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A17 5G (SM-A176B)",screen_main_assembly,3910,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A17 5G (SM-A176B)",back_glass_cover,520,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A17 5G (SM-A176B)",battery,1490,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A26 5G (SM-A266B)",screen_main_assembly,4920,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A26 5G (SM-A266B)",back_glass_cover,770,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A26 5G (SM-A266B)",battery,1520,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A36 5G (SM-A366E)",screen_main_assembly,8410,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A36 5G (SM-A366E)",back_glass_cover,1560,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A36 5G (SM-A366E)",battery,1800,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A56 5G (SM-A566E)",screen_component_main_screen_oled,4970,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A56 5G (SM-A566E)",back_glass_cover,1170,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A56 5G (SM-A566E)",battery,1540,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A16 5G (SM-A166P)",screen_main_assembly,3940,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A16 5G (SM-A166P)",back_glass_cover,500,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A16 5G (SM-A166P)",battery,1620,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A55 5G (SM-A556E)",screen_component_main_screen_oled,5400,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A55 5G (SM-A556E)",screen_component_frame,3320,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A55 5G (SM-A556E)",back_glass_cover,1180,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A55 5G (SM-A556E)",battery,1790,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A35 5G (SM-A356E)",screen_component_main_screen_oled,5390,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A35 5G (SM-A356E)",screen_component_frame,2350,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A35 5G (SM-A356E)",back_glass_cover,1310,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A35 5G (SM-A356E)",battery,1800,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A15 5G (SM-A156E)",screen_main_assembly,3370,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A15 5G (SM-A156E)",back_glass_cover,650,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A15 5G (SM-A156E)",battery,1580,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A25 (SM-A256E)",screen_main_assembly,4570,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A25 (SM-A256E)",back_glass_cover,600,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A25 (SM-A256E)",battery,900,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A34 5G (SM-A346E)",screen_main_assembly,6050,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A34 5G (SM-A346E)",screen_component_main_screen_oled,4360,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A34 5G (SM-A346E)",screen_component_frame,1930,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A34 5G (SM-A346E)",back_glass_cover,1540,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A34 5G (SM-A346E)",battery,2220,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A54 5G (SM-A546E)",screen_main_assembly,5940,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A54 5G (SM-A546E)",screen_component_main_screen_oled,3800,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A54 5G (SM-A546E)",screen_component_frame,1810,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A54 5G (SM-A546E)",back_glass_cover,1440,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A54 5G (SM-A546E)",battery,2070,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A14 5G (SM-A146B)",screen_main_assembly,3450,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A14 5G (SM-A146B)",back_glass_cover,780,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A14 5G (SM-A146B)",battery,1930,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A14 (SM-A145F)",screen_main_assembly,3110,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A14 (SM-A145F)",back_glass_cover,770,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A14 (SM-A145F)",battery,1930,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A23 5G 8GB (SM-A236E)",screen_main_assembly,3400,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A23 5G 8GB (SM-A236E)",back_glass_cover,870,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A23 5G 8GB (SM-A236E)",battery,1990,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A73 5G (SM-A736B)",screen_main_assembly,7890,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A73 5G (SM-A736B)",back_glass_cover,1130,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A73 5G (SM-A736B)",battery,2150,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A73 5G (SM-A736B)",front_camera,370,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A73 5G (SM-A736B)",rear_camera,360,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A23 8GB (SM-A235F)",screen_main_assembly,3460,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A23 8GB (SM-A235F)",back_glass_cover,720,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A23 8GB (SM-A235F)",battery,1990,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A23 8GB (SM-A235F)",front_camera,330,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A23 8GB (SM-A235F)",rear_camera,560,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A33 8GB (SM-A336E)",screen_main_assembly,6300,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A33 8GB (SM-A336E)",back_glass_cover,1190,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A33 8GB (SM-A336E)",battery,1590,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A33 8GB (SM-A336E)",front_camera,330,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A33 8GB (SM-A336E)",rear_camera,360,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A53 8GB (SM-A536E)",screen_main_assembly,7410,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A53 8GB (SM-A536E)",back_glass_cover,1300,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A53 8GB (SM-A536E)",battery,1660,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A53 8GB (SM-A536E)",front_camera,370,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A53 8GB (SM-A536E)",rear_camera,360,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A52s 6GB (SM-A528B)",screen_main_assembly,8140,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A52s 6GB (SM-A528B)",back_glass_cover,1350,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A52s 6GB (SM-A528B)",battery,1810,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A52s 6GB (SM-A528B)",front_camera,370,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A52s 6GB (SM-A528B)",rear_camera,360,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A22 6GB (SM-A225F)",screen_main_assembly,4440,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A22 6GB (SM-A225F)",back_glass_cover,830,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A22 6GB (SM-A225F)",battery,1240,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A22 5G 8GB (SM-A226B)",screen_main_assembly,4060,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A22 5G 8GB (SM-A226B)",back_glass_cover,790,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A22 5G 8GB (SM-A226B)",battery,1840,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A22 5G 8GB (SM-A226B)",front_camera,670,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A22 5G 8GB (SM-A226B)",rear_camera,580,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A72 (SM-A725F)",screen_main_assembly,7490,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A72 (SM-A725F)",back_glass_cover,1150,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A72 (SM-A725F)",battery,1250,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A72 (SM-A725F)",front_camera,1620,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A72 (SM-A725F)",rear_camera,2780,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A52 (SM-A525F)",screen_main_assembly,8650,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A52 (SM-A525F)",back_glass_cover,1240,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A52 (SM-A525F)",battery,1810,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A52 (SM-A525F)",front_camera,1730,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A52 (SM-A525F)",rear_camera,2780,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A32 (SM-A325F)",screen_main_assembly,4600,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A32 (SM-A325F)",back_glass_cover,920,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A32 (SM-A325F)",battery,1240,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A32 (SM-A325F)",front_camera,2320,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy A32 (SM-A325F)",rear_camera,2410,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M08 (SM-M085F)",screen_main_assembly,3580,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M08 (SM-M085F)",back_glass_cover,670,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M08 (SM-M085F)",battery,1690,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M47 5G (SM-M476B)",screen_main_assembly,4850,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M47 5G (SM-M476B)",back_glass_cover,1130,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M47 5G (SM-M476B)",battery,2560,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M17e 5G (SM-M076B)",screen_main_assembly,3020,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M17e 5G (SM-M076B)",back_glass_cover,610,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M17e 5G (SM-M076B)",battery,1680,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M17 5G (SM-M176B)",screen_main_assembly,3910,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M17 5G (SM-M176B)",back_glass_cover,530,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M17 5G (SM-M176B)",battery,1490,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M36 5G (SM-M366B)",screen_main_assembly,4050,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M36 5G (SM-M366B)",back_glass_cover,530,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M36 5G (SM-M366B)",battery,1410,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M16 5G (SM-M166P)",screen_main_assembly,3730,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M16 5G (SM-M166P)",back_glass_cover,410,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M16 5G (SM-M166P)",battery,1620,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M56 5G (SM-M566B)",screen_main_assembly,5560,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M56 5G (SM-M566B)",back_glass_cover,1200,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M56 5G (SM-M566B)",battery,1820,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M07 (SM-M075F)",screen_main_assembly,2840,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M07 (SM-M075F)",back_glass_cover,790,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M07 (SM-M075F)",battery,1510,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M06 5G (SM-M066B)",screen_main_assembly,2650,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M06 5G (SM-M066B)",back_glass_cover,570,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M06 5G (SM-M066B)",battery,1390,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M05 (SM-M055F)",screen_main_assembly,2280,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M05 (SM-M055F)",back_glass_cover,360,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M05 (SM-M055F)",battery,960,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M35 5G (SM-M356B)",screen_main_assembly,4940,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M35 5G (SM-M356B)",back_glass_cover,630,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M35 5G (SM-M356B)",battery,2230,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M55s 5G (SM-M558B)",screen_main_assembly,6490,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M55s 5G (SM-M558B)",back_glass_cover,1200,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M55s 5G (SM-M558B)",battery,2670,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M55 5G (SM-M556B)",screen_main_assembly,6490,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M55 5G (SM-M556B)",back_glass_cover,1200,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M55 5G (SM-M556B)",battery,2670,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M15 5G (SM-M156B)",screen_main_assembly,4060,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M15 5G (SM-M156B)",back_glass_cover,560,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M15 5G (SM-M156B)",battery,2190,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M34 5G (SM-M346B)",screen_main_assembly,4940,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M34 5G (SM-M346B)",back_glass_cover,770,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M34 5G (SM-M346B)",battery,1960,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M14 5G (SM-M146B)",screen_main_assembly,3500,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M14 5G (SM-M146B)",back_glass_cover,470,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M14 5G (SM-M146B)",battery,1200,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M33 5G 8GB (SM-M336B)",screen_main_assembly,4690,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M33 5G 8GB (SM-M336B)",back_glass_cover,820,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M33 5G 8GB (SM-M336B)",battery,2020,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M33 5G 8GB (SM-M336B)",front_camera,440,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M33 5G 8GB (SM-M336B)",rear_camera,300,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M13 5G (SM-M136B)",screen_main_assembly,2980,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M13 5G (SM-M136B)",back_glass_cover,690,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M13 5G (SM-M136B)",battery,770,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M14 (SM-M145F)",screen_main_assembly,2600,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M14 (SM-M145F)",back_glass_cover,280,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M14 (SM-M145F)",battery,820,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M13 (SM-M135F)",screen_main_assembly,3500,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M13 (SM-M135F)",back_glass_cover,670,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M13 (SM-M135F)",battery,930,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M52 5G 8GB (SM-M526B)",screen_main_assembly,6950,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M52 5G 8GB (SM-M526B)",back_glass_cover,1290,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M52 5G 8GB (SM-M526B)",battery,1430,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M52 5G 8GB (SM-M526B)",front_camera,1590,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M52 5G 8GB (SM-M526B)",rear_camera,350,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M32 5G (SM-M326B)",screen_main_assembly,3930,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M32 5G (SM-M326B)",back_glass_cover,970,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M32 5G (SM-M326B)",battery,1670,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M32 5G (SM-M326B)",front_camera,330,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M32 5G (SM-M326B)",rear_camera,1700,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M53 5G (SM-M536B)",screen_main_assembly,6920,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M53 5G (SM-M536B)",back_glass_cover,820,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M53 5G (SM-M536B)",battery,1890,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M53 5G (SM-M536B)",rear_camera,300,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M04 (SM-M045F)",screen_main_assembly,2690,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M04 (SM-M045F)",back_glass_cover,360,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M04 (SM-M045F)",battery,1370,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M42 5G 8GB (SM-M426B)",screen_main_assembly,3290,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M42 5G 8GB (SM-M426B)",back_glass_cover,980,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M42 5G 8GB (SM-M426B)",battery,1510,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M42 5G 8GB (SM-M426B)",front_camera,1680,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M42 5G 8GB (SM-M426B)",rear_camera,640,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M32 (SM-M325F)",screen_main_assembly,4650,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M32 (SM-M325F)",back_glass_cover,820,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M32 (SM-M325F)",battery,1340,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M32 (SM-M325F)",front_camera,1050,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M32 (SM-M325F)",rear_camera,280,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M21 2021 Edition (SM-M215G)",screen_main_assembly,5140,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M21 2021 Edition (SM-M215G)",back_glass_cover,940,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M21 2021 Edition (SM-M215G)",battery,800,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M21 2021 Edition (SM-M215G)",front_camera,2860,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M21 2021 Edition (SM-M215G)",rear_camera,1140,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M12 (SM-M127G)",screen_main_assembly,4150,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M12 (SM-M127G)",back_glass_cover,1010,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M12 (SM-M127G)",battery,800,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M12 (SM-M127G)",front_camera,1570,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M12 (SM-M127G)",rear_camera,330,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M02 (SM-M022G)",screen_main_assembly,2330,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M02 (SM-M022G)",back_glass_cover,330,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M02 (SM-M022G)",battery,940,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy M02 (SM-M022G)",rear_camera,790,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F08 (SM-E085F)",screen_main_assembly,3580,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F08 (SM-E085F)",back_glass_cover,670,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F08 (SM-E085F)",battery,1690,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F70 Pro 5G (SM-E476B)",screen_main_assembly,4850,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F70 Pro 5G (SM-E476B)",back_glass_cover,1100,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F70 Pro 5G (SM-E476B)",battery,2560,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F70e 5G (SM-E076B)",screen_main_assembly,3020,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F70e 5G (SM-E076B)",back_glass_cover,610,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F70e 5G (SM-E076B)",battery,1680,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F36 5G (SM-E366B)",screen_main_assembly,4050,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F36 5G (SM-E366B)",back_glass_cover,420,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F36 5G (SM-E366B)",battery,1410,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F17 5G (SM-E176B)",screen_main_assembly,3910,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F17 5G (SM-E176B)",back_glass_cover,530,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F17 5G (SM-E176B)",battery,1490,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F07 (SM-E075F)",screen_main_assembly,2840,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F07 (SM-E075F)",back_glass_cover,770,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F07 (SM-E075F)",battery,1510,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F56 5G (SM-E566B)",screen_main_assembly,5560,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F56 5G (SM-E566B)",back_glass_cover,1380,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F56 5G (SM-E566B)",battery,1820,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F16 5G (SM-E166P)",screen_main_assembly,3730,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F16 5G (SM-E166P)",back_glass_cover,380,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F16 5G (SM-E166P)",battery,1620,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F06 5G (SM-E066B)",screen_main_assembly,2650,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F06 5G (SM-E066B)",back_glass_cover,570,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F06 5G (SM-E066B)",battery,1390,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F55 5G (SM-E556B)",screen_main_assembly,6490,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F55 5G (SM-E556B)",back_glass_cover,1370,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F55 5G (SM-E556B)",battery,2670,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F15 5G (SM-E156B)",screen_main_assembly,4060,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F15 5G (SM-E156B)",back_glass_cover,620,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F15 5G (SM-E156B)",battery,2190,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F34 5G (SM-E346B)",screen_main_assembly,4940,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F34 5G (SM-E346B)",back_glass_cover,770,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F34 5G (SM-E346B)",battery,1960,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F54 5G (SM-E546B)",screen_main_assembly,5850,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F54 5G (SM-E546B)",back_glass_cover,860,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F54 5G (SM-E546B)",battery,2550,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F04 (SM-E045F)",screen_main_assembly,2690,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F04 (SM-E045F)",back_glass_cover,270,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F04 (SM-E045F)",battery,1370,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F14 5G (SM-E146B)",screen_main_assembly,3500,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F14 5G (SM-E146B)",back_glass_cover,550,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F14 5G (SM-E146B)",battery,1200,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F14 (SM-E145F)",screen_main_assembly,2600,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F14 (SM-E145F)",back_glass_cover,280,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F14 (SM-E145F)",battery,820,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F13 (SM-E135F)",screen_main_assembly,3500,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F13 (SM-E135F)",back_glass_cover,760,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F13 (SM-E135F)",battery,930,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F13 (SM-E135F)",front_camera,280,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F13 (SM-E135F)",rear_camera,1300,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F23 6GB (SM-E236B)",screen_main_assembly,3630,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F23 6GB (SM-E236B)",back_glass_cover,860,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F23 6GB (SM-E236B)",battery,1920,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F23 6GB (SM-E236B)",rear_camera,330,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F42 5G 8GB (SM-E426B)",screen_main_assembly,4060,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F42 5G 8GB (SM-E426B)",back_glass_cover,790,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F42 5G 8GB (SM-E426B)",battery,1840,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F42 5G 8GB (SM-E426B)",front_camera,670,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F42 5G 8GB (SM-E426B)",rear_camera,580,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F22 (SM-E225F)",screen_main_assembly,5240,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F22 (SM-E225F)",back_glass_cover,880,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F22 (SM-E225F)",battery,1520,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F22 (SM-E225F)",rear_camera,330,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F12 (SM-F127G)",screen_main_assembly,4150,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F12 (SM-F127G)",back_glass_cover,1200,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F12 (SM-F127G)",battery,800,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F12 (SM-F127G)",front_camera,440,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F12 (SM-F127G)",rear_camera,1570,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F02s (SM-E025F)",screen_main_assembly,3130,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F02s (SM-E025F)",back_glass_cover,840,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F02s (SM-E025F)",battery,1250,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F02s (SM-E025F)",front_camera,500,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F02s (SM-E025F)",rear_camera,940,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F62 (SM-E625F)",screen_main_assembly,5600,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F62 (SM-E625F)",back_glass_cover,1000,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F62 (SM-E625F)",battery,1370,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F62 (SM-E625F)",front_camera,1630,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"Galaxy F62 (SM-E625F)",rear_camera,2530,no,"excl labour; L2 Rs350+tax",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated
+"ALL models",charging_port_subboard,NOT FOUND,n/a,"Subboard field empty for every phone on page",https://www.samsung.com/in/support/spare-part-pricing-list-for-repair/,undated

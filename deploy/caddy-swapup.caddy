@@ -1,0 +1,14 @@
+
+# SwapUp — repair-or-upgrade trade-in desk (pm2 "swapup" on :4500).
+# Its own sslip.io hostname, so it gets a real certificate with no DNS work and
+# needs no basePath (nothing on this box shares its paths).
+swapup.104-197-168-25.sslip.io {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+	reverse_proxy localhost:4500
+}

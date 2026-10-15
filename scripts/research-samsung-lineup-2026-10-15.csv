@@ -1,0 +1,188 @@
+model,variant,price_inr,price_type,source_url,source_date
+"Galaxy S25",128GB,74999,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-silver-shadow-128gb-sm-s931bzsbins/,2026-10-15
+"Galaxy S25",128GB,74999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-silver-shadow-128gb-sm-s931bzsbins/,2026-10-15
+"Galaxy S25",256GB,84999,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-icyblue-256gb-sm-s931blbcins/,2026-10-15
+"Galaxy S25",256GB,94999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-icyblue-256gb-sm-s931blbcins/,2026-10-15
+"Galaxy S25",512GB,104999,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-navy-512gb-sm-s931bdbqins/,2026-10-15
+"Galaxy S25",512GB,114999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-navy-512gb-sm-s931bdbqins/,2026-10-15
+"Galaxy S25 FE",128GB,54999,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-fe-navy-128gb-sm-s731bdbbins/,2026-10-15
+"Galaxy S25 FE",128GB,59999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-fe-navy-128gb-sm-s731bdbbins/,2026-10-15
+"Galaxy S25 FE",256GB,60999,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-fe-navy-256gb-sm-s731bdbcins/,2026-10-15
+"Galaxy S25 FE",256GB,79999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-fe-navy-256gb-sm-s731bdbcins/,2026-10-15
+"Galaxy S25 Ultra",256GB,114999,selling,https://www.samsung.com/in/smartphones/galaxy-s25-ultra/buy/,2026-10-15
+"Galaxy S25 Ultra",256GB,129999,mrp,https://www.samsung.com/in/smartphones/galaxy-s25-ultra/buy/,2026-10-15
+"Galaxy S25 Ultra",512GB,129999,selling,https://www.samsung.com/in/smartphones/galaxy-s25-ultra/buy/,2026-10-15
+"Galaxy S25 Ultra",512GB,141999,mrp,https://www.samsung.com/in/smartphones/galaxy-s25-ultra/buy/,2026-10-15
+"Galaxy S26",256GB,102999,selling,https://www.samsung.com/in/smartphones/galaxy-s26/buy/,2026-10-15
+"Galaxy S26",256GB,117999,mrp,https://www.samsung.com/in/smartphones/galaxy-s26/buy/,2026-10-15
+"Galaxy S26",512GB,122999,selling,https://www.samsung.com/in/smartphones/galaxy-s26/buy/,2026-10-15
+"Galaxy S26",512GB,137999,mrp,https://www.samsung.com/in/smartphones/galaxy-s26/buy/,2026-10-15
+"Galaxy S26 FE",256GB,79999,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s26-fe-pistachio-256gb-sm-s741blgcins/,2026-10-15
+"Galaxy S26 FE",256GB,109999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s26-fe-pistachio-256gb-sm-s741blgcins/,2026-10-15
+"Galaxy S26 Ultra",256GB,154999,selling,https://www.samsung.com/in/smartphones/galaxy-s26-ultra/buy/,2026-10-15
+"Galaxy S26 Ultra",256GB,169999,mrp,https://www.samsung.com/in/smartphones/galaxy-s26-ultra/buy/,2026-10-15
+"Galaxy S26 Ultra",512GB,174999,selling,https://www.samsung.com/in/smartphones/galaxy-s26-ultra/buy/,2026-10-15
+"Galaxy S26 Ultra",512GB,189999,mrp,https://www.samsung.com/in/smartphones/galaxy-s26-ultra/buy/,2026-10-15
+"Galaxy S26+",256GB,134999,selling,https://www.samsung.com/in/smartphones/galaxy-s26/buy/,2026-10-15
+"Galaxy S26+",256GB,149999,mrp,https://www.samsung.com/in/smartphones/galaxy-s26/buy/,2026-10-15
+"Galaxy S25 Certified Re-Newed",256GB,54674,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-silver-shadow-256gb-certified-re-newed-sm5s931bzscins/,2026-10-15
+"Galaxy S25 Certified Re-Newed",256GB,80999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-silver-shadow-256gb-certified-re-newed-sm5s931bzscins/,2026-10-15
+"Galaxy S25 Ultra Certified Re-Newed",256GB,87749,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-ultra-titanium-silverblue-256gb-certified-re-newed-sm5s938bzbbins/,2026-10-15
+"Galaxy S25 Ultra Certified Re-Newed",256GB,129999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s25-ultra-titanium-silverblue-256gb-certified-re-newed-sm5s938bzbbins/,2026-10-15
+"Galaxy S26 Certified Re-Newed",256GB,67319,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s26-black-256gb-certified-re-newed-sm5s942bzkcins/,2026-10-15
+"Galaxy S26 Certified Re-Newed",256GB,87999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s26-black-256gb-certified-re-newed-sm5s942bzkcins/,2026-10-15
+"Galaxy S26 Certified Re-Newed",512GB,82619,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s26-black-512gb-certified-re-newed-sm5s942bzkqins/,2026-10-15
+"Galaxy S26 Certified Re-Newed",512GB,107999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s26-black-512gb-certified-re-newed-sm5s942bzkqins/,2026-10-15
+"Galaxy S26 Ultra Certified Re-Newed",256GB,107099,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s26-ultra-black-256gb-certified-re-newed-sm5s948bzkbins/,2026-10-15
+"Galaxy S26 Ultra Certified Re-Newed",256GB,139999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s26-ultra-black-256gb-certified-re-newed-sm5s948bzkbins/,2026-10-15
+"Galaxy S26 Ultra Certified Re-Newed",512GB,122399,selling,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s26-ultra-black-512gb-certified-re-newed-sm5s948bzkcins/,2026-10-15
+"Galaxy S26 Ultra Certified Re-Newed",512GB,159999,mrp,https://www.samsung.com/in/smartphones/galaxy-s/galaxy-s26-ultra-black-512gb-certified-re-newed-sm5s948bzkcins/,2026-10-15
+"Galaxy Z Flip7",256GB,109999,selling,https://www.samsung.com/in/smartphones/galaxy-z-flip7/buy/,2026-10-15
+"Galaxy Z Flip7",256GB,109999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-flip7/buy/,2026-10-15
+"Galaxy Z Flip7",512GB,121999,selling,https://www.samsung.com/in/smartphones/galaxy-z-flip7/buy/,2026-10-15
+"Galaxy Z Flip7",512GB,121999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-flip7/buy/,2026-10-15
+"Galaxy Z Flip7 FE",128GB,89999,selling,https://www.samsung.com/in/smartphones/galaxy-z-flip7-fe/buy/,2026-10-15
+"Galaxy Z Flip7 FE",128GB,89999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-flip7-fe/buy/,2026-10-15
+"Galaxy Z Flip7 FE",256GB,95999,selling,https://www.samsung.com/in/smartphones/galaxy-z-flip7-fe/buy/,2026-10-15
+"Galaxy Z Flip7 FE",256GB,95999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-flip7-fe/buy/,2026-10-15
+"Galaxy Z Flip8",256GB,124999,selling,https://www.samsung.com/in/smartphones/galaxy-z-flip8/buy/,2026-10-15
+"Galaxy Z Flip8",256GB,134999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-flip8/buy/,2026-10-15
+"Galaxy Z Flip8",512GB,144999,selling,https://www.samsung.com/in/smartphones/galaxy-z-flip8/buy/,2026-10-15
+"Galaxy Z Flip8",512GB,154999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-flip8/buy/,2026-10-15
+"Galaxy Z Fold7",256GB,174999,selling,https://www.samsung.com/in/smartphones/galaxy-z-fold7/buy/,2026-10-15
+"Galaxy Z Fold7",256GB,174999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-fold7/buy/,2026-10-15
+"Galaxy Z Fold7",512GB,186999,selling,https://www.samsung.com/in/smartphones/galaxy-z-fold7/buy/,2026-10-15
+"Galaxy Z Fold7",512GB,186999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-fold7/buy/,2026-10-15
+"Galaxy Z Fold8",256GB,179999,selling,https://www.samsung.com/in/smartphones/galaxy-z-fold8/buy/,2026-10-15
+"Galaxy Z Fold8",256GB,184999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-fold8/buy/,2026-10-15
+"Galaxy Z Fold8",512GB,199999,selling,https://www.samsung.com/in/smartphones/galaxy-z-fold8/buy/,2026-10-15
+"Galaxy Z Fold8",512GB,204999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-fold8/buy/,2026-10-15
+"Galaxy Z Fold8 Ultra",256GB,199999,selling,https://www.samsung.com/in/smartphones/galaxy-z-fold8-ultra/buy/,2026-10-15
+"Galaxy Z Fold8 Ultra",256GB,204999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-fold8-ultra/buy/,2026-10-15
+"Galaxy Z Fold8 Ultra",512GB,219999,selling,https://www.samsung.com/in/smartphones/galaxy-z-fold8-ultra/buy/,2026-10-15
+"Galaxy Z Fold8 Ultra",512GB,224999,mrp,https://www.samsung.com/in/smartphones/galaxy-z-fold8-ultra/buy/,2026-10-15
+"Galaxy A06 5G",4GB+128GB,17999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a06-5g-light-gray-128gb-sm-a066bzagins/,2026-10-15
+"Galaxy A06 5G",4GB+128GB,23999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a06-5g-light-gray-128gb-sm-a066bzagins/,2026-10-15
+"Galaxy A06 5G",6GB+128GB,19999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a06-5g-black-128gb-sm-a066bzkhins/,2026-10-15
+"Galaxy A06 5G",6GB+128GB,25999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a06-5g-black-128gb-sm-a066bzkhins/,2026-10-15
+"Galaxy A07",4GB+64GB,13499,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a07-green-64gb-sm-a075fzgdins/,2026-10-15
+"Galaxy A07",4GB+64GB,17999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a07-green-64gb-sm-a075fzgdins/,2026-10-15
+"Galaxy A07 5G",4GB+128GB,20999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a07-5g-light-green-128gb-sm-a076blgbins/,2026-10-15
+"Galaxy A07 5G",4GB+128GB,31999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a07-5g-light-green-128gb-sm-a076blgbins/,2026-10-15
+"Galaxy A07 5G",6GB+128GB,23999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a07-5g-light-green-128gb-sm-a076blgcins/,2026-10-15
+"Galaxy A07 5G",6GB+128GB,34999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a07-5g-light-green-128gb-sm-a076blgcins/,2026-10-15
+"Galaxy A08 LTE",4GB+64GB,18499,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a08-green-64gb-sm-a085fzgdins/,2026-10-15
+"Galaxy A08 LTE",4GB+64GB,26999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a08-green-64gb-sm-a085fzgdins/,2026-10-15
+"Galaxy A17 5G",6GB+128GB,27999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a17-5g-black-128gb-sm-a176bzklins/,2026-10-15
+"Galaxy A17 5G",6GB+128GB,38999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a17-5g-black-128gb-sm-a176bzklins/,2026-10-15
+"Galaxy A17 5G",8GB+128GB,30999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a17-5g-blue-128gb-sm-a176bzbmins/,2026-10-15
+"Galaxy A17 5G",8GB+128GB,41999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a17-5g-blue-128gb-sm-a176bzbmins/,2026-10-15
+"Galaxy A17 5G",8GB+256GB,36499,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a17-5g-blue-256gb-sm-a176bzbnins/,2026-10-15
+"Galaxy A17 5G",8GB+256GB,47499,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a17-5g-blue-256gb-sm-a176bzbnins/,2026-10-15
+"Galaxy A27 5G",6GB+128GB,35999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a27-5g-black-128gb-sm-a276bzkdins/,2026-10-15
+"Galaxy A27 5G",6GB+128GB,46999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a27-5g-black-128gb-sm-a276bzkdins/,2026-10-15
+"Galaxy A27 5G",8GB+128GB,40999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a27-5g-black-128gb-sm-a276bzkgins/,2026-10-15
+"Galaxy A27 5G",8GB+128GB,51999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a27-5g-black-128gb-sm-a276bzkgins/,2026-10-15
+"Galaxy A36 5G",8GB+128GB,31999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a36-5g-awesome-lavender-128gb-sm-a366elvjins/,2026-10-15
+"Galaxy A36 5G",8GB+128GB,46999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a36-5g-awesome-lavender-128gb-sm-a366elvjins/,2026-10-15
+"Galaxy A36 5G",8GB+256GB,35999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a36-5g-awesome-sapphire-blue-256gb-sm-a366edbkins/,2026-10-15
+"Galaxy A36 5G",8GB+256GB,50999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a36-5g-awesome-sapphire-blue-256gb-sm-a366edbkins/,2026-10-15
+"Galaxy A37 5G",12GB+256GB,63999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a37-5g-awesome-lavender-256gb-sm-a376elvhins/,2026-10-15
+"Galaxy A37 5G",12GB+256GB,77999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a37-5g-awesome-lavender-256gb-sm-a376elvhins/,2026-10-15
+"Galaxy A37 5G",8GB+128GB,46999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a37-5g-awesome-lavender-128gb-sm-a376elvdins/,2026-10-15
+"Galaxy A37 5G",8GB+128GB,60999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a37-5g-awesome-lavender-128gb-sm-a376elvdins/,2026-10-15
+"Galaxy A37 5G",8GB+256GB,54499,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a37-5g-awesome-charcoal-256gb-sm-a376ezagins/,2026-10-15
+"Galaxy A37 5G",8GB+256GB,68499,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a37-5g-awesome-charcoal-256gb-sm-a376ezagins/,2026-10-15
+"Galaxy A56 5G",12GB+256GB,46499,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a56-5g-awesome-graphite-256gb-sm-a566ezkhins/,2026-10-15
+"Galaxy A56 5G",12GB+256GB,59999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a56-5g-awesome-graphite-256gb-sm-a566ezkhins/,2026-10-15
+"Galaxy A56 5G",8GB+128GB,36999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a56-5g-awesome-midnight-blue-128gb-sm-a566edbzins/,2026-10-15
+"Galaxy A56 5G",8GB+128GB,49999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a56-5g-awesome-midnight-blue-128gb-sm-a566edbzins/,2026-10-15
+"Galaxy A56 5G",8GB+256GB,40999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a56-5g-awesome-olive-256gb-sm-a566ezggins/,2026-10-15
+"Galaxy A56 5G",8GB+256GB,54999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a56-5g-awesome-olive-256gb-sm-a566ezggins/,2026-10-15
+"Galaxy A57 5G",8GB+256GB,62999,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a57-5g-awesome-navy-256gb-sm-a576bdbfins/,2026-10-15
+"Galaxy A57 5G",8GB+256GB,77999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a57-5g-awesome-navy-256gb-sm-a576bdbfins/,2026-10-15
+"Galaxy A36 5G Certified Re-Newed",8GB+128GB,20924,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a36-5g-awesome-lavender-128gb-certified-re-newed-sm5a366elvjins/,2026-10-15
+"Galaxy A36 5G Certified Re-Newed",8GB+128GB,39499,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a36-5g-awesome-lavender-128gb-certified-re-newed-sm5a366elvjins/,2026-10-15
+"Galaxy A36 5G Certified Re-Newed",8GB+256GB,22949,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a36-5g-awesome-black-256gb-certified-re-newed-sm5a366ezkkins/,2026-10-15
+"Galaxy A36 5G Certified Re-Newed",8GB+256GB,43999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a36-5g-awesome-black-256gb-certified-re-newed-sm5a366ezkkins/,2026-10-15
+"Galaxy A37 5G Certified Re-Newed",128GB,32129,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a37-5g-awesome-graygreen-128gb-certified-re-newed-sm5a376edgdins/,2026-10-15
+"Galaxy A37 5G Certified Re-Newed",128GB,41999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a37-5g-awesome-graygreen-128gb-certified-re-newed-sm5a376edgdins/,2026-10-15
+"Galaxy A37 5G Certified Re-Newed",256GB,36337,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a37-5g-awesome-charcoal-256gb-certified-re-newed-sm5a376ezagins/,2026-10-15
+"Galaxy A37 5G Certified Re-Newed",256GB,47499,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a37-5g-awesome-charcoal-256gb-certified-re-newed-sm5a376ezagins/,2026-10-15
+"Galaxy A56 5G Certified Re-Newed",12GB+256GB,30374,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a56-5g-awesome-olive-256gb-certified-re-newed-sm5a566ezghins/,2026-10-15
+"Galaxy A56 5G Certified Re-Newed",12GB+256GB,59999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a56-5g-awesome-olive-256gb-certified-re-newed-sm5a566ezghins/,2026-10-15
+"Galaxy A56 5G Certified Re-Newed",8GB+256GB,28349,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a56-5g-awesome-olive-256gb-certified-re-newed-sm5a566ezggins/,2026-10-15
+"Galaxy A56 5G Certified Re-Newed",8GB+256GB,54999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a56-5g-awesome-olive-256gb-certified-re-newed-sm5a566ezggins/,2026-10-15
+"Galaxy A57 5G Certified Re-Newed",256GB (SKU ...BDBF; 8GB per new-SKU pattern - inferred),43604,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a57-5g-awesome-navy-256gb-certified-re-newed-sm5a576bdbfins/,2026-10-15
+"Galaxy A57 5G Certified Re-Newed",256GB (SKU ...BDBF; 8GB per new-SKU pattern - inferred),56999,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a57-5g-awesome-navy-256gb-certified-re-newed-sm5a576bdbfins/,2026-10-15
+"Galaxy A57 5G Certified Re-Newed",256GB (SKU ...BDBG; 12GB per new-SKU pattern - inferred),47812,selling,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a57-5g-awesome-navy-256gb-certified-re-newed-sm5a576bdbgins/,2026-10-15
+"Galaxy A57 5G Certified Re-Newed",256GB (SKU ...BDBG; 12GB per new-SKU pattern - inferred),62499,mrp,https://www.samsung.com/in/smartphones/galaxy-a/galaxy-a57-5g-awesome-navy-256gb-certified-re-newed-sm5a576bdbgins/,2026-10-15
+"Galaxy M08 LTE",4GB+64GB,16999,selling,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m08-silver-64gb-sm-m085fzsdins/,2026-10-15
+"Galaxy M08 LTE",4GB+64GB,24999,mrp,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m08-silver-64gb-sm-m085fzsdins/,2026-10-15
+"Galaxy M17e 5G",4GB+128GB,18499,selling,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m17e-5g-blitz-blue-128gb-sm-m076blbains/,2026-10-15
+"Galaxy M17e 5G",4GB+128GB,22999,mrp,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m17e-5g-blitz-blue-128gb-sm-m076blbains/,2026-10-15
+"Galaxy M17e 5G",6GB+128GB,21499,selling,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m17e-5g-vibe-violet-128gb-sm-m076blvbins/,2026-10-15
+"Galaxy M17e 5G",6GB+128GB,24999,mrp,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m17e-5g-vibe-violet-128gb-sm-m076blvbins/,2026-10-15
+"Galaxy M47 5G",6GB+128GB,37999,selling,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m47-5g-blaze-blue-128gb-sm-m476blbbins/,2026-10-15
+"Galaxy M47 5G",6GB+128GB,46999,mrp,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m47-5g-blaze-blue-128gb-sm-m476blbbins/,2026-10-15
+"Galaxy M47 5G",8GB+128GB,41999,selling,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m47-5g-rogue-red-128gb-sm-m476bzrdins/,2026-10-15
+"Galaxy M47 5G",8GB+128GB,49999,mrp,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m47-5g-rogue-red-128gb-sm-m476bzrdins/,2026-10-15
+"Galaxy M17 5G",4GB+128GB,19999,selling,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m17-5g-moonlight-silver-128gb-sm-m176bzsains/,2026-10-15
+"Galaxy M17 5G",4GB+128GB,27999,mrp,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m17-5g-moonlight-silver-128gb-sm-m176bzsains/,2026-10-15
+"Galaxy M17 5G",6GB+128GB,22999,selling,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m17-5g-moonlight-silver-128gb-sm-m176bzsbins/,2026-10-15
+"Galaxy M17 5G",6GB+128GB,29999,mrp,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m17-5g-moonlight-silver-128gb-sm-m176bzsbins/,2026-10-15
+"Galaxy M17 5G",8GB+128GB,25999,selling,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m17-5g-black-128gb-sm-m176bzkdins/,2026-10-15
+"Galaxy M17 5G",8GB+128GB,32999,mrp,https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m17-5g-black-128gb-sm-m176bzkdins/,2026-10-15
+"Galaxy F08 LTE",4GB+64GB,16999,selling,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f08-dark-blue-64gb-sm-e085fdbdins/,2026-10-15
+"Galaxy F08 LTE",4GB+64GB,24999,mrp,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f08-dark-blue-64gb-sm-e085fdbdins/,2026-10-15
+"Galaxy F17 5G",4GB+128GB,23499,selling,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f17-5g-black-128gb-sm-e176bzkains/,2026-10-15
+"Galaxy F17 5G",4GB+128GB,28999,mrp,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f17-5g-black-128gb-sm-e176bzkains/,2026-10-15
+"Galaxy F17 5G",6GB+128GB,26499,selling,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f17-5g-black-128gb-sm-e176bzkbins/,2026-10-15
+"Galaxy F17 5G",6GB+128GB,30999,mrp,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f17-5g-black-128gb-sm-e176bzkbins/,2026-10-15
+"Galaxy F36 5G",6GB+128GB,21999,selling,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f36-5g-onyx-black-128gb-sm-e366bzkbins/,2026-10-15
+"Galaxy F36 5G",6GB+128GB,26999,mrp,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f36-5g-onyx-black-128gb-sm-e366bzkbins/,2026-10-15
+"Galaxy F70 Pro 5G",6GB+128GB,37999,selling,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f70-pro-5g-alpha-black-128gb-sm-e476bzkbins/,2026-10-15
+"Galaxy F70 Pro 5G",6GB+128GB,46999,mrp,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f70-pro-5g-alpha-black-128gb-sm-e476bzkbins/,2026-10-15
+"Galaxy F70 Pro 5G",8GB+128GB,41999,selling,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f70-pro-5g-alpha-black-128gb-sm-e476bzkdins/,2026-10-15
+"Galaxy F70 Pro 5G",8GB+128GB,49999,mrp,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f70-pro-5g-alpha-black-128gb-sm-e476bzkdins/,2026-10-15
+"Galaxy F70 Pro 5G",8GB+256GB,46999,selling,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f70-pro-5g-aura-green-256gb-sm-e476bzggins/,2026-10-15
+"Galaxy F70 Pro 5G",8GB+256GB,54999,mrp,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f70-pro-5g-aura-green-256gb-sm-e476bzggins/,2026-10-15
+"Galaxy F70e 5G",4GB+128GB,18499,selling,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f70e-5g-limelight-green-128gb-sm-e076blgains/,2026-10-15
+"Galaxy F70e 5G",4GB+128GB,22999,mrp,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f70e-5g-limelight-green-128gb-sm-e076blgains/,2026-10-15
+"Galaxy F70e 5G",6GB+128GB,21499,selling,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f70e-5g-spotlight-blue-128gb-sm-e076bdbbins/,2026-10-15
+"Galaxy F70e 5G",6GB+128GB,24999,mrp,https://www.samsung.com/in/smartphones/galaxy-f/galaxy-f70e-5g-spotlight-blue-128gb-sm-e076bdbbins/,2026-10-15
+"Galaxy S26",12GB+256GB,87999,launch,https://news.samsung.com/in/samsung-india-launches-its-most-advanced-ai-phone-the-galaxy-s26-series-pre-order-now-for-exciting-offers,2026-02-26
+"Galaxy S26",12GB+512GB,107999,launch,https://news.samsung.com/in/samsung-india-launches-its-most-advanced-ai-phone-the-galaxy-s26-series-pre-order-now-for-exciting-offers,2026-02-26
+"Galaxy S26+",12GB+256GB,119999,launch,https://news.samsung.com/in/samsung-india-launches-its-most-advanced-ai-phone-the-galaxy-s26-series-pre-order-now-for-exciting-offers,2026-02-26
+"Galaxy S26+",12GB+512GB,139999,launch,https://news.samsung.com/in/samsung-india-launches-its-most-advanced-ai-phone-the-galaxy-s26-series-pre-order-now-for-exciting-offers,2026-02-26
+"Galaxy S26 Ultra",12GB+256GB,139999,launch,https://news.samsung.com/in/samsung-india-launches-its-most-advanced-ai-phone-the-galaxy-s26-series-pre-order-now-for-exciting-offers,2026-02-26
+"Galaxy S26 Ultra",12GB+512GB,159999,launch,https://news.samsung.com/in/samsung-india-launches-its-most-advanced-ai-phone-the-galaxy-s26-series-pre-order-now-for-exciting-offers,2026-02-26
+"Galaxy S26 Ultra",16GB+1TB,189999,launch,https://news.samsung.com/in/samsung-india-launches-its-most-advanced-ai-phone-the-galaxy-s26-series-pre-order-now-for-exciting-offers,2026-02-26
+"Galaxy S26+",12GB+512GB,154999,selling,https://telanganatoday.com/samsung-hikes-galaxy-s26-series-prices-by-up-to-17pc-in-india,2026-09-28
+"Galaxy S26 Ultra",16GB+1TB,214999,selling,https://telanganatoday.com/samsung-hikes-galaxy-s26-series-prices-by-up-to-17pc-in-india,2026-09-28
+"Galaxy S26 FE",8GB+256GB,79999,launch,https://www.freepressjournal.in/tech/samsung-galaxy-s26-fe-launched-in-india-priced-starting-at-79999,2026-09-14
+"Galaxy Z Fold8 Ultra",12GB+256GB,199999,launch,https://www.freepressjournal.in/tech/samsung-opens-india-pre-orders-for-galaxy-z-fold8-fold8-ultra-flip8-with-galaxy-ai-prices-start-at-124-lakh,2026-07-24
+"Galaxy Z Fold8 Ultra",12GB+512GB,219999,launch,https://www.freepressjournal.in/tech/samsung-opens-india-pre-orders-for-galaxy-z-fold8-fold8-ultra-flip8-with-galaxy-ai-prices-start-at-124-lakh,2026-07-24
+"Galaxy Z Fold8 Ultra",16GB+1TB,259999,launch,https://www.freepressjournal.in/tech/samsung-opens-india-pre-orders-for-galaxy-z-fold8-fold8-ultra-flip8-with-galaxy-ai-prices-start-at-124-lakh,2026-07-24
+"Galaxy Z Fold8",12GB+256GB,179999,launch,https://www.freepressjournal.in/tech/samsung-opens-india-pre-orders-for-galaxy-z-fold8-fold8-ultra-flip8-with-galaxy-ai-prices-start-at-124-lakh,2026-07-24
+"Galaxy Z Fold8",12GB+512GB,199999,launch,https://www.freepressjournal.in/tech/samsung-opens-india-pre-orders-for-galaxy-z-fold8-fold8-ultra-flip8-with-galaxy-ai-prices-start-at-124-lakh,2026-07-24
+"Galaxy Z Fold8",16GB+1TB,239999,launch,https://www.freepressjournal.in/tech/samsung-opens-india-pre-orders-for-galaxy-z-fold8-fold8-ultra-flip8-with-galaxy-ai-prices-start-at-124-lakh,2026-07-24
+"Galaxy Z Flip8",12GB+256GB,124999,launch,https://www.freepressjournal.in/tech/samsung-opens-india-pre-orders-for-galaxy-z-fold8-fold8-ultra-flip8-with-galaxy-ai-prices-start-at-124-lakh,2026-07-24
+"Galaxy Z Flip8",12GB+512GB,144999,launch,https://www.freepressjournal.in/tech/samsung-opens-india-pre-orders-for-galaxy-z-fold8-fold8-ultra-flip8-with-galaxy-ai-prices-start-at-124-lakh,2026-07-24
+"Galaxy A57 5G",8GB+256GB,56999,launch,https://www.freepressjournal.in/amp/tech/samsung-galaxy-a57-5g-galaxy-a37-5g-launched-in-india-price-specifications,2026-03-26
+"Galaxy A57 5G",12GB+256GB,62999,launch,https://www.freepressjournal.in/amp/tech/samsung-galaxy-a57-5g-galaxy-a37-5g-launched-in-india-price-specifications,2026-03-26
+"Galaxy A37 5G",8GB+128GB,41999,launch,https://www.freepressjournal.in/amp/tech/samsung-galaxy-a57-5g-galaxy-a37-5g-launched-in-india-price-specifications,2026-03-26
+"Galaxy A37 5G",8GB+256GB,47999,launch,https://www.freepressjournal.in/amp/tech/samsung-galaxy-a57-5g-galaxy-a37-5g-launched-in-india-price-specifications,2026-03-26
+"Galaxy A37 5G",12GB+256GB,52999,launch,https://www.freepressjournal.in/amp/tech/samsung-galaxy-a57-5g-galaxy-a37-5g-launched-in-india-price-specifications,2026-03-26
+"Galaxy A27 5G",6GB+128GB,28999,launch,https://telecomtalk.info/samsung-galaxy-a27-5g-price-confirmed-after/1009261/,2026-07-01
+"Galaxy A27 5G",8GB+128GB,31999,launch,https://telecomtalk.info/samsung-galaxy-a27-5g-price-confirmed-after/1009261/,2026-07-01
+"Galaxy A27 5G",8GB+256GB,37499,launch,https://telecomtalk.info/samsung-galaxy-a27-5g-price-confirmed-after/1009261/,2026-07-01
+"Galaxy A08 LTE",4GB+64GB,18499,launch,https://www.thehansindia.com/tech/samsung-galaxy-a08-launched-in-india-with-6-year-updates-1127999,2026-10-02
+"Galaxy M17e 5G",4GB+128GB,13999,launch,https://news.samsung.com/in/samsung-launches-galaxy-m17e-5g-redefining-the-smartphone-experience-for-indias-young-on-the-go-generation,2026-03-18
+"Galaxy M17e 5G",6GB+128GB,15499,launch,https://news.samsung.com/in/samsung-launches-galaxy-m17e-5g-redefining-the-smartphone-experience-for-indias-young-on-the-go-generation,2026-03-18
+"Galaxy M47 5G",starting price (variant not stated),22999,launch,https://www.republicworld.com/tech/samsung-galaxy-m47-5g-launched-in-india-with-6000mah-battery-snapdragon-7-gen-4-6-years-of-updates-2026-06-29-130444,2026-06-29
+"Galaxy F70 Pro 5G",6GB+128GB,25999,launch,https://www.freepressjournal.in/amp/tech/samsung-galaxy-f70-pro-5g-with-megapixel-camera-launched-in-india-priced-starting-at-25999,2026-08-03
+"Galaxy F70 Pro 5G",8GB+128GB,29999,launch,https://www.freepressjournal.in/amp/tech/samsung-galaxy-f70-pro-5g-with-megapixel-camera-launched-in-india-priced-starting-at-25999,2026-08-03
+"Galaxy F70 Pro 5G",8GB+256GB,34999,launch,https://www.freepressjournal.in/amp/tech/samsung-galaxy-f70-pro-5g-with-megapixel-camera-launched-in-india-priced-starting-at-25999,2026-08-03
+"Galaxy F70e 5G",4GB+128GB,12499,launch,https://www.sammobile.com/news/samsung-launches-galaxy-f70e-5g-india/,2026-02-09
+"Galaxy F70e 5G",6GB+128GB,14999,launch,https://www.sammobile.com/news/samsung-launches-galaxy-f70e-5g-india/,2026-02-09

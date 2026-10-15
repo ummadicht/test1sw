@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "swapup",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/ammar/projects/swapup && exec npm run dev"
+      ],
+      "port": 4500
+    }
+  ]
+}
