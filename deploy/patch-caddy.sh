@@ -9,12 +9,13 @@ if sudo grep -qF "$HOSTNAME_LINE" "$CF"; then echo "caddy: block already present
 BAK="$CF.bak-swapup-$(date +%Y%m%d%H%M%S)"
 sudo cp "$CF" "$BAK"
 sudo sh -c "cat '$BLOCK' >> '$CF'"
-if sudo caddy validate --config "$CF" --adapter caddyfile >/tmp/caddy-validate.log 2>&1; then
+LOG=$(mktemp)
+if sudo caddy validate --config "$CF" --adapter caddyfile >"$LOG" 2>&1; then
   sudo systemctl reload caddy
   echo "caddy: block added and reloaded (backup $BAK)"
 else
   sudo cp "$BAK" "$CF"
   echo "caddy: VALIDATION FAILED — restored $BAK" >&2
-  tail -5 /tmp/caddy-validate.log >&2
+  tail -5 "$LOG" >&2
   exit 1
 fi
