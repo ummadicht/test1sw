@@ -9,6 +9,8 @@ import { adminContext } from "@/components/admin/context";
 import { STORE_KIND_LABEL, fmtDay, fracPct } from "@/components/admin/format";
 import { StoreLimitForm } from "./StoreLimitForm";
 import { AddStoreForm } from "./AddStoreForm";
+import { PendingStores } from "./PendingStores";
+import { pendingStores } from "@/lib/server/signup";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Stores" };
@@ -31,6 +33,7 @@ export default async function AdminStoresPage({ searchParams }: { searchParams: 
   const stores = listStores(u).filter((s) => s.org_id === orgId);
   const live = new Map(programmeReport(u, { orgId }).stores.map((r) => [r.storeId, r]));
   const totalLimit = stores.reduce((t, s) => t + s.credit_limit, 0);
+  const pending = pendingStores(u).filter((p) => stores.some((s) => s.id === p.id));
 
   return (
     <AppShell user={u} wide>
@@ -48,6 +51,7 @@ export default async function AdminStoresPage({ searchParams }: { searchParams: 
           </div>
         }
       >
+        <PendingStores stores={pending} />
         <Card title={`${stores.length} store${stores.length === 1 ? "" : "s"}`} pad={false}>
           {stores.length ? (
             <div className="overflow-x-auto">

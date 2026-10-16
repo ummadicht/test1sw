@@ -78,6 +78,15 @@ export function AppShell({ user, children, wide = false }: { user: SessionUser; 
             <LogoutButton />
           </div>
         </div>
+        {store?.status === "pending" ? (
+          <div className="bg-[color:var(--warn-bg)] text-[color:var(--warn)] text-[13px] font-semibold text-center py-1.5 border-t border-line px-4">
+            {store.name} is waiting for approval from {org?.name}. Phone tests and quotes work; taking trade-ins starts once it is approved.
+          </div>
+        ) : store?.status === "rejected" ? (
+          <div className="bg-[color:var(--bad-bg)] text-[color:var(--bad)] text-[13px] font-semibold text-center py-1.5 border-t border-line px-4">
+            {store.name} was not approved{store.review_note ? `: ${store.review_note}` : "."}
+          </div>
+        ) : null}
         {org?.demo ? (
           <div className="bg-[color:var(--sample-bg)] text-[color:var(--sample)] text-[12.5px] font-semibold text-center py-1 border-t border-line">
             Demo programme — sample prices and example data. Nothing here moves real money.
