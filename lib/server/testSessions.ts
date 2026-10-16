@@ -96,12 +96,18 @@ export type TestSessionView = {
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
-function publicBase(): string {
-  return (process.env.SWAPUP_PUBLIC_URL || "http://localhost:4500").replace(/\/$/, "");
+/**
+ * The origin the links point at: SWAPUP_PUBLIC_URL when set (production), else
+ * the origin the request came in on (`base`, from publicOrigin(req)) — so a dev
+ * server reached through the web-app proxy (:4620) or a LAN IP hands out links
+ * that phone can open — else localhost:4500.
+ */
+function publicBase(base?: string | null): string {
+  return (process.env.SWAPUP_PUBLIC_URL || base || "http://localhost:4500").replace(/\/$/, "");
 }
 
 /** Links for a code. The deep link carries the server so a dev build can point anywhere. */
-export function linksFor(code: string, base = publicBase()) {
+export function linksFor(code: string, base: string = publicBase()) {
   return {
     joinUrl: `${base}/j/${code}`,
     deepLink: `swapupcheck://join?code=${code}&server=${encodeURIComponent(base)}`,
@@ -189,7 +195,7 @@ function freshCode(): string {
 
 /* ─────────────────────────── staff side ─────────────────────────── */
 
-export function createTestSession(u: SessionUser, input: { caseId?: string | null; customerName?: string; customerPhone?: string }) {
+export function createTestSession(u: SessionUser, input: { caseId?: string | null; customerName?: string; customerPhone?: string }, origin?: string | null) {
   requireCounter(u);
   const store = ownStore(u);
   let caseId = input.caseId || null;
@@ -209,17 +215,17 @@ export function createTestSession(u: SessionUser, input: { caseId?: string | nul
     )
     .run(id, code, caseId, store.id, store.org_id, u.id, JSON.stringify(DEFAULT_PLAN), now, new Date(Date.now() + UNJOINED_TTL_MS).toISOString(), now);
   audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "test_session.create", entity: "test_session", entityId: id, detail: { caseId } });
-  return withLinks(view(rowById(id)!), store);
+  return withLinks(view(rowById(id)!), store, origin);
 }
 
-function withLinks(session: TestSessionView, store: StoreRow) {
+function withLinks(session: TestSessionView, store: StoreRow, origin?: string | null) {
   const wifi = storeWifi(store);
-  return { session, ...linksFor(session.code), wifi: wifi ? { ssid: wifi.ssid, qr: wifiQr(wifi) } : null };
+  return { session, ...linksFor(session.code, publicBase(origin)), wifi: wifi ? { ssid: wifi.ssid, qr: wifiQr(wifi) } : null };
 }
 
-export function getTestSession(u: SessionUser, id: string) {
+export function getTestSession(u: SessionUser, id: string, origin?: string | null) {
   const { r, store } = inScope(u, id);
-  return withLinks(view(r), store);
+  return withLinks(view(r), store, origin);
 }
 
 export function listOpenSessions(u: SessionUser): TestSessionView[] {
@@ -270,13 +276,13 @@ export function cancelTestSession(u: SessionUser, id: string) {
 }
 
 /** A new code for the SAME case — the old one stops working. Results so far are kept only if joined. */
-export function reissueTestSession(u: SessionUser, id: string) {
+export function reissueTestSession(u: SessionUser, id: string, origin?: string | null) {
   requireCounter(u);
   const { r } = inScope(u, id);
   if (r.status === "applied") throw new HttpError(409, "These results are already on the case.");
   return tx(() => {
     db().prepare(`UPDATE test_sessions SET status = 'cancelled', ticket_hash = NULL, updated_at = ? WHERE id = ? AND status != 'applied'`).run(nowIso(), r.id);
-    return createTestSession(u, { caseId: r.case_id });
+    return createTestSession(u, { caseId: r.case_id }, origin);
   });
 }
 
@@ -330,17 +336,36 @@ export function openByCode(raw: string): { ok: true; code: string; storeName: st
 
 const joinAttempts = new Map<string, { n: number; until: number }>();
 
-function rateLimit(ip: string): void {
-  const now = Date.now();
+/**
+ * What this stops is guessing codes, so only REFUSED joins count. A phone
+ * re-joining its own session (the app does on every resume; the browser check
+ * on every return to its tab) is not a guess — and every customer in a store
+ * shares the store Wi‑Fi's one public IP, so counting those would lock the
+ * next customer out of a perfectly good code.
+ */
+function checkJoinRate(ip: string): void {
   const cur = joinAttempts.get(ip);
-  if (cur && cur.until > now) {
-    if (cur.n >= 20) throw new HttpError(429, "Too many tries. Wait a few minutes, then scan the store's QR again.");
-    cur.n += 1;
-  } else joinAttempts.set(ip, { n: 1, until: now + 10 * 60_000 });
+  if (cur && cur.until > Date.now() && cur.n >= 20) throw new HttpError(429, "Too many tries. Wait a few minutes, then scan the store's QR again.");
 }
 
-export function joinByCode(input: { code?: unknown; device?: unknown; appVersion?: unknown; installId?: unknown }, ip: string) {
-  rateLimit(ip);
+function noteRefusedJoin(ip: string): void {
+  const now = Date.now();
+  const cur = joinAttempts.get(ip);
+  if (cur && cur.until > now) cur.n += 1;
+  else joinAttempts.set(ip, { n: 1, until: now + 10 * 60_000 });
+}
+
+export function joinByCode(input: { code?: unknown; device?: unknown; appVersion?: unknown; installId?: unknown }, ip: string, origin?: string | null) {
+  checkJoinRate(ip);
+  try {
+    return joinByCodeChecked(input, ip, origin);
+  } catch (e) {
+    if (e instanceof HttpError && e.status < 500) noteRefusedJoin(ip);
+    throw e;
+  }
+}
+
+function joinByCodeChecked(input: { code?: unknown; device?: unknown; appVersion?: unknown; installId?: unknown }, ip: string, origin?: string | null) {
   const code = normaliseCode(input.code);
   const installId = typeof input.installId === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(input.installId) ? input.installId : null;
   if (!installId) throw new HttpError(400, "The app did not send its install id — update SwapUp Check.");
@@ -366,7 +391,7 @@ export function joinByCode(input: { code?: unknown; device?: unknown; appVersion
     const v = view(rowById(r.id)!);
     return {
       ticket,
-      session: { id: v.id, caseRef: v.caseRef, storeName: v.storeName, plan: v.plan, server: publicBase(), status: v.status, results: v.results, declared: v.declared },
+      session: { id: v.id, caseRef: v.caseRef, storeName: v.storeName, plan: v.plan, server: publicBase(origin), status: v.status, results: v.results, declared: v.declared },
     };
   });
 }

@@ -29,3 +29,24 @@ export async function body<T = Record<string, unknown>>(req: Request): Promise<T
     throw new HttpError(400, "Expected a JSON body.");
   }
 }
+
+/**
+ * The public origin for links this response hands out (join QR, deep link):
+ * SWAPUP_PUBLIC_URL when set — production always sets it, so a forged Host
+ * header changes nothing there — else the origin the request arrived on
+ * (Host / X-Forwarded-Host), e.g. the local web-app proxy on :4620 or the
+ * Mac's LAN IP when a phone is testing against a dev server.
+ */
+export function publicOrigin(req: Request): string {
+  return originFromHeaders(req.headers, new URL(req.url).protocol.replace(/:$/, "")) ?? new URL(req.url).origin;
+}
+
+/** As publicOrigin, for server components (`await headers()`). null = nothing usable. */
+export function originFromHeaders(h: Headers, defaultProto = "http"): string | null {
+  const env = process.env.SWAPUP_PUBLIC_URL;
+  if (env) return env.replace(/\/$/, "");
+  const host = (h.get("x-forwarded-host") || h.get("host") || "").split(",")[0].trim();
+  const proto = (h.get("x-forwarded-proto") || "").split(",")[0].trim() || defaultProto;
+  if (host && /^[A-Za-z0-9.\-\[\]:]+$/.test(host) && /^https?$/.test(proto)) return `${proto}://${host}`;
+  return null;
+}

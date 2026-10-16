@@ -3,6 +3,7 @@ import { openByCode, linksFor } from "@/lib/server/testSessions";
 import { ensureSeeded } from "@/lib/server/seed";
 import { apkInfo, mb, webAppInfo, webCheckUrl } from "@/lib/server/downloads";
 import { BrandMark } from "@/components/ui";
+import { originFromHeaders } from "@/lib/server/http";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Test your phone", robots: { index: false } };
@@ -23,9 +24,11 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
   await ensureSeeded();
   const { code } = await params;
   const s = openByCode(code);
-  const ua = (await headers()).get("user-agent") || "";
+  const h = await headers();
+  const ua = h.get("user-agent") || "";
   const isIphone = /iPhone|iPad|iPod/i.test(ua);
-  const base = process.env.SWAPUP_PUBLIC_URL || "";
+  // SWAPUP_PUBLIC_URL in production; in dev the origin this page was opened on.
+  const base = originFromHeaders(h) || "";
   const apk = apkInfo("check");
   const web = webAppInfo("check");
 

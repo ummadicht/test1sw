@@ -1,4 +1,4 @@
-import { handle, body } from "@/lib/server/http";
+import { handle, body, publicOrigin } from "@/lib/server/http";
 import { ensureSeeded } from "@/lib/server/seed";
 import { joinByCode } from "@/lib/server/testSessions";
 
@@ -8,6 +8,6 @@ export async function POST(req: Request) {
     await ensureSeeded();
     const b = await body<{ code?: string; device?: unknown; appVersion?: string; installId?: string }>(req);
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
-    return joinByCode(b, ip);
+    return joinByCode(b, ip, publicOrigin(req));
   });
 }

@@ -6,3 +6,6 @@ data/
 .env.*
 next-env.d.ts
 *.tsbuildinfo
+
+# dev only: symlink to ../swapup-mobile/dist-web so /j and /downloads see the browser builds (deploy excludes it)
+/public/app

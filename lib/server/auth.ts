@@ -156,14 +156,15 @@ export async function clearSession(): Promise<void> {
  * a changed role takes effect on the next request rather than at cookie expiry.
  */
 export async function getSession(): Promise<SessionUser | null> {
-  const jar = await cookies();
   // The store app sends the same signed token as "Authorization: Bearer …".
-  let token = jar.get(COOKIE)?.value;
-  if (!token) {
-    const h = (await headers()).get("authorization") || "";
-    const m = /^Bearer\s+(\S+)$/i.exec(h);
-    if (m) token = m[1];
-  }
+  // An explicit Bearer token wins over the cookie, and is never topped up from
+  // it: the browser store app at /app/store/ is on the desk's own origin, so its
+  // fetches also carry whatever desk cookie that browser has — often a
+  // different person (the manager signed in on the desk, an advisor in the
+  // app). Cookie-first would act as the wrong user; a bad Bearer token is a 401.
+  const h = (await headers()).get("authorization") || "";
+  const m = /^Bearer\s+(\S+)$/i.exec(h);
+  const token = m ? m[1] : (await cookies()).get(COOKIE)?.value;
   const u = decode(token);
   if (!u) return null;
   const row = db().prepare(`SELECT role, org_id, store_id, active, name FROM users WHERE id = ?`).get(u.id) as
