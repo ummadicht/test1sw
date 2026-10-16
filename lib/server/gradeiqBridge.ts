@@ -170,6 +170,7 @@ async function createOnce(id: string): Promise<void> {
     const ge = e instanceof GradeiqError ? e : new GradeiqError("network", message(e));
     // A timed-out create may still have made a session SwapUp never learned the id of.
     if (ge.ambiguous) addOrphan(id, null, `create timed out on attempt ${attempt} — GradeIQ may hold a session SwapUp never learned`);
+    if (ge.orphanId) addOrphan(id, ge.orphanId, `not used: ${ge.message}`);
     const giveUp = ge.kind === "tenant" || ge.kind === "disabled" || attempt >= MAX_AUTO_CREATES;
     db()
       .prepare(`UPDATE test_sessions SET gradeiq_state = ?, gradeiq_error = ?, updated_at = ? WHERE id = ? AND gradeiq_id IS NULL`)

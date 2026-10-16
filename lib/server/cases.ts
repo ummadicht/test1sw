@@ -452,11 +452,12 @@ export function markLcdOverride(caseId: string, info: { by: string; userId: stri
   const row0 = db().prepare(`SELECT camera_check FROM cases WHERE id = ?`).get(caseId) as { camera_check: string | null } | undefined;
   if (!row0) return;
   const prev = parseJson<CaseCameraCheck | null>(row0.camera_check, null) ?? { ...blankCameraCheck(info.at), testSessionId: info.testSessionId };
-  const flag = `LCD not camera-checked — the camera was unlocked by ${info.by} before the customer's phone showed the patterns: ${info.reason}`;
+  const reason = `the camera was unlocked by ${info.by} before the customer's phone showed the patterns: ${info.reason}`;
+  const flag = `LCD not camera-checked: ${reason}`;
   const next: CaseCameraCheck = {
     ...prev,
     lcdOverride: { by: info.by, reason: info.reason, at: info.at },
-    lcd: { ...prev.lcd, cameraChecked: false, reason: flag },
+    lcd: { ...prev.lcd, cameraChecked: false, reason },
     flags: [...prev.flags.filter((f) => !f.startsWith("LCD not camera-checked")), flag],
   };
   db().prepare(`UPDATE cases SET camera_check = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(next), nowIso(), caseId);

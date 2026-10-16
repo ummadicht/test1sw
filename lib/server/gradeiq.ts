@@ -59,12 +59,15 @@ export class GradeiqError extends Error {
   status: number | null;
   /** The request may have reached GradeIQ (a timeout): a create might have happened. */
   ambiguous: boolean;
-  constructor(kind: GradeiqErrorKind, message: string, opts: { status?: number | null; ambiguous?: boolean } = {}) {
+  /** A GradeIQ session that was made but will not be used (e.g. under the wrong tenant). */
+  orphanId: string | null;
+  constructor(kind: GradeiqErrorKind, message: string, opts: { status?: number | null; ambiguous?: boolean; orphanId?: string | null } = {}) {
     super(message);
     this.name = "GradeiqError";
     this.kind = kind;
     this.status = opts.status ?? null;
     this.ambiguous = opts.ambiguous ?? false;
+    this.orphanId = opts.orphanId ?? null;
   }
 }
 
@@ -141,7 +144,7 @@ export async function createSession(input: { model?: string | null } = {}): Prom
   const client = typeof r?.client === "string" ? r.client : "";
   if (!UUID.test(id)) throw new GradeiqError("shape", "GradeIQ did not return a session id.");
   if (client !== cfg.client) {
-    throw new GradeiqError("tenant", `GradeIQ put this session under tenant "${client || "?"}", not "${cfg.client}". No GradeIQ data will be used — check GRADEIQ_CLIENT.`);
+    throw new GradeiqError("tenant", `GradeIQ put this session under tenant "${client || "?"}", not "${cfg.client}". No GradeIQ data will be used — check GRADEIQ_CLIENT.`, { orphanId: id });
   }
   return { id, client };
 }

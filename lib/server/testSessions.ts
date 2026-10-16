@@ -318,7 +318,8 @@ export async function applyTestSession(u: SessionUser, id: string) {
     state: cam.state,
     by: u.name,
     grade: cam.snap?.cosmeticGrade || null,
-    status: cam.fin.status,
+    // Nothing graded by Apply is "not camera-graded", not "waiting".
+    status: cam.snap?.cosmeticGrade || cam.fin.status === "failed" ? cam.fin.status : "none",
     final: cam.fin.final,
     gradeRange: cam.snap?.gradeRange ?? null,
     conclusive: cam.snap?.conclusive ?? null,
@@ -326,7 +327,17 @@ export async function applyTestSession(u: SessionUser, id: string) {
     floor: cam.mapping.floor,
     faults: cam.mapping.faults.map((f) => ({ id: f.id, because: f.because, photoIndex: f.photoIndex, confidence: f.confidence })),
     suggested: cam.mapping.suggested.map((f) => ({ id: f.id, because: f.because, photoIndex: f.photoIndex, confidence: f.confidence })),
-    flags: [...(cam.state !== "ready" ? ["Not camera-graded — the condition is the advisor's."] : cam.fin.final ? [] : cam.fin.reasons), ...cam.mapping.flags, ...cam.notes],
+    flags: [
+      ...(cam.state !== "ready"
+        ? ["Not camera-graded — the condition is the advisor's."]
+        : cam.fin.final
+          ? []
+          : cam.snap?.cosmeticGrade || cam.fin.status === "failed"
+            ? cam.fin.reasons
+            : ["Not camera-graded — no camera grade came back before Apply. The condition is the advisor's."]),
+      ...cam.mapping.flags,
+      ...cam.notes,
+    ],
     lcd: cam.mapping.lcd,
     lcdOverride: cam.override,
     identity: cam.mapping.identity,

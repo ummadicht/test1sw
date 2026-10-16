@@ -542,7 +542,7 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
     }
   }
   if (opts.lcdOverride) {
-    lcd = { cameraChecked: false, verdict: lcd.verdict, reason: `LCD not camera-checked — the camera was unlocked by ${opts.lcdOverride.by} before the customer's phone showed the patterns: ${opts.lcdOverride.reason}` };
+    lcd = { cameraChecked: false, verdict: lcd.verdict, reason: `the camera was unlocked by ${opts.lcdOverride.by} before the customer's phone showed the patterns: ${opts.lcdOverride.reason}` };
   }
   if (!lcd.cameraChecked) flags.push(`LCD not camera-checked${lcd.reason ? `: ${lcd.reason}` : "."}`);
 
