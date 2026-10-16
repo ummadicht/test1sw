@@ -61,7 +61,8 @@ export type ModelMatch = {
 
 export type DiagnosticSummary = {
   model: ModelMatch;
-  faults: { id: FaultId; because: string }[];
+  /** sources: where the fault came from — the phone's own test, or the customer's answer (both possible). */
+  faults: { id: FaultId; because: string; sources: ("tested" | "declared")[] }[];
   untested: { id: string; name: string; critical: boolean }[];
   notes: string[];
   verdict: "all_passed" | "faults_found" | "incomplete";
@@ -269,10 +270,12 @@ export function summarise(
   const nameOf = new Map(plan.map((p) => [p.id, p.name]));
   const name = (id: string) => nameOf.get(id) ?? id;
   const reasons = new Map<FaultId, string[]>();
-  const add = (f: FaultId, why: string) => {
+  const sources = new Map<FaultId, Set<"tested" | "declared">>();
+  const add = (f: FaultId, why: string, source: "tested" | "declared" = "tested") => {
     const list = reasons.get(f) ?? [];
     if (!list.includes(why)) list.push(why);
     reasons.set(f, list);
+    sources.set(f, (sources.get(f) ?? new Set()).add(source));
   };
   const notes: string[] = [];
   let anyFailed = false;
@@ -313,7 +316,7 @@ export function summarise(
       ["liquid", "water_damage", "The customer says the phone has had liquid damage", "whether the phone has had liquid damage"],
     ];
     for (const [key, fault, yes, what] of ask) {
-      if (declared[key] === true) add(fault, yes);
+      if (declared[key] === true) add(fault, yes, "declared");
       else if (declared[key] === null || declared[key] === undefined) notes.push(`The customer did not say ${what} — check it by eye.`);
     }
   }
@@ -331,7 +334,7 @@ export function summarise(
 
   const faults = [...reasons.entries()]
     .sort((a, b) => FAULT_ORDER.indexOf(a[0]) - FAULT_ORDER.indexOf(b[0]))
-    .map(([id, why]) => ({ id, because: why.join("; ") }));
+    .map(([id, why]) => ({ id, because: why.join("; "), sources: (["tested", "declared"] as const).filter((x) => sources.get(id)?.has(x)) }));
 
   const verdict: DiagnosticSummary["verdict"] = untested.some((u) => u.critical)
     ? "incomplete"
