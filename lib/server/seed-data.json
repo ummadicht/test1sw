@@ -14,6 +14,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-F976B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -33,6 +36,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-F971B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -52,6 +58,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-F776B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -71,6 +80,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": 10999,
+   "modelCodes": [
+    "SM-F966B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -90,6 +102,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": 9249,
+   "modelCodes": [
+    "SM-F766B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -109,6 +124,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": 9249,
+   "modelCodes": [
+    "SM-F761B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -128,6 +146,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": 10999,
+   "modelCodes": [
+    "SM-F956B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -147,6 +168,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": 9249,
+   "modelCodes": [
+    "SM-F741B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -166,6 +190,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": 10999,
+   "modelCodes": [
+    "SM-F946B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -185,6 +212,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": 9249,
+   "modelCodes": [
+    "SM-F731B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -204,6 +234,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": 10999,
+   "modelCodes": [
+    "SM-F936B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -223,6 +256,9 @@
    ],
    "serviceTier": "Z",
    "carePlusFee": 9249,
+   "modelCodes": [
+    "SM-F721B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -242,6 +278,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-S741B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -261,6 +300,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 3699,
+   "modelCodes": [
+    "SM-S948B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -280,6 +322,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 3699,
+   "modelCodes": [
+    "SM-S947B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -299,6 +344,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 3699,
+   "modelCodes": [
+    "SM-S942B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -318,6 +366,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 3699,
+   "modelCodes": [
+    "SM-S937B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -337,6 +388,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 2349,
+   "modelCodes": [
+    "SM-S731B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -356,6 +410,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 3699,
+   "modelCodes": [
+    "SM-S938B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -375,6 +432,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 3699,
+   "modelCodes": [
+    "SM-S936B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -394,6 +454,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 3699,
+   "modelCodes": [
+    "SM-S931B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -413,6 +476,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 2349,
+   "modelCodes": [
+    "SM-S721B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -432,6 +498,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 3699,
+   "modelCodes": [
+    "SM-S928B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -451,6 +520,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 2349,
+   "modelCodes": [
+    "SM-S926B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -470,6 +542,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 2349,
+   "modelCodes": [
+    "SM-S921B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (7 yrs security) \u2014 check Samsung's security-update scope page",
@@ -489,6 +564,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 2349,
+   "modelCodes": [
+    "SM-S711B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -508,6 +586,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-S918B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -527,6 +608,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-S916B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -546,6 +630,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": 3699,
+   "modelCodes": [
+    "SM-S911B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -565,6 +652,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-S908E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -584,6 +674,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-S906E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -603,6 +696,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-S901E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -622,6 +718,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-G990E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -641,6 +740,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-G991B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -660,6 +762,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-G996B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -679,6 +784,9 @@
    ],
    "serviceTier": "S",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-G998B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -698,6 +806,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A276B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -717,6 +828,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A576B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -736,6 +850,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A376E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -755,6 +872,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A176B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -774,6 +894,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A266B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -793,6 +916,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A366E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -812,6 +938,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": 2349,
+   "modelCodes": [
+    "SM-A566E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -831,6 +960,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A166P"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -850,6 +982,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A556E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -869,6 +1004,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A356E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -888,6 +1026,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A156E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -907,6 +1048,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A256E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -926,6 +1070,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A346E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -945,6 +1092,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A546E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -964,6 +1114,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A146B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -983,6 +1136,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A145F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1002,6 +1158,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A236E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1021,6 +1180,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A736B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1040,6 +1202,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A235F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1059,6 +1224,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A336E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1078,6 +1246,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A536E"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1097,6 +1268,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A528B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1116,6 +1290,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A225F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1135,6 +1312,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A226B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1154,6 +1334,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A725F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1173,6 +1356,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A525F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1192,6 +1378,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-A325F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1211,6 +1400,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M085F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1230,6 +1422,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M476B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1249,6 +1444,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M076B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1268,6 +1466,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M176B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1287,6 +1488,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M366B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1306,6 +1510,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M166P"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1325,6 +1532,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M566B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1344,6 +1554,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M075F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1363,6 +1576,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M066B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1382,6 +1598,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M055F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1401,6 +1620,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M356B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1420,6 +1642,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M558B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1439,6 +1664,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M556B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1458,6 +1686,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M156B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1477,6 +1708,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M346B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1496,6 +1730,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M146B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1515,6 +1752,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M336B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1534,6 +1774,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M136B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1553,6 +1796,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M145F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1572,6 +1818,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M135F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1591,6 +1840,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M526B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1610,6 +1862,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M326B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1629,6 +1884,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M536B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1648,6 +1906,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M045F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1667,6 +1928,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M426B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1686,6 +1950,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M325F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1705,6 +1972,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M215G"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1724,6 +1994,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M127G"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1743,6 +2016,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-M022G"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1762,6 +2038,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E085F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1781,6 +2060,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E476B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1800,6 +2082,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E076B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1819,6 +2104,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E366B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1838,6 +2126,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E176B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1857,6 +2148,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E075F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1876,6 +2170,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E566B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1895,6 +2192,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E166P"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1914,6 +2214,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E066B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (6 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1933,6 +2236,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E556B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1952,6 +2258,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E156B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1971,6 +2280,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E346B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -1990,6 +2302,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E546B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -2009,6 +2324,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E045F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -2028,6 +2346,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E146B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -2047,6 +2368,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E145F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (5 yrs security) \u2014 check Samsung's security-update scope page",
@@ -2066,6 +2390,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E135F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -2085,6 +2412,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E236B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -2104,6 +2434,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E426B"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -2123,6 +2456,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E225F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -2142,6 +2478,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-F127G"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -2161,6 +2500,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E025F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -2180,6 +2522,9 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [
+    "SM-E625F"
+   ],
    "source": {
     "kind": "oem_public",
     "label": "Release year and update policy approximate (4 yrs security) \u2014 check Samsung's security-update scope page",
@@ -2199,6 +2544,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2218,6 +2564,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2237,6 +2584,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2256,6 +2604,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2275,6 +2624,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2294,6 +2644,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2313,6 +2664,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2332,6 +2684,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2351,6 +2704,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2370,6 +2724,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2389,6 +2744,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2408,6 +2764,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2427,6 +2784,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2446,6 +2804,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2465,6 +2824,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2484,6 +2844,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2503,6 +2864,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2522,6 +2884,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2541,6 +2904,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2560,6 +2924,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2579,6 +2944,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Release year approximate; update policy not recorded",
@@ -2598,6 +2964,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Google update policy (5 yrs), release year approximate",
@@ -2617,6 +2984,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Google update policy (5 yrs), release year approximate",
@@ -2636,6 +3004,7 @@
    ],
    "serviceTier": "other",
    "carePlusFee": null,
+   "modelCodes": [],
    "source": {
     "kind": "sample",
     "label": "Google update policy (7 yrs), release year approximate",

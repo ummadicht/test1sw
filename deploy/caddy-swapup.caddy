@@ -10,5 +10,18 @@ swapup.104-197-168-25.sslip.io {
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
-	reverse_proxy localhost:4500
+	# The Android apps. Served by Caddy from a folder OUTSIDE the app dir, so an
+	# app deploy (rsync --delete) can never remove them. The /downloads page
+	# itself is the app's.
+	@apk path_regexp apk ^/downloads/swapup-(store|check)\.apk$
+	handle @apk {
+		root * /var/www/swapup-downloads
+		uri strip_prefix /downloads
+		header Content-Type "application/vnd.android.package-archive"
+		header Cache-Control "no-cache"
+		file_server
+	}
+	handle {
+		reverse_proxy localhost:4500
+	}
 }

@@ -29,6 +29,17 @@ def clean_name(name):
     n = re.sub(r"\s+\d+GB\b", "", n)
     return n
 
+def model_codes(name):
+    """Samsung model codes in the official name, e.g. "Galaxy S22 (SM-S901E)" -> ["SM-S901E"].
+    Android reports the same code as Build.MODEL; SwapUp Check matches on it
+    (exact code, or the 7-character family "SM-S901" that SM-S901B shares)."""
+    out = []
+    for group in re.findall(r"\((.*?)\)", name):
+        for code in re.findall(r"SM-[A-Z0-9]+", group.upper()):
+            if code not in out:
+                out.append(code)
+    return out
+
 def series_of(model):
     m = model.replace("Galaxy ", "")
     if m.startswith("Z "): return "Z"
@@ -128,8 +139,11 @@ with open(os.path.join(SRC_DIR, "research-samsung-spare-parts-2026-10-15.csv")) 
             models[mid] = {
                 "id": mid, "brand": "Samsung", "model": model.replace("Galaxy ", "Galaxy "), "series": series_of(model),
                 "releaseYear": y, "supportEndYear": y + sec, "variants": variants_for(model), "serviceTier": tier(model),
-                "carePlusFee": CARE.get(model), "source": {"kind": "oem_public", "label": f"Release year and update policy approximate ({sec} yrs security) — check Samsung's security-update scope page", "observedAt": OBSERVED},
+                "carePlusFee": CARE.get(model), "modelCodes": [], "source": {"kind": "oem_public", "label": f"Release year and update policy approximate ({sec} yrs security) — check Samsung's security-update scope page", "observedAt": OBSERVED},
             }
+        for code in model_codes(name):
+            if code not in models[mid]["modelCodes"]:
+                models[mid]["modelCodes"].append(code)
         part, price = row["part"], int(row["price_inr"])
         src = {"kind": "oem_public", "url": SPARE_URL, "observedAt": OBSERVED}
         label_base = "Samsung India list price, excl. GST & labour (premium colour / max storage)"
@@ -167,7 +181,7 @@ for brand, model, y, launch in OTHER:
     sec = PIXEL_SEC.get(model)
     models[mid] = {
         "id": mid, "brand": brand, "model": model, "series": None, "releaseYear": y,
-        "supportEndYear": (y + sec) if sec else None, "variants": ["128GB", "256GB"], "serviceTier": "other", "carePlusFee": None,
+        "supportEndYear": (y + sec) if sec else None, "variants": ["128GB", "256GB"], "serviceTier": "other", "carePlusFee": None, "modelCodes": [],
         "source": {"kind": "sample", "label": "Release year approximate; update policy not recorded" if not sec else f"Google update policy ({sec} yrs), release year approximate", "observedAt": OBSERVED},
     }
     other_launch[mid] = launch

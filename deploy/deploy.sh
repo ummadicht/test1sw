@@ -35,6 +35,16 @@ echo "▸ production deps on the VM"
 echo "▸ env (secret minted once, then reused — rotating it signs everyone out)"
 "${SSH[@]}" 'sudo test -f /etc/swapup.env || { S=$(openssl rand -hex 32); printf "NODE_ENV=production\nPORT=4500\nSWAPUP_SESSION_SECRET=%s\n" "$S" | sudo tee /etc/swapup.env >/dev/null; sudo chown root:ammar /etc/swapup.env; sudo chmod 640 /etc/swapup.env; echo minted; }'
 
+echo "▸ downloads folder for the Android apps (outside the app dir)"
+"${SSH[@]}" 'set -e; sudo mkdir -p /var/www/swapup-downloads; sudo chown ammar:ammar /var/www/swapup-downloads
+  sudo grep -q "^SWAPUP_DOWNLOADS_DIR=" /etc/swapup.env || echo "SWAPUP_DOWNLOADS_DIR=/var/www/swapup-downloads" | sudo tee -a /etc/swapup.env >/dev/null
+  sudo grep -q "^SWAPUP_PUBLIC_URL=" /etc/swapup.env || echo "SWAPUP_PUBLIC_URL=https://swapup.104-197-168-25.sslip.io" | sudo tee -a /etc/swapup.env >/dev/null'
+MOBILE_DIST=${MOBILE_DIST:-$ROOT/../swapup-mobile/dist}
+if ls "$MOBILE_DIST"/swapup-*.apk >/dev/null 2>&1; then
+  echo "  uploading APKs from $MOBILE_DIST"
+  rsync -az -e "ssh -i $KEY" "$MOBILE_DIST"/swapup-*.apk "$MOBILE_DIST"/swapup-*.json "$VM:/var/www/swapup-downloads/"
+fi
+
 echo "▸ pm2"
 "${SSH[@]}" "cd ~/swapup && chmod +x deploy/start.sh deploy/patch-caddy.sh && (pm2 describe swapup >/dev/null 2>&1 && pm2 restart swapup --update-env || pm2 start deploy/start.sh --name swapup --interpreter bash) && pm2 save >/dev/null"
 
