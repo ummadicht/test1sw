@@ -237,9 +237,10 @@ export function matchModel(device: DeviceReport | null, tradeModels: TradeModelR
 /**
  * SwapUp Check also runs in a web browser (Expo web, /app/check/) — the only
  * way to test an iPhone, and the no-install way on Android. The browser build
- * reports its appVersion as "web-<version>". A browser cannot test everything
- * (charging, side keys, NFC, biometrics…): those come in as "unsupported" and
- * stay UNTESTED like any other gap — this note only tells the advisor why.
+ * reports its appVersion as "web-<version>". A browser cannot run every test
+ * (which ones depends on the phone and the browser): those come in as
+ * "unsupported" and stay UNTESTED like any other gap — this note only tells the
+ * advisor why there are more of them.
  */
 export const BROWSER_NOTE = "Tested in a web browser — some tests can't run in a browser; the SwapUp Check app covers more.";
 

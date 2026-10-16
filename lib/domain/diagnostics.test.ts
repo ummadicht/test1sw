@@ -328,7 +328,7 @@ test("summary: an emulator run is called out", () => {
 
 test("summary: a browser run (appVersion web-…) says so, and what the browser could not test stays UNTESTED", () => {
   const WEB = { ...DEVICE, appVersion: "web-1.0.0" };
-  // What a browser typically cannot do: charging, buttons, Bluetooth, NFC, biometrics.
+  // Tests the browser build reported as "unsupported" (which ones varies by phone and browser).
   const results = all("pass", { charging: unsupported, buttons: unsupported, bluetooth: unsupported, nfc: unsupported, faceid: unsupported });
   const s = summarise(DEFAULT_PLAN, results, NO_DAMAGE, WEB, MODELS);
   assert.ok(s.notes.includes(BROWSER_NOTE), "the browser note is in the summary");
@@ -338,7 +338,7 @@ test("summary: a browser run (appVersion web-…) says so, and what the browser 
     DEFAULT_PLAN.map((p) => p.id).filter((id) => ["charging", "buttons", "bluetooth", "nfc", "faceid"].includes(id)),
     "unsupported in a browser is untested, never passed"
   );
-  assert.equal(s.verdict, "incomplete", "charging is critical, and a browser cannot test it");
+  assert.equal(s.verdict, "incomplete", "charging is critical — unsupported in the browser leaves the check incomplete");
   assert.equal(s.notes.filter((n) => n === BROWSER_NOTE).length, 1, "said once");
 
   // Only the browser's gaps that are not critical → the verdict stands, the note still shows.
