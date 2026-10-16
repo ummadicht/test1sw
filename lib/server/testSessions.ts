@@ -19,9 +19,10 @@ import {
   type GiqRow,
   type GradingView,
   type DeviceScreen,
+  cameraEvidence,
 } from "./gradeiqBridge";
 import { GradeiqError } from "./gradeiq";
-import { applyCameraFloor, addFaultSources, blankCameraCheck, type CaseCameraCheck } from "../domain/gradeiqMap";
+import { applyCameraFloor, addFaultSources, blankCameraCheck, resultsWithCameraDisplay, type CaseCameraCheck } from "../domain/gradeiqMap";
 import {
   DEFAULT_PLAN,
   CODE_ALPHABET,
@@ -176,6 +177,10 @@ function view(r: Row, opts: { staff?: boolean } = {}): TestSessionView {
   const c = db().prepare(`SELECT ref FROM cases WHERE id = ?`).get(r.case_id) as { ref: string } | undefined;
   const store = getStore(r.store_id);
   const hasAnything = !!device || Object.keys(results).length > 0 || !!declared;
+  // The store camera's LCD sweep is the native run's display test — fold it in
+  // so a fully tested phone isn't reported "incomplete".
+  const effective = resultsWithCameraDisplay(results, cameraEvidence(r).mapping.lcd, r.updated_at);
+  const nativeApp = !!device?.appVersion && !device.appVersion.startsWith("web-");
   return {
     id: r.id,
     code: r.code,
@@ -191,10 +196,10 @@ function view(r: Row, opts: { staff?: boolean } = {}): TestSessionView {
     appliedAt: r.applied_at,
     device,
     plan,
-    results,
+    results: effective,
     declared,
-    progress: progressOf(plan, results),
-    summary: hasAnything ? summarise(plan, results, declared, device, tradeModelRefs()) : null,
+    progress: progressOf(plan, effective),
+    summary: hasAnything ? summarise(plan, effective, declared, device, tradeModelRefs(), { declaredExpected: !nativeApp }) : null,
     grading: opts.staff ? gradingView(r) : null,
   };
 }

@@ -583,6 +583,28 @@ export function worseDisplay(selfTest: TestOutcome | null | undefined, camera: "
 }
 
 /**
+ * The phone's results with the camera's LCD sweep folded into `display`.
+ * The native app never runs a display self-test when the store photographs the
+ * phone — the camera sweep IS the display test — so without this every native
+ * run reads "incomplete" (display untested). Worse-of when both exist; an
+ * unknown or unchecked sweep changes nothing.
+ */
+export function resultsWithCameraDisplay(results: TestResults, lcd: LcdCheck, at: string): TestResults {
+  if (!lcd.cameraChecked || (lcd.verdict !== "pass" && lcd.verdict !== "fail")) return results;
+  const self = results.display?.outcome ?? null;
+  const combined = worseDisplay(self, lcd.verdict);
+  if (!combined) return results;
+  return {
+    ...results,
+    display: {
+      outcome: combined,
+      detail: { method: self ? "worse of the phone's display test and the store camera's LCD sweep" : "store camera LCD sweep (GradeIQ)", camera: lcd.verdict, selfTest: self },
+      at: results.display?.at ?? at,
+    },
+  };
+}
+
+/**
  * SwapUp's results → the FULL map GradeIQ is sent every time (always with
  * merge:true). unsupported → skip: GradeIQ would store any string as-is and its
  * passport would render a state its type does not allow. `detail` stays in

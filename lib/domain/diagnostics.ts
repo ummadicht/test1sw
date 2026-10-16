@@ -265,7 +265,9 @@ export function summarise(
   results: TestResults,
   declared: Declared | null,
   device: DeviceReport | null,
-  tradeModels: TradeModelRef[]
+  tradeModels: TradeModelRef[],
+  /** false for the native automatic app, which never asks the damage questions (the store camera covers cracks). */
+  opts: { declaredExpected?: boolean } = {}
 ): DiagnosticSummary {
   const nameOf = new Map(plan.map((p) => [p.id, p.name]));
   const name = (id: string) => nameOf.get(id) ?? id;
@@ -307,7 +309,9 @@ export function summarise(
   }
 
   // What the customer says about damage a phone cannot see on itself.
-  if (!declared) {
+  if (!declared && opts.declaredExpected === false) {
+    notes.push("The app doesn't ask the customer about damage: cracks and scratches come from the store camera check. Liquid damage can't be tested — check the liquid indicators by eye.");
+  } else if (!declared) {
     notes.push("The customer has not answered the damage questions (cracked screen, cracked back, liquid). Check the phone by eye.");
   } else {
     const ask: [keyof Declared, FaultId, string, string][] = [
