@@ -34,7 +34,8 @@ gradeiq_env_defaults() {
 echo "▸ gate: GradeIQ answers on the VM"
 gradeiq_env_defaults
 "${SSH[@]}" 'F=/etc/swapup.env
-  val() { sudo test -f $F && sudo sed -n "s/^$1=//p" $F | tail -n1; }
+  # start.sh SOURCES the file, so GRADEIQ_ENABLED="0" (quoted) or a trailing space is still the kill switch.
+  val() { sudo test -f $F && sudo sed -n "s/^$1=//p" $F | tail -n1 | tr -d "\"'\'' \r\t"; }
   BASE=$(val GRADEIQ_BASE_URL); BASE=${BASE:-http://127.0.0.1:3700/apps/gradeiq}
   if [ "$(val GRADEIQ_ENABLED)" = "0" ]; then echo "  GRADEIQ_ENABLED=0 in $F — camera grading is switched off by the operator; gate skipped"; exit 0; fi
   out=$(curl -s -m 10 -w "\n%{http_code}" "$BASE/api/sessions/00000000-0000-4000-8000-000000000000" || true)
