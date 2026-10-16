@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { db, nowIso, parseJson, audit } from "./db";
 import * as giq from "./gradeiq";
 import { GradeiqError } from "./gradeiq";
@@ -317,7 +317,11 @@ async function syncOnce(id: string): Promise<void> {
     const h = hash(fn);
     if (h !== r.gradeiq_forward_hash) {
       await giq.postFunctional(r.gradeiq_id, fn);
-      db().prepare(`UPDATE test_sessions SET gradeiq_forward_hash = ?, gradeiq_forwarded_at = ? WHERE id = ?`).run(h, nowIso(), id);
+      // Compare-and-set: if a new sweep marked the map for re-sending while this
+      // request was in flight, keep the marker so the follow-up run sends again.
+      db()
+        .prepare(`UPDATE test_sessions SET gradeiq_forward_hash = ?, gradeiq_forwarded_at = ? WHERE id = ? AND gradeiq_forward_hash IS ?`)
+        .run(h, nowIso(), id, r.gradeiq_forward_hash);
     }
   }
 }
@@ -406,8 +410,15 @@ async function pullSnapshot(id: string): Promise<GradeiqSnapshot | null> {
     db().prepare(`UPDATE test_sessions SET gradeiq_snapshot = ?, gradeiq_synced_at = ? WHERE id = ?`).run(JSON.stringify(snap), now, id);
     const l = live(r);
     if (l.pullError) saveLive(id, { ...l, pullError: null }, now);
-    // The camera's LCD verdict changes what `display` must say in GradeIQ.
-    if (prev?.displayCheck?.verdict !== snap.displayCheck?.verdict) scheduleSync(id);
+    // Every screen sweep rewrites GradeIQ's `display` with its own verdict and
+    // drops results posted during its AI call (contract §5 #7). So a new sweep
+    // forces a full re-send even when SwapUp's map hashes the same — e.g. a
+    // self-test fail with a camera pass leaves GradeIQ saying "pass" otherwise.
+    // The marker is unique, so a forward already in flight can't overwrite it.
+    if (JSON.stringify(prev?.displayCheck ?? null) !== JSON.stringify(snap.displayCheck ?? null)) {
+      db().prepare(`UPDATE test_sessions SET gradeiq_forward_hash = ? WHERE id = ?`).run(`resend:${randomUUID()}`, id);
+      scheduleSync(id);
+    }
     return snap;
   } catch (e) {
     db().prepare(`UPDATE test_sessions SET gradeiq_synced_at = ? WHERE id = ?`).run(now, id);
@@ -514,8 +525,15 @@ export type GradingView = {
 };
 
 export function cameraEvidence(r: GiqRow): { snap: GradeiqSnapshot | null; fin: Finality; mapping: CameraMapping; override: CameraOverrideInfo } {
-  const { snap, fin } = storedFinality(r);
   const override = parseJson<CameraOverrideInfo>(r.gradeiq_override, null);
+  // The kill switch means NO GradeIQ data is used — not even a snapshot pulled
+  // before it was thrown. Otherwise Apply would add camera_ai faults and a
+  // camera floor to a case it records as "not camera-graded".
+  if (!giq.gradeiqConfig().enabled) {
+    const fin = finality(null);
+    return { snap: null, fin, mapping: mapCamera(null, fin, { lcdOverride: override }), override };
+  }
+  const { snap, fin } = storedFinality(r);
   return { snap, fin, mapping: mapCamera(snap, fin, { lcdOverride: override }), override };
 }
 

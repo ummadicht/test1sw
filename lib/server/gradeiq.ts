@@ -190,7 +190,8 @@ export async function getSession(id: string, fetchedAt: string): Promise<Gradeiq
   delete raw.staged;
   delete raw.offer;
   const snap = readSnapshot(raw, cfg.publicUrl, fetchedAt);
-  if (snap.client && snap.client !== cfg.client) throw new GradeiqError("tenant", `This GradeIQ session belongs to tenant "${snap.client}", not "${cfg.client}".`);
+  // Strict: a session that names no tenant is not proven to be ours (GradeIQ always stores client_id).
+  if (snap.client !== cfg.client) throw new GradeiqError("tenant", `This GradeIQ session belongs to tenant "${snap.client || "?"}", not "${cfg.client}".`);
   return snap;
 }
 
