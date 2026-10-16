@@ -280,17 +280,26 @@ export async function applyTestSession(u: SessionUser, id: string) {
   const { r } = inScope(u, id);
   if (r.status === "applied") throw new HttpError(409, "These results are already on the case.");
   if (!["joined", "testing", "complete"].includes(r.status)) throw new HttpError(409, "There are no results to apply yet.");
-  const v = view(r);
-  const s = v.summary;
-  if (!s) throw new HttpError(409, "There are no results to apply yet.");
-  const c = getCase(u, r.case_id);
-  if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "The case is past the counter, so the results can't change it any more.");
+  if (!view(r).summary) throw new HttpError(409, "There are no results to apply yet.");
+  if (!["draft", "quoted"].includes(getCase(u, r.case_id).status)) throw new HttpError(409, "The case is past the counter, so the results can't change it any more.");
 
   // What the store camera saw (GradeIQ) — one last pull and the DeviceFax
   // snapshot, outside any transaction. Only a FINAL grade's confirmed damage
   // counts; anything weaker stays a flag for the advisor.
   const cam = await evidenceForApply(r.id);
   const now = nowIso();
+
+  // Those were up to two GradeIQ round trips: read the session and the case
+  // again, so results that arrived and edits the advisor saved meanwhile are
+  // not overwritten with what was read before.
+  const fresh = rowById(r.id);
+  if (!fresh || fresh.status === "applied") throw new HttpError(409, "These results are already on the case.");
+  if (!["joined", "testing", "complete"].includes(fresh.status)) throw new HttpError(409, "This test session is closed.");
+  const v = view(fresh);
+  const s = v.summary;
+  if (!s) throw new HttpError(409, "There are no results to apply yet.");
+  const c = getCase(u, r.case_id);
+  if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "The case is past the counter, so the results can't change it any more.");
 
   const patch: Parameters<typeof updateCase>[2] = {};
   if (s.model.modelId) {

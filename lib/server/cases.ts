@@ -150,8 +150,12 @@ export type CaseView = {
   coverage: Coverage;
   condition: ConditionAnswers | null;
   conditionProblems: string[];
-  /** What the store camera saw, written when a SwapUp Check session is applied. null = never camera-checked. */
-  camera: CaseCameraCheck | null;
+  /**
+   * What the store camera saw, written when a SwapUp Check session is applied. null = never camera-checked.
+   * The GradeIQ session id is kept on the row but never in a view: partners read cases, and that id is
+   * the only key to GradeIQ's anonymous writes (contract §5 #1).
+   */
+  camera: Omit<CaseCameraCheck, "gradeiqId"> | null;
   /** Why there is no trade-in quote although the phone is described (the camera's identity check). */
   quoteBlocked: string | null;
   manualRepair: ManualQuote | null;
@@ -213,6 +217,11 @@ function thisYear(): number {
   return new Date().getUTCFullYear();
 }
 
+function withoutGradeiqId(c: CaseCameraCheck): Omit<CaseCameraCheck, "gradeiqId"> {
+  const { gradeiqId: _gradeiqId, ...rest } = c;
+  return rest;
+}
+
 function toView(c: CaseRow, store: StoreRow): CaseView {
   const tm = getTradeModel(c.model_id);
   const advisor = db().prepare(`SELECT name FROM users WHERE id = ?`).get(c.advisor_id) as { name: string } | undefined;
@@ -256,7 +265,7 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
     coverage: c.coverage,
     condition,
     conditionProblems: condition ? conditionFloor(condition, faults) : [],
-    camera,
+    camera: camera ? withoutGradeiqId(camera) : null,
     quoteBlocked: identityBlock(camera),
     manualRepair: parseJson<ManualQuote | null>(c.manual_repair, null),
     partnerManual: parseJson<PartnerManual | null>(c.partner_manual, null),
@@ -449,7 +458,8 @@ export function recordCameraCheck(caseId: string, check: CaseCameraCheck, source
 
 /** Staff unlocked the camera without the customer's phone echoing: the case is marked "LCD not camera-checked" now, not only at Apply. */
 export function markLcdOverride(caseId: string, info: { by: string; userId: string; reason: string; at: string; testSessionId: string }): void {
-  const row0 = db().prepare(`SELECT camera_check FROM cases WHERE id = ?`).get(caseId) as { camera_check: string | null } | undefined;
+  // Only while the case is at the counter — a locked trade-in's record is not rewritten.
+  const row0 = db().prepare(`SELECT camera_check FROM cases WHERE id = ? AND status IN ('draft','quoted')`).get(caseId) as { camera_check: string | null } | undefined;
   if (!row0) return;
   const prev = parseJson<CaseCameraCheck | null>(row0.camera_check, null) ?? { ...blankCameraCheck(info.at), testSessionId: info.testSessionId };
   const reason = `the camera was unlocked by ${info.by} before the customer's phone showed the patterns: ${info.reason}`;
@@ -460,7 +470,7 @@ export function markLcdOverride(caseId: string, info: { by: string; userId: stri
     lcd: { ...prev.lcd, cameraChecked: false, reason },
     flags: [...prev.flags.filter((f) => !f.startsWith("LCD not camera-checked")), flag],
   };
-  db().prepare(`UPDATE cases SET camera_check = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(next), nowIso(), caseId);
+  db().prepare(`UPDATE cases SET camera_check = ?, updated_at = ? WHERE id = ? AND status IN ('draft','quoted')`).run(JSON.stringify(next), nowIso(), caseId);
 }
 
 const SCREENS = new Set<string>(SCREEN_ORDER);
