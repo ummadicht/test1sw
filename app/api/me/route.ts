@@ -15,7 +15,7 @@ export async function GET() {
       roleLabel: ROLE_LABEL[u.role],
       home: homeFor(u.role),
       org: org ? { id: org.id, name: org.name, kind: org.kind, demo: !!org.demo } : null,
-      store: store ? { id: store.id, name: store.name, code: store.code, kind: store.kind, city: store.city } : null,
+      store: store ? { id: store.id, name: store.name, code: store.code, kind: store.kind, city: store.city, status: store.status ?? "active", reviewNote: store.review_note ?? null } : null,
     };
   });
 }

@@ -270,6 +270,25 @@ const MIGRATIONS: string[] = [
     used_at TEXT
   );
   `,
+  /* 4 — self-serve sign-up: stores register themselves (pending until the
+         programme approves and sets a credit line), staff join with an invite. */ `
+  ALTER TABLE stores ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+  ALTER TABLE stores ADD COLUMN registered_by TEXT;
+  ALTER TABLE stores ADD COLUMN review_note TEXT;
+  CREATE TABLE store_invites (
+    code_hash TEXT PRIMARY KEY,
+    code_hint TEXT NOT NULL,
+    store_id TEXT NOT NULL REFERENCES stores(id),
+    role TEXT NOT NULL CHECK (role IN ('advisor','store_manager')),
+    created_by TEXT NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    max_uses INTEGER NOT NULL,
+    uses INTEGER NOT NULL DEFAULT 0,
+    revoked_at TEXT
+  );
+  CREATE INDEX store_invites_store ON store_invites (store_id);
+  `,
 ];
 
 function migrate(conn: Database.Database): void {

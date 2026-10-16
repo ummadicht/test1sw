@@ -22,7 +22,7 @@ export function userPayload(u: SessionUser) {
     role: u.role,
     roleLabel: ROLE_LABEL[u.role],
     org: org ? { id: org.id, name: org.name, demo: !!org.demo } : null,
-    store: store ? { id: store.id, name: store.name, code: store.code, city: store.city, kind: store.kind } : null,
+    store: store ? { id: store.id, name: store.name, code: store.code, city: store.city, kind: store.kind, status: store.status ?? "active", reviewNote: store.review_note ?? null } : null,
   };
 }
 

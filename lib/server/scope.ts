@@ -28,6 +28,9 @@ export type StoreRow = {
   credit_limit: number;
   active: number;
   created_at: string;
+  /** pending = registered itself, waiting for the programme to approve it and set a credit line. */
+  status?: "pending" | "active" | "rejected";
+  review_note?: string | null;
 };
 
 export function getOrg(id: string): OrgRow | null {

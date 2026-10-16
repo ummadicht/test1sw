@@ -264,6 +264,10 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
   };
   if (c.status === "quoted") {
     view.lockBlockers = lockBlockers(view, !!org?.demo);
+    // A store that registered itself has no credit line until the programme approves it.
+    if (store.status === "pending")
+      view.lockBlockers.unshift(`This store is waiting for approval from ${org?.name ?? "the programme"}. Phone tests and quotes work; taking trade-ins starts once it is approved and given a credit line.`);
+    if (store.status === "rejected") view.lockBlockers.unshift("This store is closed in SwapUp, so it can't take trade-ins.");
     if (quote?.status === "priced" && quote.amount) {
       view.creditCheck = canHold(storePolicy(store), storeEvents(store.id), quote.amount);
       if (!view.creditCheck.ok) view.lockBlockers.push(view.creditCheck.reason);
