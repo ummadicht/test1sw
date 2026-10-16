@@ -425,6 +425,43 @@ test("disagreements: self-test and camera sweep disagree on the display → both
   assert.equal(d[0].topic, "display");
   assert.equal(d[0].tested, "self-test passed");
   assert.match(d[0].camera, /failed/);
+  assert.equal(d[0].final, "Lines, spots or dead pixels");
+});
+
+test("disagreements: a low-confidence sweep failure is shown, but never claimed as recorded", () => {
+  const s = snap({}, {}, { displayCheck: { verdict: "fail", confidence: 0.5, patterns: ["white"], requested: ["white"], missing: [] } });
+  const m = mapCamera(s, finality(s));
+  assert.deepEqual(m.faults, [], "below the bar: no display_lines");
+  const d = disagreements(null, { display: { outcome: "pass", detail: null, at: AT } }, s, m, finality(s));
+  assert.equal(d.length, 1);
+  assert.equal(d[0].final, "not recorded");
+  assert.doesNotMatch(d[0].message, /Recorded as/);
+  // a self-test failure is recorded whatever the camera says
+  const pass = snap();
+  const d2 = disagreements(null, { display: { outcome: "fail", detail: null, at: AT } }, pass, mapCamera(pass, finality(pass)), finality(pass));
+  assert.equal(d2[0].final, "Lines, spots or dead pixels");
+});
+
+test("map: gaps — back minor chip is a flag; a severe frame crack is 'bent' with frame_damage suggested", () => {
+  const chip = mapCamera(snap({}, { specialists: [comp("back", "B", [{ type: "chip", severity: "minor" }])] }), FINAL);
+  assert.deepEqual(chip.faults, []);
+  assert.equal(chip.floor.body, "flawless");
+  assert.match(chip.flags.join(" "), /may have seen a chip on the back/);
+  const crack = mapCamera(snap({}, { specialists: [comp("frame", "D", [{ type: "crack", severity: "severe" }])] }), FINAL);
+  assert.equal(crack.floor.body, "bent");
+  assert.deepEqual(crack.faults, []);
+  assert.deepEqual(ids(crack.suggested), ["frame_damage"]);
+});
+
+test("finality: a grade without a named model tier is provisional, never final", () => {
+  const f = finality(snap({}, { tierUsed: undefined }));
+  assert.equal(f.status, "provisional");
+  assert.match(f.reasons.join(" "), /did not say which model/);
+});
+
+test("display: an inconclusive sweep never erases a self-test failure", () => {
+  assert.equal(worseDisplay("fail", "unknown"), "fail");
+  assert.equal(worseDisplay("fail", "pass"), "fail");
 });
 
 test("disagreements: an identity mismatch blocks the quote", () => {

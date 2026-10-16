@@ -782,13 +782,18 @@ export function disagreements(declared: Declared | null, results: TestResults, s
   const self = results.display?.outcome;
   const cam = s?.displayCheck?.verdict;
   if ((self === "pass" && cam === "fail") || (self === "fail" && cam === "pass")) {
+    // Say what the case actually records: a self-test fail always adds display_lines;
+    // a camera fail only when it was confident enough to become a fault.
+    const recorded = self === "fail" || m.faults.some((f) => f.id === "display_lines");
     out.push({
       topic: "display",
       customer: null,
       tested: self === "pass" ? "self-test passed" : "self-test failed",
       camera: cam === "fail" ? `screen sweep failed (${pct(s?.displayCheck?.confidence ?? null)})` : "screen sweep passed",
-      final: SCREEN_LABEL.lines_or_spots,
-      message: `Phone's own display test ${self === "pass" ? "passed" : "failed"}; the camera's screen sweep ${cam === "fail" ? "failed" : "passed"}. Recorded as "${SCREEN_LABEL.lines_or_spots}" — check the screen by eye.`,
+      final: recorded ? SCREEN_LABEL.lines_or_spots : "not recorded",
+      message: `Phone's own display test ${self === "pass" ? "passed" : "failed"}; the camera's screen sweep ${cam === "fail" ? "failed" : "passed"}. ${
+        recorded ? `Recorded as "${SCREEN_LABEL.lines_or_spots}"` : "The camera was not confident enough, so nothing is recorded"
+      } — check the screen by eye.`,
       photoIndex: null,
       box: null,
     });
