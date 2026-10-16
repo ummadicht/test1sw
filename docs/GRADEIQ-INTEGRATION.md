@@ -321,7 +321,7 @@ while the customer's phone echoes the screen patterns.
 | **No demo or fallback grade path exists or can be enabled.** | No such code or variable. `GRADEIQ_ENABLED=0` is a labelled kill switch (`state: disabled`, "check the condition by eye"). |
 
 Implementation choices worth knowing (each stricter than or clarifying §3):
-- **Frame cracks count only when severe**, as GradeIQ's own structural rule says (`visionAgents.ts:731-733`); a moderate frame crack is a flag. Chips on the front or back glass count from `moderate` up (§3.4 row 1); a confirmed crack of any severity counts.
+- **Frame cracks count only when severe**, as GradeIQ's own structural rule says (`visionAgents.ts:727-729`); a moderate frame crack is a flag. Chips on the front or back glass count from `moderate` up (§3.4 row 1); a confirmed crack of any severity counts.
 - **The LCD sweep is its own AI call.** A `displayCheck` fail with confidence ≥ 0.7 adds `display_lines` even while the cosmetic grade is provisional; below 0.7 it is a flag. Missing patterns, `unknown`, no sweep, or a camera override → "LCD not camera-checked".
 - **`display` worse-of** is recomputed on every forward from the latest snapshot, so when the sweep's verdict arrives the full map is re-sent with the worse value (fail > pass > skip).
 - **A provisional grade is never applied**: what it would have added becomes "Not final, so not added: … Check it by eye."
