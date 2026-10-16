@@ -11,7 +11,8 @@ KEY=${KEY:-$HOME/.ssh/denovo_gcp}
 PUBLIC=${PUBLIC:-https://swapup.104-197-168-25.sslip.io}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BUILD=${BUILD:-/private/tmp/claude-501/swapup-deploy}
-SSH=(ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "$VM")
+SSH_OPTS="-i $KEY -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ConnectTimeout=15"
+SSH=(ssh $SSH_OPTS "$VM")
 
 echo "▸ gates: domain tests + typecheck"
 (cd "$ROOT" && npm test >/dev/null && npx tsc --noEmit -p .)
@@ -25,7 +26,7 @@ if ls "$BUILD/.next/server/chunks" 2>/dev/null | grep -q '\[turbopack\]'; then e
 
 echo "▸ ship"
 "${SSH[@]}" "mkdir -p ~/swapup/data"
-rsync -az --delete -e "ssh -i $KEY" \
+rsync -az --delete -e "ssh $SSH_OPTS" \
   --exclude node_modules --exclude data --exclude .git --exclude '.env*' --exclude '.next/cache' --exclude '.claude' \
   "$BUILD/" "$VM:~/swapup/"
 
@@ -42,7 +43,7 @@ echo "▸ downloads folder for the Android apps (outside the app dir)"
 MOBILE_DIST=${MOBILE_DIST:-$ROOT/../swapup-mobile/dist}
 if ls "$MOBILE_DIST"/swapup-*.apk >/dev/null 2>&1; then
   echo "  uploading APKs from $MOBILE_DIST"
-  rsync -az -e "ssh -i $KEY" "$MOBILE_DIST"/swapup-*.apk "$MOBILE_DIST"/swapup-*.json "$VM:/var/www/swapup-downloads/"
+  rsync -az -e "ssh $SSH_OPTS" "$MOBILE_DIST"/swapup-*.apk "$MOBILE_DIST"/swapup-*.json "$VM:/var/www/swapup-downloads/"
 fi
 
 echo "▸ pm2"
