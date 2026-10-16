@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { createHmac, timingSafeEqual, randomBytes, scryptSync } from "node:crypto";
 import { db, parseJson } from "./db";
 
@@ -130,6 +130,11 @@ export function authenticate(username: string, password: string): SessionUser | 
   };
 }
 
+/** The signed token itself — handed to the store app, which sends it as a Bearer token. */
+export function issueToken(u: SessionUser): string {
+  return encode(u);
+}
+
 export async function setSession(u: SessionUser): Promise<void> {
   const jar = await cookies();
   jar.set(COOKIE, encode(u), {
@@ -152,7 +157,14 @@ export async function clearSession(): Promise<void> {
  */
 export async function getSession(): Promise<SessionUser | null> {
   const jar = await cookies();
-  const u = decode(jar.get(COOKIE)?.value);
+  // The store app sends the same signed token as "Authorization: Bearer …".
+  let token = jar.get(COOKIE)?.value;
+  if (!token) {
+    const h = (await headers()).get("authorization") || "";
+    const m = /^Bearer\s+(\S+)$/i.exec(h);
+    if (m) token = m[1];
+  }
+  const u = decode(token);
   if (!u) return null;
   const row = db().prepare(`SELECT role, org_id, store_id, active, name FROM users WHERE id = ?`).get(u.id) as
     | Pick<UserRow, "role" | "org_id" | "store_id" | "active" | "name">

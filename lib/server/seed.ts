@@ -28,6 +28,7 @@ type SeedData = {
     variants: string[];
     serviceTier: string;
     carePlusFee: number | null;
+    modelCodes?: string[];
     source: unknown;
   }[];
   repairBook: { modelId: string; part: string; price: number; source: unknown }[];
@@ -45,6 +46,7 @@ export function ensureSeeded(): Promise<void> {
     g.__swapup_seed = (async () => {
       const has = db().prepare(`SELECT COUNT(*) n FROM orgs`).get() as { n: number };
       if (has.n === 0) seedBase();
+      backfillModelCodes();
       const demoDone = db().prepare(`SELECT value FROM meta WHERE key = 'demo_cases'`).get();
       if (!demoDone && process.env.SWAPUP_DEMO_CASES !== "0") {
         try {
@@ -57,6 +59,24 @@ export function ensureSeeded(): Promise<void> {
     })();
   }
   return g.__swapup_seed;
+}
+
+/**
+ * Databases seeded before model codes existed (production) get them from the
+ * seed data: SwapUp Check matches a phone on the code it reports (SM-S901E).
+ * Only fills rows that have none, so a code an admin edited is never overwritten.
+ */
+function backfillModelCodes(): void {
+  const empty = db().prepare(`SELECT id FROM trade_models WHERE model_codes = '[]' OR model_codes IS NULL`).all() as { id: string }[];
+  if (!empty.length) return;
+  const byId = new Map(DATA.tradeModels.map((m) => [m.id, m.modelCodes ?? []]));
+  const upd = db().prepare(`UPDATE trade_models SET model_codes = ? WHERE id = ?`);
+  db().transaction(() => {
+    for (const r of empty) {
+      const codes = byId.get(r.id);
+      if (codes && codes.length) upd.run(JSON.stringify(codes), r.id);
+    }
+  })();
 }
 
 export const SAMPLE_DEDUCTIONS: RateCard["deductions"] = {
@@ -122,10 +142,10 @@ function seedBase(): void {
     for (const u of users) user.run(...u, pw, now);
 
     const tm = d.prepare(
-      `INSERT INTO trade_models (id, brand, model, series, release_year, support_end_year, variants, service_tier, care_plus_fee, source) VALUES (?,?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO trade_models (id, brand, model, series, release_year, support_end_year, variants, service_tier, care_plus_fee, model_codes, source) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
     );
     for (const m of DATA.tradeModels)
-      tm.run(m.id, m.brand, m.model, m.series, m.releaseYear, m.supportEndYear, JSON.stringify(m.variants), m.serviceTier, m.carePlusFee, JSON.stringify(m.source));
+      tm.run(m.id, m.brand, m.model, m.series, m.releaseYear, m.supportEndYear, JSON.stringify(m.variants), m.serviceTier, m.carePlusFee, JSON.stringify(m.modelCodes ?? []), JSON.stringify(m.source));
 
     const rb = d.prepare(`INSERT INTO repair_book (org_id, model_id, part, price, source) VALUES (?,?,?,?,?)`);
     const nd = d.prepare(`INSERT INTO new_devices (id, org_id, brand, model, series, variant, price, support_end_year, active, sort, source) VALUES (?,?,?,?,?,?,?,?,1,?,?)`);

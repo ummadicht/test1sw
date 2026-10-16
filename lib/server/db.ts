@@ -233,6 +233,43 @@ const MIGRATIONS: string[] = [
   ALTER TABLE cases ADD COLUMN closed_reason TEXT;
   CREATE INDEX cases_imei2 ON cases (imei2);
   `,
+  /* 3 — SwapUp Check: customer test sessions on their own phone, store Wi-Fi,
+         Samsung model codes for matching, one-time web hand-off nonces. */ `
+  CREATE TABLE test_sessions (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    store_id TEXT NOT NULL REFERENCES stores(id),
+    org_id TEXT NOT NULL REFERENCES orgs(id),
+    created_by TEXT NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL,
+    plan TEXT NOT NULL,
+    install_id TEXT,
+    ticket_hash TEXT,
+    device TEXT,
+    declared TEXT,
+    results TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    opened_at TEXT,
+    joined_at TEXT,
+    completed_at TEXT,
+    applied_at TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX test_sessions_code ON test_sessions (code);
+  CREATE INDEX test_sessions_ticket ON test_sessions (ticket_hash);
+  CREATE INDEX test_sessions_store ON test_sessions (store_id, status);
+  ALTER TABLE stores ADD COLUMN settings TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE trade_models ADD COLUMN model_codes TEXT NOT NULL DEFAULT '[]';
+  CREATE TABLE handoff_nonces (
+    nonce_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    next TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT
+  );
+  `,
 ];
 
 function migrate(conn: Database.Database): void {
