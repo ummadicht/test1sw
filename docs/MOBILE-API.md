@@ -66,14 +66,23 @@ other roles get `403 "The store app is for store staff."`.
 }
 ```
 
-`GET /api/test-sessions/<id>` (Bearer) → `TestSessionView` (poll every 2 s while open).
-`GET /api/test-sessions?open=1` (Bearer) → `{ sessions: TestSessionView[] }` for the store.
-`POST /api/test-sessions/<id>/apply` (Bearer) → applies the mapped model, storage,
-faults and condition to the case (through the normal case service, so it re-prices) →
+`GET /api/test-sessions/<id>` (Bearer) → `TestSessionView` (poll every 2 s while open). This
+poll also drives the camera-grading pulls from GradeIQ (§8) — throttled on the server.
+`GET /api/test-sessions?open=1` (Bearer) → `{ sessions: TestSessionView[] }` for the store
+(grading from what is stored; no GradeIQ calls).
+`POST /api/test-sessions/<id>/apply` (Bearer) → applies the mapped model, storage, the tested
+faults **and the camera-confirmed faults** (§8), and a condition no better than the advisor's,
+the faults' or the camera's, to the case (through the normal case service, so it re-prices) →
 `{ session: TestSessionView, caseId }`.
-`POST /api/test-sessions/<id>/cancel` (Bearer) → status `cancelled`, ticket revoked.
+`POST /api/test-sessions/<id>/cancel` (Bearer) → status `cancelled`, ticket revoked; its GradeIQ
+session is abandoned.
 `POST /api/test-sessions/<id>/reissue` (Bearer) → new code + QR for the SAME case when the
-old one expired.
+old one expired. A new code is a new GradeIQ session (the photos belong to the phone that joins).
+`POST /api/test-sessions/<id>/camera-override` (Bearer) `{ reason }` → `TestSessionView` — unlocks
+the camera page without the customer's phone echoing patterns (§8). Needs a reason (≥ 8 chars);
+recorded with the staff member's name; the case is marked "LCD not camera-checked".
+`POST /api/test-sessions/<id>/grading-retry` (Bearer) → `TestSessionView` — after "Camera grading
+unavailable", ask for a fresh GradeIQ session.
 
 ```ts
 type TestSessionView = {
@@ -87,10 +96,11 @@ type TestSessionView = {
   declared: { screenCracked: boolean|null; backCracked: boolean|null; liquid: boolean|null; imei: string|null } | null;
   progress: { done: number; total: number };
   summary: DiagnosticSummary | null;   // computed whenever results change
+  grading: GradingView | null;         // camera grading (§8) — staff responses only
 };
 type DiagnosticSummary = {
   model: { modelId: string|null; label: string|null; variant: string|null; match: "exact"|"family"|"none"; why: string };
-  faults: { id: FaultId; because: string }[];                  // SwapUp fault ids (lib/domain/condition.ts)
+  faults: { id: FaultId; because: string; sources: ("tested"|"declared")[] }[]; // SwapUp fault ids (lib/domain/condition.ts)
   untested: { id: string; name: string; critical: boolean }[]; // skipped / unsupported / never run
   notes: string[];                                             // things that are not faults but worth saying
   verdict: "all_passed" | "faults_found" | "incomplete";
@@ -148,6 +158,22 @@ its queue until acknowledged → `{ ok: true, received: n, progress }`.
 `GET /api/device/status` → `{ status, progress, storeName, caseRef }` (lets the app show
 "The store has your results").
 
+**Photo check** (between the damage questions and the tests — §8). "Lay your phone on the
+counter": poll about every 700 ms, show `pattern` full-screen, echo what is on screen.
+
+`GET /api/device/screen` →
+`{ state, pattern, shown, cosmeticDone, handoffDone, capture: { verdict, code, reasons[], attempt } | null }`
+- `state`: `disabled` or `failed` → skip the photo check and run the tests; `pending` → wait;
+  `ready` → show `pattern` (`idle` | `white` | `black` | `red` | `green` | `blue` | `stripes`).
+- `capture.verdict = "retake"` → the store's photos were rejected (show `reasons`; stay on the
+  screen — the store retakes).
+- Leave for the tests when `handoffDone` is true, or 30 s after `cosmeticDone`.
+- `503 { error }` → the server can't reach GradeIQ just now: keep the screen, keep polling.
+- Never carries the GradeIQ session id or the camera URL.
+
+`POST /api/device/screen` `{ shown: "<pattern actually on screen>" }` → `{ ok: true }`. The first
+echo is what unlocks the store's camera button.
+
 ## 5. Downloads
 
 `GET /downloads/swapup-check.apk` and `/downloads/swapup-store.apk` — served by Caddy from
@@ -194,3 +220,82 @@ everything else proxied to :4500); for `/j` and `/downloads` to offer them, syml
   client hints / user agent, battery on phones only; disk, RAM and physical-vs-emulator are null.
 - **Never send** a Permissions-Policy that blocks camera, microphone, geolocation, motion
   sensors, Bluetooth or NFC on `/app/check/` — the tests need them.
+
+## 8. Camera grading (GradeIQ underneath)
+
+SwapUp Check is built on GradeIQ: every test session gets a GradeIQ session in the background
+(server to server; `docs/GRADEIQ-INTEGRATION.md`). The **customer's phone** is tested
+automatically — no extra questions — and its screen echoes the patterns the **store device's**
+camera asks for; GradeIQ's AI vision grades cracks, scratches and the LCD from those photos.
+
+Store-app flow: wait for `grading.deviceReady` → button **Take photos** opens `grading.cameraUrl`
+in Chrome (`Linking.openURL`, not the WebView: the page needs the camera, HTTPS and, on Android,
+the torch) → watch `grading.capture` / `grading.assessment` → Apply.
+
+```ts
+type GradingView = {
+  state: "disabled" | "pending" | "ready" | "failed";
+  message: string;                 // one line for the top of the card
+  error: string | null;
+  canRetry: boolean;               // show Retry → POST …/grading-retry
+  deviceReady: boolean;            // the customer's phone is echoing patterns
+  cameraConnected: boolean;
+  cameraUrl: string | null;        // GradeIQ /v2/cam/<id> — ONLY when deviceReady (or overridden); never in a QR
+  cameraLocked: string | null;     // why the camera button is locked
+  canOverride: boolean;            // offer "Start without the customer's phone" → …/camera-override {reason}
+  override: { by: string; reason: string; at: string } | null;
+  screenReadable: boolean;
+  pattern: string | null; cosmeticDone: boolean; handoffDone: boolean;
+  capture: { verdict: string; reasons: string[] } | null;   // e.g. "retake" + reasons
+  sync: { state: "idle" | "in_sync" | "sending" | "retrying"; error: string | null; forwardedAt: string | null };
+  outOfSync: boolean;              // show "GradeIQ out of sync, retrying" — SwapUp's own results stay authoritative
+  assessment: AssessmentView | null;
+  disagreements: { topic: "screen"|"back"|"display"|"identity"; customer: string|null; tested: string|null;
+                   camera: string; final: string; message: string; photoIndex: number|null; box: Box|null }[];
+  timedOut: boolean;               // stopped waiting 180 s after the photos were accepted
+  syncedAt: string | null;
+};
+type AssessmentView = {
+  final: boolean; provisional: boolean; status: "none"|"grading"|"provisional"|"final"|"failed"; reasons: string[];
+  grade: string | null;            // Premium/A/B/C/D — shown, NEVER priced; null = not camera-graded
+  conclusive: boolean | null; gradeRange: { best: string; worst: string } | null; needsHumanReview: boolean;
+  coverage: number | null; score: number | null; tierUsed: "stub"|"flash"|"pro"|null; visionModel: string | null;
+  functionalGrade: string | null;  // GradeIQ's Working/Faulty — display only; `summary.verdict` is the authority
+  components: { id: "front"|"back"|"frame"|"cameras"|"display"; label: string; grade: string|null; confidence: number|null; findings: number }[];
+  findings: { component; componentLabel; type; label; severity; confidence; confirmed: boolean;
+              photoIndex: number|null; photoUrl: string|null; box: [ymin,xmin,ymax,xmax]|null; location: string|null;
+              meaning: string|null;           // in SwapUp's words, e.g. "Cracked glass"
+              effect: "fault"|"condition"|"suggested"|"flag"|"none" }[];
+  faults: { id: FaultId; because: string; component; confidence; photoIndex; box }[];    // added at Apply (source camera_ai)
+  suggested: { id: FaultId; because: string; … }[];   // shown, never added (frame_damage, cracked lens)
+  floor: { screen: ScreenState; body: BodyState };   // the condition may be recorded worse, never better
+  flags: string[];                                    // weaker sightings, "LCD not camera-checked", review notes
+  displayCheck: { verdict: "pass"|"fail"|"unknown"; confidence; note; findings[]; patterns[]; captures[]; requested[]; missing[]; reason } | null;
+  lcd: { cameraChecked: boolean; verdict: "pass"|"fail"|"unknown"|null; reason: string|null };
+  obstruction: { present: boolean; type: string; note: string } | null;   // a case on the phone → grade not used
+  oem: { verdict: string; confidence: number|null; evidence: string[] } | null;
+  identity: { verdict: "match"|"mismatch"|"unverified"; reasons: string[]; device: { make, model, match, reason } | null };
+  photos: string[]; fetchedAt: string | null;
+};
+```
+
+Rules the server enforces:
+- **Camera lock fails closed.** `cameraUrl` is null until GradeIQ's `/screen` reports the
+  customer's phone echoing (`shown` is a string). Unreadable `/screen` → `cameraLocked` says so;
+  only `camera-override` with a reason unlocks it, and the LCD is then "not camera-checked".
+- **Only confirmed damage changes the case:** confidence ≥ 0.7, corroborated, located with a box,
+  from a FINAL grade (a grade letter, a real model tier, no refinement running, photos accepted,
+  no case on the phone). Weaker sightings are flags. A provisional grade is never applied.
+- **The camera only makes things worse** and never downgrades a customer's damage declaration.
+- **Identity mismatch blocks the quote** (`CaseView.quoteBlocked`, no partner quote) until a
+  **store manager** sends `PATCH /api/cases/<id>` `{ cameraOverride: { identity: true, reason } }`.
+- **Recording the phone better than the camera confirmed** (removing a `camera_ai` fault, or a
+  better screen/body answer) → `409` unless the PATCH carries `cameraOverride: { reason }`; the
+  name and reason are stored in `CaseView.camera.overrides`.
+- No grade ever comes from anywhere else: no demo grade, no fallback, no switch for one.
+  `GRADEIQ_ENABLED=0` is a labelled kill switch (`state: "disabled"`, condition by eye).
+
+Case fields (`GET /api/cases/<id>`): `faultSources` (`{ [faultId]: ("tested"|"declared"|"camera_ai"|"advisor")[] }`),
+`camera` (what the camera saw, written at Apply: grade, final, floor, faults, suggested, flags, lcd,
+lcdOverride, identity, identityOverride, overrides, devicefax), `quoteBlocked`. The DeviceFax JSON
+(photo URLs on the public GradeIQ origin) is kept on the test session for staff only.

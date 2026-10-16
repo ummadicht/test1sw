@@ -1,6 +1,8 @@
 # Integration contract: GradeIQ as SwapUp's grading engine
 
-Status: proposal, 2026-10-16. Nothing was edited or deployed. The only live checks were read-only.
+Status: researched 2026-10-16 as a proposal; **the decisions in §6 were taken and the SwapUp
+server side is built** (`su/lib/server/gradeiq.ts`, `gradeiqBridge.ts`, `su/lib/domain/gradeiqMap.ts`).
+Not deployed. The SwapUp Check pattern-echo screen and the Store app's camera button are not built yet.
 
 Path prefixes used below:
 - `giq/` = /Users/ammar/projects/gradeiq
@@ -40,7 +42,7 @@ Path prefixes used below:
 |---|---|---|
 | `GRADEIQ_BASE_URL` | `http://127.0.0.1:3700/apps/gradeiq` | Same VM, so server-to-server calls skip both public proxy hops. The basePath is compiled in (`giq/next.config.ts:5-10`), so `/apps/gradeiq` is required even on localhost. |
 | `GRADEIQ_PUBLIC_URL` | `https://swapmore.com/apps/gradeiq` | For the camera-page link on the store device, the passport link, and turning stored photo paths (`/api/uploads/...`) into public URLs. SwapUp already builds links on the server (`su/lib/server/testSessions.ts:105-116`). No `NEXT_PUBLIC_` copy is needed, which avoids CounterIQ's build-time-URL failure (`ciq/deploy-spectrum.sh:40-48`). |
-| `GRADEIQ_CLIENT` | `swapup` | GradeIQ has no such tenant yet (§5 #3). Until it does, any value silently becomes `default` (EUR) (`giq/app/api/sessions/route.ts:18`). |
+| `GRADEIQ_CLIENT` | `swapmore-in` (decided, §6) | The existing INR tenant until GradeIQ gets a dedicated `swapup` one (§5 #3). Any unknown value silently becomes `default` (EUR) (`giq/app/api/sessions/route.ts:18`), so SwapUp rejects a create whose echoed `client` differs. |
 | `GRADEIQ_CHANNEL` | `retail` | Reuses the retail capture journey CounterIQ already exercises. `/value` keys its price-withholding on this channel (`giq/app/api/sessions/[id]/value/route.ts:29-38`). |
 | `GRADEIQ_TIMEOUT_MS` | 5000 (create: 20000) | Create can wait on IMEI and Phonecheck lookups (`giq/app/api/sessions/route.ts:31-38`). |
 | `GRADEIQ_ENABLED` | `1` / `0` | `0` is a labelled kill switch back to today's flow, where the advisor checks condition by eye. It is **not** a demo mode. |
@@ -52,7 +54,7 @@ Path prefixes used below:
 
 | # | Call | When | Body | Read back |
 |---|---|---|---|---|
-| 1 | `POST /api/sessions` | After a SwapUp test session commits | `{"client":"swapup","channel":"retail","segment":"c2b","imei":"<15 digits, only if the case already has one>","model":"<SwapUp model label, only if the case has one>"}` | `id` (UUID) and `client`. **Reject the session if `client` ≠ `GRADEIQ_CLIENT`.** The response shape is at `route.ts:132`. Never send `demographic`: an invalid value makes GradeIQ return 500 (`giq/lib/profiles.ts:159-164`). `c2b` is a valid segment (`profiles.ts:13, 123`). |
+| 1 | `POST /api/sessions` | After a SwapUp test session commits | `{"client":"swapmore-in","channel":"retail","segment":"c2b","model":"<SwapUp model label, only if the case has one>"}` — **never an IMEI** (decided, §6) | `id` (UUID) and `client`. **Reject the session if `client` ≠ `GRADEIQ_CLIENT`.** The response shape is at `route.ts:132`. Never send `demographic`: an invalid value makes GradeIQ return 500 (`giq/lib/profiles.ts:159-164`). `c2b` is a valid segment (`profiles.ts:13, 123`). |
 | 2 | `POST /api/sessions/{id}/device` | Phone joins; customer declares the IMEI | `{"device":{"source":"swapup-check","brand":…,"model":modelName,"os":"Android <osVersion>","storageGB":<only from an exact SwapUp variant match>,"imei":"<declared>"},"model":"<SwapUp label, only when match = exact>"}` | Nothing. Note that it fills `imei` and `model` only when they are empty, and runs **no** IMEI lookup (`giq/app/api/sessions/[id]/device/route.ts:35-44`). |
 | 3 | `POST /api/sessions/{id}/functional` | After each `/api/device/results` batch | `{"functional":{…all 18 ids…},"merge":true}`. Always the **full** mapped map, always `merge:true`. | `verdict`. A body without `functional`, or without `merge`, **wipes** every stored result (`functional/route.ts:17, 20-22`). |
 | 4 | `GET` / `POST /api/sessions/{id}/screen` | Proxied for the customer's phone during the photo check | POST `{"shown":"<pattern>"}` | `{pattern, shown, cosmeticDone, handoffDone, capture, connectedAt}` (`giq/app/api/sessions/[id]/screen/route.ts:113-130`). An unknown id returns `idle`, not 404 (`:100`). |
@@ -299,9 +301,37 @@ Each item says whether it needs a GradeIQ code change, a SwapUp code change, or 
     - `/video` accepts a body of any size (`video/route.ts:14-24`).
     - The Pandas results endpoint hard-codes USD (`pandasResult.ts:121-126`).
 
-**Decisions needed from you:**
-- the tenant id and currency for SwapUp in GradeIQ;
-- whether paid Phonecheck lookups should run for SwapUp sessions;
-- whether camera-confirmed structural damage auto-adds a fault or only suggests one;
-- whether DeviceFax is shown to customers before #6 is fixed;
-- confirming that the partner, not GradeIQ, owns the only price the customer sees.
+**Decisions needed from you:** answered — see §6.
+
+## 6. Decisions (2026-10-16) and how they are built
+
+Product direction: *SwapUp is built on GradeIQ fundamentals but extends beyond the browser to
+native app testing, all automatically without any questions — simple.* Every SwapUp test session
+is backed by a GradeIQ session; the customer's phone is tested automatically; cracks, scratches
+and the LCD come from GradeIQ's AI vision through the **store** device's camera on `/v2/cam/{id}`
+while the customer's phone echoes the screen patterns.
+
+| Decision | Built as |
+|---|---|
+| **Tenant:** `GRADEIQ_CLIENT` defaults to `swapmore-in` (the existing INR tenant); a dedicated `swapup` tenant later. | `gradeiqConfig()`; a create whose echoed `client` ≠ `GRADEIQ_CLIENT` fails as "wrong tenant" (no auto-retry, audit `gradeiq.tenant_mismatch`, the stray GradeIQ id recorded in `gradeiq_orphans`). Every pulled snapshot is checked too. |
+| **No paid Phonecheck lookups:** never send an IMEI at create. | `createSession()` sends `client/channel/segment/model` only. The customer's declared IMEI goes with call 2 (`/device`), which runs no lookup. |
+| **Camera-confirmed structural damage is added automatically at Apply** (source `camera_ai`); weaker sightings are flags only. | Confirmed = confidence ≥ 0.7, not `uncorroborated`, has a box, **from a FINAL grade** (§3.3). `mapCamera()` in `gradeiqMap.ts`; `applyTestSession` unions the faults, floors the condition, writes `cases.fault_sources` and `cases.camera_check`. |
+| **DeviceFax JSON is snapshotted for staff only.** | Call 6 at Apply → `test_sessions.gradeiq_devicefax`, photo URLs re-rooted on `GRADEIQ_PUBLIC_URL`, `offer`/`staged` dropped. Never shown to customers; the HTML passport is not used. |
+| **GradeIQ is never asked for a price.** | The client has no function for `/offer`, `/value`, `/accept`, `/grade-manual` or `/reprocess`. The grade letter is shown to staff, never priced; the partner prices SwapUp's condition answers. |
+| **No demo or fallback grade path exists or can be enabled.** | No such code or variable. `GRADEIQ_ENABLED=0` is a labelled kill switch (`state: disabled`, "check the condition by eye"). |
+
+Implementation choices worth knowing (each stricter than or clarifying §3):
+- **Frame cracks count only when severe**, as GradeIQ's own structural rule says (`visionAgents.ts:731-733`); a moderate frame crack is a flag. Chips on the front or back glass count from `moderate` up (§3.4 row 1); a confirmed crack of any severity counts.
+- **The LCD sweep is its own AI call.** A `displayCheck` fail with confidence ≥ 0.7 adds `display_lines` even while the cosmetic grade is provisional; below 0.7 it is a flag. Missing patterns, `unknown`, no sweep, or a camera override → "LCD not camera-checked".
+- **`display` worse-of** is recomputed on every forward from the latest snapshot, so when the sweep's verdict arrives the full map is re-sent with the worse value (fail > pass > skip).
+- **A provisional grade is never applied**: what it would have added becomes "Not final, so not added: … Check it by eye."
+- **Identity:** either GradeIQ check saying `mismatch` blocks the partner quote server-side (`reprice` asks for no quote; `CaseView.quoteBlocked`; also a lock blocker) — even from a provisional grade, because it protects the store. Only a **store manager** can accept the phone (`PATCH /api/cases/<id>` `{cameraOverride:{identity:true, reason}}`). Missing identity = `unverified`, never a pass.
+- **Advisor overrides:** removing a `camera_ai` fault or recording a better screen/body than the camera's floor → 409 unless the PATCH carries `cameraOverride: { reason }` (≥ 8 chars, name stored, audited). "Fill condition from faults" applies the camera floor too.
+- **Apply now merges the condition** (`mergeCondition`, then the camera floor) instead of rebuilding it from faults, so a worse answer the advisor recorded survives — what `mergeCondition`'s comment always promised.
+- **Camera lock (fail closed):** `cameraUrl` is withheld until GradeIQ `/screen.shown` is a string. An unreadable `/screen`, or a customer phone that can't run Check, can be overridden with `POST /api/test-sessions/<id>/camera-override {reason}`; the name and reason are kept on the session and the case is marked "LCD not camera-checked" at once.
+- **Pull cadence:** only while staff poll `GET /api/test-sessions/<id>`: `/screen` at most every 2 s (the customer's phone: every 0.5 s through the proxy); the whole session every 5 s from `cosmeticDone` until final **and** the LCD verdict is in, for at most 180 s; a retake restarts the window. The staff GET waits ≤ 1.5 s for this, then answers from what is stored.
+- **Forwarding:** per session, one request at a time, outside every transaction; a body is sent only when its hash differs from the last one GradeIQ acknowledged. Failures back off 2 s → 60 s and show `outOfSync`. A create retries twice (5 s, 20 s) and then waits for Retry. A server restart is recovered lazily on the next staff or device poll.
+- **Deploy gate** (`su/deploy/deploy.sh`): the VM must get a 404 **with GradeIQ's JSON body** `{"error":"not found"}` — a wrong basePath also answers 404, but with an HTML page. Skipped only when `/etc/swapup.env` says `GRADEIQ_ENABLED=0`. Missing `GRADEIQ_*` lines are appended; existing ones are never changed.
+- **Local dev:** GradeIQ's dev server has no `NEXT_PUBLIC_BASE_PATH`, so it serves at the root: `GRADEIQ_BASE_URL=http://127.0.0.1:3700`, `GRADEIQ_PUBLIC_URL=http://localhost:3700` in `su/.env.local` (gitignored).
+
+Still open: the SwapUp Check pattern-echo screen (native + web) and the Store app's camera button / grading card (`sum/`); a UI for override reasons on the web desk (today the 409 explains, but the desk has no reason field); everything in §5 that needs a GradeIQ change.
