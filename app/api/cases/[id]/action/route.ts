@@ -6,6 +6,7 @@ import {
   walkAway,
   lockTradeIn,
   cancelTradeIn,
+  recordDataClear,
   setBonusOverride,
   type CaseView,
   type LockInput,
@@ -18,6 +19,8 @@ type ActionBody = {
   customer?: LockInput["customer"];
   checks?: LockInput["checks"];
   bp?: unknown;
+  steps?: Record<string, unknown>;
+  note?: unknown;
 };
 
 /**
@@ -36,7 +39,7 @@ async function transition(fn: () => CaseView | Promise<CaseView>): Promise<CaseV
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-/** One door for every case action: reprice, choose_repair, walk_away, lock, cancel, bonus_override. */
+/** One door for every case action: reprice, choose_repair, walk_away, lock, cancel, data_clear, bonus_override. */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   return handle(async () => {
     const u = await requireUser();
@@ -55,6 +58,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         return transition(() => lockTradeIn(u, id, { customer: b.customer!, checks: b.checks! }));
       case "cancel":
         return transition(() => cancelTradeIn(u, id, str(b.reason) ?? ""));
+      case "data_clear":
+        return recordDataClear(u, id, { ...(b.steps ?? {}), note: b.note });
       case "bonus_override": {
         if (b.bp !== null && typeof b.bp !== "number") throw new HttpError(400, "Send the bonus in basis points, or null to reset it.");
         return setBonusOverride(u, id, { bp: b.bp, reason: str(b.reason) });

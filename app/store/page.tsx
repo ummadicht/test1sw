@@ -14,6 +14,7 @@ import { listPickups, openChargebacks } from "@/lib/server/pickups";
 import { programmeReport } from "@/lib/server/reports";
 import { getOrg, getStore, storesForUser } from "@/lib/server/scope";
 import { tradeSources } from "@/lib/server/pickups-extra";
+import { dataClearDueIds } from "@/lib/server/cases";
 import { nowIso } from "@/lib/server/db";
 import { SIGN, type CreditEventKind } from "@/lib/domain/credit";
 import { CASE_STATUS_LABEL } from "@/lib/domain/lifecycle";
@@ -89,9 +90,10 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
   const anySample = Object.values(sources).some((s) => s.kind === "sample");
   const samplePickups = pickups.filter((p) => p.items.some((i) => isSample(i.id))).map((p) => p.id);
 
+  const dataDue = dataClearDueIds(cs.store.id);
   const bookable: BookableDevice[] = cs.held
     .filter((h) => h.status === "locked")
-    .map((h) => ({ caseId: h.caseId, ref: h.ref, label: h.label, value: h.value, days: wholeDays(h.heldSince, now), sample: isSample(h.caseId) }));
+    .map((h) => ({ caseId: h.caseId, ref: h.ref, label: h.label, value: h.value, days: wholeDays(h.heldSince, now), sample: isSample(h.caseId), dataDue: dataDue.has(h.caseId) }));
   const onPickup = cs.held.length - bookable.length;
 
   const month = istMonthStart(now);
@@ -239,7 +241,14 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
                             {h.ref}
                           </Link>
                         </td>
-                        <td className="font-medium">{h.label}</td>
+                        <td className="font-medium">
+                          {h.label}
+                          {dataDue.has(h.caseId) ? (
+                            <Link href={`/cases/${h.caseId}#data-clear`} className="block text-[12.5px] text-warn font-semibold hover:underline">
+                              Customer&apos;s data not cleared
+                            </Link>
+                          ) : null}
+                        </td>
                         <td className="text-right">
                           <div className="flex flex-col items-end gap-1">
                             <Money value={h.value} className="font-semibold" />

@@ -227,8 +227,6 @@ function deviceId(orgId: string, model: string, variant: string): string {
 
 const CHECKS = {
   ownership: true,
-  factoryReset: true,
-  accountsRemoved: true,
   simRemoved: true,
   imeiMatches: true,
   noFinanceLock: true,
@@ -275,10 +273,14 @@ async function seedDemoCases(): Promise<void> {
   };
   const lock = (who: SessionUser, id: string, name: string, phone: string, idType = "aadhaar", last4 = "4821") =>
     cases.lockTradeIn(who, id, { customer: { name, phone, idType, idLast4: last4 }, checks: CHECKS });
+  // The customer reset the phone after accepting; the store saw the setup screen.
+  const cleared = (who: SessionUser, id: string) =>
+    cases.recordDataClear(who, id, { accountsSignedOut: true, resetDone: true, setupScreenSeen: true, noPreviousAccount: true });
 
   // Andheri — the full journey.
   const a1 = await make({ who: adv, name: "Meera Iyer", phone: "9820012345", model: "galaxy-s22", variant: "128GB", imei: "35278912345678", faults: ["screen_cracked", "battery_drain"], accessories: acc(true, false, true, "gt11m"), upgrade: ["Galaxy S25", "256GB"] });
   lock(adv, a1, "Meera Iyer", "9820012345");
+  cleared(adv, a1);
   backdate(a1, 6);
 
   const a2 = await make({ who: adv, name: "Vikram Joshi", phone: "9867012345", model: "galaxy-a54-5g", variant: "128GB", imei: "35412309876543", faults: ["battery_drain"], accessories: acc(true, true, true, "gt11m"), upgrade: ["Galaxy A56 5G", "8GB+256GB"] });
@@ -292,6 +294,8 @@ async function seedDemoCases(): Promise<void> {
   lock(adv, a4, "Ananya Kulkarni", "9769012345");
   const a5 = await make({ who: adv, name: "Rohan Pillai", phone: "9821012345", model: "galaxy-z-flip5", variant: "256GB", imei: "35123498765432", faults: ["display_lines"], accessories: acc(true, true, false, "gt11m"), upgrade: ["Galaxy Z Flip7", "256GB"] });
   lock(adv, a5, "Rohan Pillai", "9821012345", "driving_licence", "0042");
+  cleared(adv, a4);
+  cleared(adv, a5);
   backdate(a4, 12);
   backdate(a5, 11);
 

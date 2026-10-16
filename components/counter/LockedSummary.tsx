@@ -8,16 +8,20 @@ import { maskImei } from "@/lib/domain/imei";
 import { QuoteSource } from "./StepTradeIn";
 import { idTypeLabel, maskPhone, fmtWhen, faultLabels, conditionSummary, COVER_LABEL } from "./shared";
 import type { CaseOps, PickupInfo } from "./ops";
+import { DataClearCard } from "./DataClearCard";
 
 /** After the trade-in is taken: what was agreed, who checked it, and where the phone is now. */
 export function LockedSummary({
   ops,
   isManager,
+  isCounter,
   showCustomer,
   pickup,
 }: {
   ops: CaseOps;
   isManager: boolean;
+  /** Store staff — they record the customer's data clearing. */
+  isCounter: boolean;
   /** Store and programme staff see the customer's details; the partner sees the phone only. */
   showCustomer: boolean;
   pickup: PickupInfo | null;
@@ -33,6 +37,8 @@ export function LockedSummary({
     { label: "Case opened", at: view.createdAt, note: view.advisorName ? `by ${view.advisorName}` : undefined },
     { label: "Trade-in taken", at: view.lockedAt, note: view.checks ? `checks by ${view.checks.by}` : undefined },
   ];
+  if (view.dataClearState === "done" || view.dataClearState === "due")
+    timeline.push({ label: "Customer's data cleared", at: view.dataClear?.at ?? null, note: view.dataClear ? `seen by ${view.dataClear.by}` : undefined });
   if (view.status === "cancelled") timeline.push({ label: "Trade-in cancelled", at: view.closedAt });
   if (pickup) timeline.push({ label: "Collected by the partner", at: pickup.collectedAt, note: pickup.collectorName ? `by ${pickup.collectorName}` : undefined });
   if (cl) timeline.push({ label: `Partner's verdict: ${OUTCOME_LABEL[cl.outcome as ClearanceOutcome] ?? cl.outcome}`, at: cl.at, note: `by ${cl.by}` });
@@ -45,6 +51,7 @@ export function LockedSummary({
 
   return (
     <div className="space-y-5">
+      {view.dataClearState === "due" ? <DataClearCard ops={ops} canRecord={isCounter} /> : null}
       <section className="card">
         <header className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4">
           <h2 className="text-[17px] font-[720]">Trade-in</h2>
@@ -142,7 +149,7 @@ export function LockedSummary({
                     <span className="num font-semibold">{pickup.ref}</span> · {PICKUP_STATUS_LABEL[pickup.status as PickupStatus] ?? pickup.status}
                   </>
                 ) : view.status === "locked" ? (
-                  "Not on a pickup yet — waiting at the store"
+                  view.dataClearState === "due" ? "Not on a pickup yet — clear the customer's data first" : "Not on a pickup yet — waiting at the store"
                 ) : (
                   "—"
                 )}
@@ -223,6 +230,7 @@ export function LockedSummary({
         </div>
       </section>
 
+      {view.dataClearState === "done" || view.dataClearState === "attested" ? <DataClearCard ops={ops} canRecord={isCounter} /> : null}
       <DeclaredCard ops={ops} />
     </div>
   );

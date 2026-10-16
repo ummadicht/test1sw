@@ -145,6 +145,14 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
                 {v.checks.kym.reference ? ` · ${v.checks.kym.reference}` : ""}
               </div>
             ) : null}
+            <div className="text-ink-2">
+              Customer&apos;s data:{" "}
+              {v.dataClear
+                ? `factory reset by the customer, seen by ${v.dataClear.by} on ${fmtWhen(v.dataClear.at)} (not a certified erasure)`
+                : v.dataClearState === "attested"
+                  ? "factory reset ticked at hand-over (not a certified erasure)"
+                  : "not cleared yet"}
+            </div>
             <div className="text-ink-2">Faults: {v.faults.length ? faultLabels(v.faults) : "none reported"}</div>
             {cond.length ? <div className="text-ink-2">Declared condition: {cond.join(" · ")}</div> : null}
           </div>

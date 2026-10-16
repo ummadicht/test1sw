@@ -6,7 +6,7 @@ import { api } from "@/lib/client/api";
 import { ErrorText, Field, Money, SourceBadge } from "@/components/ui";
 import { inr } from "@/lib/domain/money";
 
-export type BookableDevice = { caseId: string; ref: string; label: string; value: number; days: number; sample: boolean };
+export type BookableDevice = { caseId: string; ref: string; label: string; value: number; days: number; sample: boolean; dataDue: boolean };
 
 /**
  * "Book a pickup": pick which waiting phones go on it (all by default), then
@@ -22,6 +22,7 @@ export function BookPickup({ devices, maxAgeDays, partnerName, primary }: { devi
   const chosen = devices.filter((d) => ticked.has(d.caseId));
   const total = chosen.reduce((t, d) => t + d.value, 0);
   const allOn = chosen.length === devices.length;
+  const chosenDue = chosen.filter((d) => d.dataDue).length;
 
   const toggle = (id: string) =>
     setTicked((s) => {
@@ -79,11 +80,21 @@ export function BookPickup({ devices, maxAgeDays, partnerName, primary }: { devi
               <span className="flex flex-col items-end gap-1 shrink-0">
                 <Money value={d.value} className="font-semibold" />
                 {d.sample ? <SourceBadge kind="sample" /> : null}
+                {d.dataDue ? <span className="pill pill-warn">Data not cleared</span> : null}
               </span>
             </label>
           );
         })}
       </fieldset>
+      {chosenDue ? (
+        <p className="banner banner-warn text-[14px]">
+          <span aria-hidden>⚠</span>
+          <span>
+            {chosenDue === 1 ? "One phone has" : `${chosenDue} phones have`} no data-clearing record. A phone that still asks for the customer&apos;s account
+            can&apos;t be set up by anyone else, and {partnerName} may reject it — call the customer back to reset it, or record it on the case if it was done.
+          </span>
+        </p>
+      ) : null}
       <Field label="Note for the collector (optional)" hint="e.g. Collect after 2 pm; ask for the service desk.">
         <input className="input" maxLength={300} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </Field>

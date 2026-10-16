@@ -152,7 +152,7 @@ export function CaseWorkspace({
         {/* Steps (or, once traded in, the summary) */}
         <div className="space-y-5 min-w-0 lg:col-start-1 lg:row-start-1">
           {lockedOrLater ? (
-            <LockedSummary ops={ops} isManager={isManager} showCustomer={showCustomer} pickup={pickup} />
+            <LockedSummary ops={ops} isManager={isManager} isCounter={isCounter} showCustomer={showCustomer} pickup={pickup} />
           ) : (
             <>
               <StepPhone ops={ops} brands={brands} initialModel={initialModel} />

@@ -307,6 +307,7 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
                         <td className="min-w-[170px]">
                           <div className="font-medium">{i.device ?? "—"}</div>
                           {i.customerName ? <div className="text-[12.5px] text-muted">{i.customerName}</div> : null}
+                          {i.dataClear === "due" ? <div className="text-[12.5px] text-warn font-semibold">Customer&apos;s data not cleared</div> : null}
                         </td>
                         <td className="text-right">
                           <div className="flex flex-col items-end gap-1">

@@ -312,6 +312,10 @@ const MIGRATIONS: string[] = [
   ALTER TABLE cases ADD COLUMN fault_sources TEXT NOT NULL DEFAULT '{}';
   ALTER TABLE cases ADD COLUMN camera_check TEXT;
   `,
+  /* 6 — data clearing after an accepted trade-in: the store's record that the
+         customer reset the phone (not a certified erasure). */ `
+  ALTER TABLE cases ADD COLUMN data_clear TEXT;
+  `,
 ];
 
 function migrate(conn: Database.Database): void {

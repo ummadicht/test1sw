@@ -23,6 +23,7 @@ import { decide, type Decision } from "../domain/decision";
 import { canHold } from "../domain/credit";
 import { readImei } from "../domain/imei";
 import { type CaseStatus, assertTransition, OPEN_TRADE_STATUSES, cancelEvents } from "../domain/lifecycle";
+import { DATA_CLEAR_LABEL, DATA_CLEAR_STATUSES, DATA_CLEAR_STEPS, dataClearState, missingDataClearSteps, type DataClearRecord, type DataClearState } from "../domain/dataClear";
 import {
   type CaseCameraCheck,
   type FaultSources,
@@ -49,8 +50,9 @@ export const KYM_LABEL: Record<KymStatus, string> = {
 
 export type Checks = {
   ownership: boolean;
-  factoryReset: boolean;
-  accountsRemoved: boolean;
+  /** Older cases only: the reset used to be ticked at hand-over. It is now its own step after acceptance (dataClear). */
+  factoryReset?: boolean;
+  accountsRemoved?: boolean;
   simRemoved: boolean;
   imeiMatches: boolean;
   noFinanceLock: boolean;
@@ -122,6 +124,7 @@ type CaseRow = {
   closed_at: string | null;
   fault_sources: string;
   camera_check: string | null;
+  data_clear: string | null;
 };
 
 export type Clearance = { outcome: string; accepted: number; shortfall: number; reason: string | null; by: string; at: string };
@@ -186,6 +189,9 @@ export type CaseView = {
   creditCheck: ReturnType<typeof canHold> | null;
   /** Why the trade-in cannot be locked yet (empty = it can). */
   lockBlockers: string[];
+  /** The customer's factory reset after acceptance, as the store saw it. */
+  dataClear: DataClearRecord | null;
+  dataClearState: DataClearState;
 };
 
 /* ─────────────────────────── reads ─────────────────────────── */
@@ -292,7 +298,11 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
     partner,
     creditCheck: null,
     lockBlockers: [],
+    dataClear: parseJson<DataClearRecord | null>(c.data_clear, null),
+    dataClearState: "not_applicable",
   };
+  const legacyChecks = parseJson<Checks | null>(c.checks, null);
+  view.dataClearState = dataClearState(c.status, view.dataClear, legacyChecks?.factoryReset === true);
   if (c.status === "quoted") {
     view.lockBlockers = lockBlockers(view, !!org?.demo);
     if (view.quoteBlocked) view.lockBlockers.unshift(view.quoteBlocked);
@@ -344,6 +354,7 @@ export type CaseListItem = {
   updatedAt: string;
   lockedAt: string | null;
   demo: boolean;
+  dataClear: DataClearState;
 };
 
 export function listCases(
@@ -411,8 +422,20 @@ export function listCases(
       updatedAt: r.updated_at,
       lockedAt: r.locked_at,
       demo: !!r.demo,
+      dataClear: dataClearState(r.status, parseJson<DataClearRecord | null>(r.data_clear, null), parseJson<Checks | null>(r.checks, null)?.factoryReset === true),
     };
   });
+}
+
+/** Accepted phones still at this store whose data clearing is not recorded. */
+export function dataClearDueIds(storeId: string): Set<string> {
+  const rows = db()
+    .prepare(
+      `SELECT id FROM cases WHERE store_id = ? AND status IN (${DATA_CLEAR_STATUSES.map(() => "?").join(",")})
+         AND data_clear IS NULL AND COALESCE(json_extract(checks, '$.factoryReset'), 0) != 1`
+    )
+    .all(storeId, ...DATA_CLEAR_STATUSES) as { id: string }[];
+  return new Set(rows.map((r) => r.id));
 }
 
 /* ─────────────────────────── writes ─────────────────────────── */
@@ -922,8 +945,8 @@ export type LockInput = {
   customer: { name: string; phone: string; idType: string; idLast4: string };
   checks: {
     ownership: boolean;
-    factoryReset: boolean;
-    accountsRemoved: boolean;
+    factoryReset?: boolean;
+    accountsRemoved?: boolean;
     simRemoved: boolean;
     imeiMatches: boolean;
     noFinanceLock: boolean;
@@ -950,8 +973,6 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
   const ch = input?.checks ?? ({} as LockInput["checks"]);
   const missing = [
     !ch.ownership && "customer confirms they own the phone",
-    !ch.factoryReset && "phone is factory reset",
-    !ch.accountsRemoved && "Samsung / Google accounts are signed out",
     !ch.simRemoved && "SIM and memory card are removed",
     !ch.imeiMatches && "the IMEI on the phone matches the one recorded",
     !ch.noFinanceLock && "the phone is not on an EMI / finance plan or a company lock",
@@ -998,8 +1019,6 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
     const customer: Customer = { name: name.slice(0, 80), phone, idType, idLast4 };
     const checks: Checks = {
       ownership: true,
-      factoryReset: true,
-      accountsRemoved: true,
       simRemoved: true,
       imeiMatches: true,
       noFinanceLock: true,
@@ -1035,6 +1054,36 @@ export function cancelTradeIn(u: SessionUser, id: string, reason: string): CaseV
     if (upd.changes !== 1) throw new HttpError(409, "This case changed while you were working on it — reload.");
     postEvents(store.id, cancelEvents(id, c.trade_value!, now), u.id);
     audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.cancel", entity: "case", entityId: id, detail: { reason: reason.trim() } });
+    return getCase(u, id);
+  });
+}
+
+/**
+ * Record that the customer cleared the phone after accepting the trade-in:
+ * signed out of their accounts, factory-reset it from Settings, and it came
+ * back to a setup screen that does not ask for their account. Store staff
+ * only, while the phone is at the store. Recorded once.
+ */
+export function recordDataClear(u: SessionUser, id: string, input: Record<string, unknown>): CaseView {
+  requireCounter(u);
+  const missing = missingDataClearSteps(input);
+  if (missing.length) throw new HttpError(400, `Confirm each step first: ${missing.join("; ")}.`);
+  const note = typeof input.note === "string" ? input.note.trim().slice(0, 200) || null : null;
+  return tx(() => {
+    const { c, store } = caseInScope(u, id);
+    if (!DATA_CLEAR_STATUSES.includes(c.status)) throw new HttpError(409, "Data clearing is recorded after the customer accepts the trade-in, while the phone is still at the store.");
+    if (c.data_clear) throw new HttpError(409, "Data clearing is already recorded for this phone.");
+    const now = nowIso();
+    const record: DataClearRecord = {
+      label: DATA_CLEAR_LABEL,
+      steps: Object.fromEntries(DATA_CLEAR_STEPS.map(([k]) => [k, true])) as DataClearRecord["steps"],
+      note,
+      by: u.name,
+      at: now,
+    };
+    const upd = db().prepare(`UPDATE cases SET data_clear = ?, updated_at = ? WHERE id = ? AND data_clear IS NULL`).run(JSON.stringify(record), now, id);
+    if (upd.changes !== 1) throw new HttpError(409, "This case changed while you were working on it — reload.");
+    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.data_clear", entity: "case", entityId: id, detail: { note } });
     return getCase(u, id);
   });
 }

@@ -8,8 +8,6 @@ import type { CaseOps } from "./ops";
 
 const CHECKS = [
   ["ownership", "The customer confirms they own this phone"],
-  ["factoryReset", "Factory reset done"],
-  ["accountsRemoved", "Samsung and Google accounts signed out"],
   ["simRemoved", "SIM and memory card removed"],
   ["imeiMatches", "IMEI on the phone (*#06#) matches the one recorded"],
   ["noFinanceLock", "Not on an EMI / finance plan, and no lender or company lock on it"],
@@ -34,8 +32,6 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
   const [idLast4, setIdLast4] = useState("");
   const [checks, setChecks] = useState<Record<CheckKey, boolean>>({
     ownership: false,
-    factoryReset: false,
-    accountsRemoved: false,
     simRemoved: false,
     imeiMatches: false,
     noFinanceLock: false,
@@ -92,7 +88,7 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
       <form onSubmit={submit} className="space-y-5">
         <p className="text-[14px] text-ink-2">
           Only when the customer has chosen to upgrade. The store keeps the old phone and its trade-in value is held on the store&apos;s credit line
-          until the partner collects it.
+          until the partner collects it. Next, the customer clears their data from the phone&apos;s Settings — the next screen walks you through it.
         </p>
 
         <div className="grid sm:grid-cols-2 gap-3">
