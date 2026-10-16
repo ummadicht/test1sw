@@ -143,7 +143,8 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
             </div>
           </details>
           <p className="text-white/60 text-[14px]">
-            Your code: <span className="font-mono text-[22px] tracking-[0.2em] font-bold text-white align-middle">{s.code}</span>
+            Your code <span className="font-mono text-[22px] tracking-[0.2em] font-bold text-white align-middle mx-1">{s.code}</span> — the same as on the
+            advisor&apos;s screen.
           </p>
         </div>
       ) : (
