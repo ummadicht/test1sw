@@ -634,6 +634,76 @@ export function cameraOverrideProblems(answers: ConditionAnswers | null, faults:
   return out;
 }
 
+/* ─────────────────────────── what the case keeps ─────────────────────────── */
+
+export type RecordedOverride = { by: string; userId: string; reason: string; at: string; items: string[] };
+
+/**
+ * The camera's word on a case (cases.camera_check), written at Apply. Four
+ * layers stay separate (§3.5): what the customer declared and what the phone
+ * tested live on the test session; this is what the camera saw; the case's
+ * faults and condition are what the advisor finally recorded — no better than
+ * this, unless an override with a name and a reason says why.
+ */
+export type CaseCameraCheck = {
+  testSessionId: string | null;
+  gradeiqId: string | null;
+  state: "disabled" | "pending" | "ready" | "failed";
+  at: string;
+  by: string | null;
+  /** Shown, never priced. null = not camera-graded. */
+  grade: string | null;
+  status: Finality["status"];
+  final: boolean;
+  gradeRange: { best: string; worst: string } | null;
+  conclusive: boolean | null;
+  needsHumanReview: boolean;
+  floor: CameraFloor;
+  faults: { id: FaultId; because: string; photoIndex: number | null; confidence: number | null }[];
+  suggested: { id: FaultId; because: string; photoIndex: number | null; confidence: number | null }[];
+  flags: string[];
+  lcd: LcdCheck;
+  lcdOverride: CameraOverrideInfo;
+  identity: { verdict: IdentityVerdict; reasons: string[] };
+  /** A store manager accepted the phone despite an identity mismatch. */
+  identityOverride: RecordedOverride | null;
+  /** Advisor answers recorded better than the camera confirmed. */
+  overrides: RecordedOverride[];
+  devicefax: boolean;
+};
+
+export function blankCameraCheck(at: string): CaseCameraCheck {
+  return {
+    testSessionId: null,
+    gradeiqId: null,
+    state: "disabled",
+    at,
+    by: null,
+    grade: null,
+    status: "none",
+    final: false,
+    gradeRange: null,
+    conclusive: null,
+    needsHumanReview: false,
+    floor: { ...NO_FLOOR },
+    faults: [],
+    suggested: [],
+    flags: [],
+    lcd: { cameraChecked: false, verdict: null, reason: null },
+    lcdOverride: null,
+    identity: { verdict: "unverified", reasons: [] },
+    identityOverride: null,
+    overrides: [],
+    devicefax: false,
+  };
+}
+
+/** The quote is blocked while the camera says this is not the phone on the case and no manager has overridden it. */
+export function identityBlock(c: Pick<CaseCameraCheck, "identity" | "identityOverride"> | null): string | null {
+  if (!c || c.identity.verdict !== "mismatch" || c.identityOverride) return null;
+  return `The camera says this may not be the phone on the case${c.identity.reasons[0] ? ` (${c.identity.reasons[0]})` : ""}. It can't be priced until a store manager checks it and records why it is the right phone.`;
+}
+
 /* ─────────────────────────── where each fault came from ─────────────────────────── */
 
 export type FaultSource = "advisor" | "tested" | "declared" | "camera_ai";

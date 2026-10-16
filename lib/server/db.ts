@@ -289,6 +289,29 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX store_invites_store ON store_invites (store_id);
   `,
+  /* 5 — GradeIQ underneath SwapUp Check (docs/GRADEIQ-INTEGRATION.md): one
+         GradeIQ session per test session, what the store camera saw, and
+         where every fault on a case came from. Additive only. */ `
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_id TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_state TEXT NOT NULL DEFAULT 'disabled';
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_error TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_snapshot TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_synced_at TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_forwarded_at TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_attempts INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_orphans TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_screen TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_screen_at TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_cosmetic_done_at TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_device_hash TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_forward_hash TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_sync_error TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_override TEXT;
+  ALTER TABLE test_sessions ADD COLUMN gradeiq_devicefax TEXT;
+  CREATE INDEX test_sessions_gradeiq ON test_sessions (gradeiq_id);
+  ALTER TABLE cases ADD COLUMN fault_sources TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE cases ADD COLUMN camera_check TEXT;
+  `,
 ];
 
 function migrate(conn: Database.Database): void {

@@ -23,6 +23,16 @@ import { decide, type Decision } from "../domain/decision";
 import { canHold } from "../domain/credit";
 import { readImei } from "../domain/imei";
 import { type CaseStatus, assertTransition, OPEN_TRADE_STATUSES, cancelEvents } from "../domain/lifecycle";
+import {
+  type CaseCameraCheck,
+  type FaultSources,
+  type RecordedOverride,
+  applyCameraFloor,
+  blankCameraCheck,
+  cameraOverrideProblems,
+  identityBlock,
+  reconcileFaultSources,
+} from "../domain/gradeiqMap";
 
 /* ─────────────────────────── types ─────────────────────────── */
 
@@ -110,6 +120,8 @@ type CaseRow = {
   updated_at: string;
   locked_at: string | null;
   closed_at: string | null;
+  fault_sources: string;
+  camera_check: string | null;
 };
 
 export type Clearance = { outcome: string; accepted: number; shortfall: number; reason: string | null; by: string; at: string };
@@ -133,9 +145,15 @@ export type CaseView = {
   imei2Check: "valid" | "invalid" | null;
   closedReason: string | null;
   faults: FaultId[];
+  /** Where each fault came from: the phone's own test, the customer, the store camera (GradeIQ), the advisor. */
+  faultSources: FaultSources;
   coverage: Coverage;
   condition: ConditionAnswers | null;
   conditionProblems: string[];
+  /** What the store camera saw, written when a SwapUp Check session is applied. null = never camera-checked. */
+  camera: CaseCameraCheck | null;
+  /** Why there is no trade-in quote although the phone is described (the camera's identity check). */
+  quoteBlocked: string | null;
   manualRepair: ManualQuote | null;
   partnerManual: PartnerManual | null;
   /** The centre does not repair this brand — only an outside quote can be compared. */
@@ -202,6 +220,7 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
   const quote = parseJson<PartnerQuote | null>(c.quote, null);
   const quoteExpired = !!quote?.validUntil && Date.parse(quote.validUntil) < Date.now();
+  const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   const org = getOrg(c.org_id);
   const partner = org?.partner_id ? partnerMode(org.partner_id) : null;
   const view: CaseView = {
@@ -233,9 +252,12 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
     imei2Check: (c.imei2_check as "valid" | "invalid" | null) ?? null,
     closedReason: c.closed_reason,
     faults,
+    faultSources: reconcileFaultSources(parseJson<FaultSources>(c.fault_sources, {}), faults),
     coverage: c.coverage,
     condition,
     conditionProblems: condition ? conditionFloor(condition, faults) : [],
+    camera,
+    quoteBlocked: identityBlock(camera),
     manualRepair: parseJson<ManualQuote | null>(c.manual_repair, null),
     partnerManual: parseJson<PartnerManual | null>(c.partner_manual, null),
     repairNotServiced: tm && org?.target_brand && tm.brand !== org.target_brand ? `This centre repairs ${org.target_brand} phones only. Enter the customer's own repair quote to compare.` : null,
@@ -264,6 +286,7 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
   };
   if (c.status === "quoted") {
     view.lockBlockers = lockBlockers(view, !!org?.demo);
+    if (view.quoteBlocked) view.lockBlockers.unshift(view.quoteBlocked);
     // A store that registered itself has no credit line until the programme approves it.
     if (store.status === "pending")
       view.lockBlockers.unshift(`This store is waiting for approval from ${org?.name ?? "the programme"}. Phone tests and quotes work; taking trade-ins starts once it is approved and given a credit line.`);
@@ -413,6 +436,32 @@ export function createCase(u: SessionUser, input: { customerName?: string; custo
 
 const digitsOnly = (s?: string | null) => (s || "").replace(/\D/g, "");
 
+/**
+ * The store camera's word on a case and where each fault came from — written
+ * by Apply on a SwapUp Check session, just before the case is updated and
+ * re-priced (so an identity mismatch already blocks that re-price).
+ */
+export function recordCameraCheck(caseId: string, check: CaseCameraCheck, sources: FaultSources): void {
+  db()
+    .prepare(`UPDATE cases SET camera_check = ?, fault_sources = ?, updated_at = ? WHERE id = ? AND status IN ('draft','quoted')`)
+    .run(JSON.stringify(check), JSON.stringify(sources), nowIso(), caseId);
+}
+
+/** Staff unlocked the camera without the customer's phone echoing: the case is marked "LCD not camera-checked" now, not only at Apply. */
+export function markLcdOverride(caseId: string, info: { by: string; userId: string; reason: string; at: string; testSessionId: string }): void {
+  const row0 = db().prepare(`SELECT camera_check FROM cases WHERE id = ?`).get(caseId) as { camera_check: string | null } | undefined;
+  if (!row0) return;
+  const prev = parseJson<CaseCameraCheck | null>(row0.camera_check, null) ?? { ...blankCameraCheck(info.at), testSessionId: info.testSessionId };
+  const flag = `LCD not camera-checked — the camera was unlocked by ${info.by} before the customer's phone showed the patterns: ${info.reason}`;
+  const next: CaseCameraCheck = {
+    ...prev,
+    lcdOverride: { by: info.by, reason: info.reason, at: info.at },
+    lcd: { ...prev.lcd, cameraChecked: false, reason: flag },
+    flags: [...prev.flags.filter((f) => !f.startsWith("LCD not camera-checked")), flag],
+  };
+  db().prepare(`UPDATE cases SET camera_check = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(next), nowIso(), caseId);
+}
+
 const SCREENS = new Set<string>(SCREEN_ORDER);
 const BODIES = new Set<string>(BODY_ORDER);
 const ISSUES = new Set<string>(Object.keys(ISSUE_LABEL));
@@ -451,6 +500,13 @@ export type CasePatch = {
   /** The partner's quote read off its own app (amount + reference code). */
   partnerQuote?: { amount: number; reference: string; validDays?: number; repairedAmount?: number | null } | null;
   upgradeDeviceId?: string | null;
+  /**
+   * Record the phone as BETTER than the store camera confirmed (remove a fault
+   * it found, or a better screen/body answer): a reason is required and the
+   * advisor's name is stored with it. `identity: true` — a store manager
+   * accepts the phone despite the camera's identity mismatch.
+   */
+  cameraOverride?: { reason?: string; identity?: boolean } | null;
 };
 
 const EDITABLE: CaseStatus[] = ["draft", "quoted"];
@@ -523,11 +579,41 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch): 
     sets.condition = patch.condition === null ? null : JSON.stringify(cleanCondition(patch.condition));
     pricingChanged = true;
   }
+  const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   if (patch.conditionFromFaults) {
     const prev = parseJson<ConditionAnswers | null>((sets.condition as string | undefined) ?? c.condition, null);
     const base = prev ? { accessories: prev.accessories, age: prev.age } : { accessories: { charger: true, box: false, bill: false }, age: "gt11m" as const };
-    sets.condition = JSON.stringify(conditionFromFaults(faults, base));
+    // What the camera confirmed is part of what is known about the phone.
+    const filled = conditionFromFaults(faults, base);
+    sets.condition = JSON.stringify(camera ? applyCameraFloor(filled, camera.floor) : filled);
     pricingChanged = true;
+  }
+  if (patch.faults !== undefined) sets.fault_sources = JSON.stringify(reconcileFaultSources(parseJson<FaultSources>(c.fault_sources, {}), faults));
+  // The camera only ever makes the phone worse. Recording it better than the
+  // camera confirmed needs a reason, kept with the advisor's name.
+  if (camera && (patch.faults !== undefined || patch.condition !== undefined || patch.conditionFromFaults || patch.cameraOverride)) {
+    const answers = parseJson<ConditionAnswers | null>((sets.condition as string | undefined) ?? c.condition, null);
+    const covered = new Set(camera.overrides.flatMap((o) => o.items));
+    const problems = cameraOverrideProblems(answers, faults, camera).filter((p) => !covered.has(p.key));
+    const reason = String(patch.cameraOverride?.reason ?? "").trim().slice(0, 300);
+    const next: CaseCameraCheck = { ...camera, overrides: [...camera.overrides] };
+    let changed = false;
+    if (problems.length) {
+      if (reason.length < 8) throw new HttpError(409, `${problems[0].why} Give the reason as an override, or keep the camera's answer.`);
+      next.overrides.push({ by: u.name, userId: u.id, reason, at: nowIso(), items: problems.map((p) => p.key) });
+      changed = true;
+    }
+    if (patch.cameraOverride?.identity && identityBlock(camera)) {
+      if (u.role !== "store_manager") throw new HttpError(403, "Only the store manager can accept a phone the camera says is not the one on the case.");
+      if (reason.length < 8) throw new HttpError(400, "Say how you checked that this is the right phone.");
+      next.identityOverride = { by: u.name, userId: u.id, reason, at: nowIso(), items: ["identity"] } satisfies RecordedOverride;
+      changed = true;
+      pricingChanged = true;
+    }
+    if (changed) {
+      sets.camera_check = JSON.stringify(next);
+      audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.camera_override", entity: "case", entityId: id, detail: { reason, items: problems.map((p) => p.key), identity: !!next.identityOverride && !camera.identityOverride } });
+    }
   }
   if (patch.customer !== undefined) {
     const prev = parseJson<Customer | null>(c.customer, null);
@@ -654,7 +740,9 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
   const expired = !!quote?.validUntil && Date.parse(quote.validUntil) < Date.now();
   const partnerId = orgPartnerId(org.id);
   const partnerName = getOrg(partnerId)?.name ?? "Partner";
-  if (!tm || !c.variant || !condition || !consistent) {
+  // The camera says this is not the phone on the case: no price until a store manager resolves it.
+  const blocked = identityBlock(parseJson<CaseCameraCheck | null>(c.camera_check, null));
+  if (!tm || !c.variant || !condition || !consistent || blocked) {
     quote = null;
     repairedQuote = null;
   } else if (pm) {

@@ -2,7 +2,26 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import { db, tx, nowIso, newId, parseJson, audit } from "./db";
 import { HttpError, type SessionUser } from "./auth";
 import { getStore, getOrg, canSeeStore, ownStore, storeInScope, type StoreRow } from "./scope";
-import { createCase, getCase, updateCase } from "./cases";
+import { createCase, getCase, updateCase, recordCameraCheck, markLcdOverride } from "./cases";
+import {
+  initialGradeiqState,
+  kickCreate,
+  retryCreate,
+  abandon,
+  scheduleSync,
+  refreshGrading,
+  gradingView,
+  deviceScreen,
+  deviceScreenShown,
+  DeviceScreenUnavailable,
+  recordOverride,
+  evidenceForApply,
+  type GiqRow,
+  type GradingView,
+  type DeviceScreen,
+} from "./gradeiqBridge";
+import { GradeiqError } from "./gradeiq";
+import { applyCameraFloor, addFaultSources, blankCameraCheck, type CaseCameraCheck } from "../domain/gradeiqMap";
 import {
   DEFAULT_PLAN,
   CODE_ALPHABET,
@@ -10,6 +29,7 @@ import {
   readDevice,
   readResults,
   mergeResults,
+  mergeCondition,
   readDeclared,
   summarise,
   progressOf,
@@ -42,6 +62,12 @@ import {
  *   • GET /j/<code> marks "opened" but never binds or consumes anything, so a
  *     link preview or a curious tap cannot steal the session;
  *   • staff reads are scoped like cases (out of scope → 404).
+ *
+ * GradeIQ is the grading engine underneath (lib/server/gradeiqBridge.ts): every
+ * session gets a GradeIQ session in the background; the customer's phone shows
+ * the screen patterns through /api/device/screen while the STORE device
+ * photographs it with GradeIQ's camera page. The GradeIQ id and the camera URL
+ * reach staff only — never the customer's phone, the QR or a public page.
  */
 
 export type SessionStatus = "waiting" | "opened" | "joined" | "testing" | "complete" | "applied" | "expired" | "cancelled";
@@ -50,7 +76,7 @@ const UNJOINED_TTL_MS = 30 * 60_000;
 const JOINED_TTL_MS = 2 * 60 * 60_000;
 const OPEN_STATUSES: SessionStatus[] = ["waiting", "opened", "joined", "testing", "complete"];
 
-type Row = {
+type Row = GiqRow & {
   id: string;
   code: string;
   case_id: string;
@@ -92,6 +118,8 @@ export type TestSessionView = {
   declared: Declared | null;
   progress: { done: number; total: number };
   summary: DiagnosticSummary | null;
+  /** Camera grading (GradeIQ). Staff responses only — null anywhere the customer's phone could read it. */
+  grading: GradingView | null;
 };
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -139,7 +167,8 @@ function rowById(id: string): Row | null {
   return r ? expireIfDue(r) : null;
 }
 
-function view(r: Row): TestSessionView {
+/** `staff`: include the grading block (camera URL, GradeIQ result). Never for a device response. */
+function view(r: Row, opts: { staff?: boolean } = {}): TestSessionView {
   const plan = parseJson<PlanItem[]>(r.plan, [...DEFAULT_PLAN]);
   const results = parseJson<TestResults>(r.results, {});
   const device = parseJson<DeviceReport | null>(r.device, null);
@@ -166,6 +195,7 @@ function view(r: Row): TestSessionView {
     declared,
     progress: progressOf(plan, results),
     summary: hasAnything ? summarise(plan, results, declared, device, tradeModelRefs()) : null,
+    grading: opts.staff ? gradingView(r) : null,
   };
 }
 
@@ -210,12 +240,15 @@ export function createTestSession(u: SessionUser, input: { caseId?: string | nul
   const code = freshCode();
   db()
     .prepare(
-      `INSERT INTO test_sessions (id, code, case_id, store_id, org_id, created_by, status, plan, results, created_at, expires_at, updated_at)
-       VALUES (?,?,?,?,?,?,'waiting',?,'{}',?,?,?)`
+      `INSERT INTO test_sessions (id, code, case_id, store_id, org_id, created_by, status, plan, results, created_at, expires_at, updated_at, gradeiq_state)
+       VALUES (?,?,?,?,?,?,'waiting',?,'{}',?,?,?,?)`
     )
-    .run(id, code, caseId, store.id, store.org_id, u.id, JSON.stringify(DEFAULT_PLAN), now, new Date(Date.now() + UNJOINED_TTL_MS).toISOString(), now);
+    .run(id, code, caseId, store.id, store.org_id, u.id, JSON.stringify(DEFAULT_PLAN), now, new Date(Date.now() + UNJOINED_TTL_MS).toISOString(), now, initialGradeiqState());
   audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "test_session.create", entity: "test_session", entityId: id, detail: { caseId } });
-  return withLinks(view(rowById(id)!), store, origin);
+  // The GradeIQ session is created in the background once this commits — a
+  // slow GradeIQ never holds up the counter.
+  kickCreate(id);
+  return withLinks(view(rowById(id)!, { staff: true }), store, origin);
 }
 
 function withLinks(session: TestSessionView, store: StoreRow, origin?: string | null) {
@@ -223,9 +256,11 @@ function withLinks(session: TestSessionView, store: StoreRow, origin?: string | 
   return { session, ...linksFor(session.code, publicBase(origin)), wifi: wifi ? { ssid: wifi.ssid, qr: wifiQr(wifi) } : null };
 }
 
-export function getTestSession(u: SessionUser, id: string, origin?: string | null) {
+/** The staff read the store app polls. Pulls what GradeIQ has (throttled) before answering. */
+export async function getTestSession(u: SessionUser, id: string, origin?: string | null) {
   const { r, store } = inScope(u, id);
-  return withLinks(view(r), store, origin);
+  await refreshGrading(r.id);
+  return withLinks(view(rowById(r.id) ?? r, { staff: true }), store, origin);
 }
 
 export function listOpenSessions(u: SessionUser): TestSessionView[] {
@@ -234,7 +269,10 @@ export function listOpenSessions(u: SessionUser): TestSessionView[] {
   const rows = db()
     .prepare(`SELECT * FROM test_sessions WHERE store_id = ? AND status IN ('waiting','opened','joined','testing','complete') ORDER BY created_at DESC LIMIT 50`)
     .all(store.id) as Row[];
-  return rows.map(expireIfDue).filter((r) => r.status !== "expired").map(view);
+  return rows
+    .map(expireIfDue)
+    .filter((r) => r.status !== "expired")
+    .map((r) => view(r, { staff: true }));
 }
 
 export async function applyTestSession(u: SessionUser, id: string) {
@@ -248,22 +286,72 @@ export async function applyTestSession(u: SessionUser, id: string) {
   const c = getCase(u, r.case_id);
   if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "The case is past the counter, so the results can't change it any more.");
 
+  // What the store camera saw (GradeIQ) — one last pull and the DeviceFax
+  // snapshot, outside any transaction. Only a FINAL grade's confirmed damage
+  // counts; anything weaker stays a flag for the advisor.
+  const cam = await evidenceForApply(r.id);
+  const now = nowIso();
+
   const patch: Parameters<typeof updateCase>[2] = {};
   if (s.model.modelId) {
     patch.modelId = s.model.modelId;
     if (s.model.variant) patch.variant = s.model.variant;
   }
-  patch.faults = unionFaults(c.faults, s.faults.map((f) => f.id));
-  patch.conditionFromFaults = true;
+  const testedFaults = s.faults.map((f) => f.id);
+  const cameraFaults = cam.mapping.faults.map((f) => f.id);
+  patch.faults = unionFaults(unionFaults(c.faults, testedFaults), cameraFaults);
+  // Never better than what the advisor recorded, the faults allow, or the camera confirmed.
+  patch.condition = applyCameraFloor(mergeCondition(c.condition, patch.faults as typeof c.faults), cam.mapping.floor);
   if (v.declared?.imei && !c.imei) patch.imei = v.declared.imei;
+
+  // Where each fault came from, and the camera's word on the case — written
+  // BEFORE updateCase so its re-price already knows about an identity mismatch.
+  const sources = addFaultSources(c.faultSources, [
+    ...s.faults.flatMap((f) => f.sources.map((source) => ({ id: f.id, source }))),
+    ...cam.mapping.faults.map((f) => ({ id: f.id, source: "camera_ai" as const })),
+  ]);
+  const prevCheck = c.camera;
+  const check: CaseCameraCheck = {
+    ...blankCameraCheck(now),
+    testSessionId: r.id,
+    gradeiqId: cam.gradeiqId,
+    state: cam.state,
+    by: u.name,
+    grade: cam.snap?.cosmeticGrade || null,
+    status: cam.fin.status,
+    final: cam.fin.final,
+    gradeRange: cam.snap?.gradeRange ?? null,
+    conclusive: cam.snap?.conclusive ?? null,
+    needsHumanReview: cam.snap?.needsHumanReview ?? false,
+    floor: cam.mapping.floor,
+    faults: cam.mapping.faults.map((f) => ({ id: f.id, because: f.because, photoIndex: f.photoIndex, confidence: f.confidence })),
+    suggested: cam.mapping.suggested.map((f) => ({ id: f.id, because: f.because, photoIndex: f.photoIndex, confidence: f.confidence })),
+    flags: [...(cam.state !== "ready" ? ["Not camera-graded — the condition is the advisor's."] : cam.fin.final ? [] : cam.fin.reasons), ...cam.mapping.flags, ...cam.notes],
+    lcd: cam.mapping.lcd,
+    lcdOverride: cam.override,
+    identity: cam.mapping.identity,
+    // A manager's identity decision and earlier overrides survive a re-test only if the camera says the same thing again.
+    identityOverride: prevCheck?.identity.verdict === "mismatch" && cam.mapping.identity.verdict === "mismatch" ? prevCheck.identityOverride : null,
+    overrides: prevCheck?.overrides ?? [],
+    devicefax: cam.devicefax,
+  };
+  recordCameraCheck(r.case_id, check, sources);
+
   // updateCase re-prices (partner quote, repair estimate, decision) outside any transaction.
   await updateCase(u, r.case_id, patch);
-  const now = nowIso();
   // The ticket stays valid for STATUS reads only (byTicket refuses writes once
   // applied), so the customer's phone can show "the store has your results".
   db().prepare(`UPDATE test_sessions SET status = 'applied', applied_at = ?, updated_at = ? WHERE id = ?`).run(now, now, r.id);
-  audit({ userId: u.id, orgId: r.org_id, storeId: r.store_id, action: "test_session.apply", entity: "test_session", entityId: r.id, detail: { faults: patch.faults, model: s.model } });
-  return { session: view(rowById(r.id)!), caseId: r.case_id };
+  audit({
+    userId: u.id,
+    orgId: r.org_id,
+    storeId: r.store_id,
+    action: "test_session.apply",
+    entity: "test_session",
+    entityId: r.id,
+    detail: { faults: patch.faults, model: s.model, camera: { state: cam.state, grade: check.grade, final: check.final, faults: cameraFaults, identity: check.identity.verdict, lcdChecked: check.lcd.cameraChecked } },
+  });
+  return { session: view(rowById(r.id)!, { staff: true }), caseId: r.case_id };
 }
 
 export function cancelTestSession(u: SessionUser, id: string) {
@@ -271,8 +359,9 @@ export function cancelTestSession(u: SessionUser, id: string) {
   const { r, store } = inScope(u, id);
   if (["applied", "cancelled"].includes(r.status)) throw new HttpError(409, "This session is already closed.");
   db().prepare(`UPDATE test_sessions SET status = 'cancelled', ticket_hash = NULL, updated_at = ? WHERE id = ?`).run(nowIso(), r.id);
+  abandon(r.id, "test session cancelled");
   audit({ userId: u.id, orgId: r.org_id, storeId: r.store_id, action: "test_session.cancel", entity: "test_session", entityId: r.id });
-  return withLinks(view(rowById(r.id)!), store);
+  return withLinks(view(rowById(r.id)!, { staff: true }), store);
 }
 
 /** A new code for the SAME case — the old one stops working. Results so far are kept only if joined. */
@@ -280,10 +369,50 @@ export function reissueTestSession(u: SessionUser, id: string, origin?: string |
   requireCounter(u);
   const { r } = inScope(u, id);
   if (r.status === "applied") throw new HttpError(409, "These results are already on the case.");
-  return tx(() => {
+  const out = tx(() => {
     db().prepare(`UPDATE test_sessions SET status = 'cancelled', ticket_hash = NULL, updated_at = ? WHERE id = ? AND status != 'applied'`).run(nowIso(), r.id);
     return createTestSession(u, { caseId: r.case_id }, origin);
   });
+  // A new code is a new GradeIQ session: the photos belong to the phone that joins it.
+  abandon(r.id, "test session reissued");
+  return out;
+}
+
+/** Staff pressed Retry after "Camera grading unavailable". */
+export function retryGrading(u: SessionUser, id: string) {
+  requireCounter(u);
+  const { r, store } = inScope(u, id);
+  if (!["waiting", "opened", "joined", "testing", "complete"].includes(r.status)) throw new HttpError(409, "This session is closed.");
+  if (r.gradeiq_id) throw new HttpError(409, "Camera grading is already set up for this session.");
+  try {
+    retryCreate(r.id);
+  } catch (e) {
+    if (e instanceof GradeiqError) throw new HttpError(409, e.message);
+    throw e;
+  }
+  audit({ userId: u.id, orgId: r.org_id, storeId: r.store_id, action: "test_session.gradeiq_retry", entity: "test_session", entityId: r.id });
+  return withLinks(view(rowById(r.id)!, { staff: true }), store);
+}
+
+/**
+ * Unlock the camera page without the customer's phone echoing patterns (it
+ * can't run SwapUp Check, or SwapUp can't read GradeIQ's pairing state). Fail
+ * closed: this needs a name and a reason, and the case is marked "LCD not
+ * camera-checked" — the photos still grade the glass, but the screen sweep is
+ * not a closed loop any more.
+ */
+export async function cameraOverride(u: SessionUser, id: string, raw: { reason?: unknown }, origin?: string | null) {
+  requireCounter(u);
+  const { r, store } = inScope(u, id);
+  if (!["joined", "testing", "complete"].includes(r.status)) throw new HttpError(409, "The customer's phone has to join the session first.");
+  if (r.gradeiq_state !== "ready" || !r.gradeiq_id) throw new HttpError(409, "Camera grading is not available for this session.");
+  const reason = typeof raw?.reason === "string" ? raw.reason.trim().slice(0, 300) : "";
+  if (reason.length < 8) throw new HttpError(400, "Say why the camera has to start without the customer's phone showing the patterns.");
+  const info = { by: u.name, reason, at: nowIso() };
+  recordOverride(r.id, info);
+  markLcdOverride(r.case_id, { ...info, userId: u.id, testSessionId: r.id });
+  audit({ userId: u.id, orgId: r.org_id, storeId: r.store_id, action: "test_session.camera_override", entity: "test_session", entityId: r.id, detail: { reason } });
+  return getTestSession(u, r.id, origin);
 }
 
 /* ─────────────────────────── store Wi-Fi ─────────────────────────── */
@@ -366,6 +495,13 @@ export function joinByCode(input: { code?: unknown; device?: unknown; appVersion
 }
 
 function joinByCodeChecked(input: { code?: unknown; device?: unknown; appVersion?: unknown; installId?: unknown }, ip: string, origin?: string | null) {
+  const out = joinTx(input, ip, origin);
+  // Forward the device report to GradeIQ (call 2) once the join has committed.
+  scheduleSync(out.session.id);
+  return out;
+}
+
+function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown; installId?: unknown }, ip: string, origin?: string | null) {
   const code = normaliseCode(input.code);
   const installId = typeof input.installId === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(input.installId) ? input.installId : null;
   if (!installId) throw new HttpError(400, "The app did not send its install id — update SwapUp Check.");
@@ -412,10 +548,19 @@ export function deviceDeclare(authorization: string | null, raw: unknown) {
   const d = readDeclared(raw);
   if (!d.ok) throw new HttpError(400, d.reason);
   db().prepare(`UPDATE test_sessions SET declared = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(d.declared), nowIso(), r.id);
+  scheduleSync(r.id); // a declared IMEI rides along with the device report
   return { ok: true as const };
 }
 
 export function deviceResults(authorization: string | null, raw: { results?: unknown }) {
+  const out = resultsTx(authorization, raw);
+  // After the batch commits: forward the FULL map to GradeIQ, one request at a time per session.
+  scheduleSync(out.sessionId);
+  const { sessionId: _id, ...reply } = out;
+  return reply;
+}
+
+function resultsTx(authorization: string | null, raw: { results?: unknown }) {
   return tx(() => {
     const r = byTicket(authorization);
     const plan = parseJson<PlanItem[]>(r.plan, [...DEFAULT_PLAN]);
@@ -424,7 +569,7 @@ export function deviceResults(authorization: string | null, raw: { results?: unk
     const merged = mergeResults(parseJson<TestResults>(r.results, {}), items);
     const status: SessionStatus = r.status === "joined" && items.length ? "testing" : r.status;
     db().prepare(`UPDATE test_sessions SET results = ?, status = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(merged), status, now, r.id);
-    return { ok: true as const, received: items.length, ignored, progress: progressOf(plan, merged) };
+    return { ok: true as const, received: items.length, ignored, progress: progressOf(plan, merged), sessionId: r.id };
   });
 }
 
@@ -444,6 +589,40 @@ export function deviceStatus(authorization: string | null) {
   if (!r0) return { status: "closed" as const, progress: null, storeName: null, caseRef: null };
   const v = view(expireIfDue(r0));
   return { status: v.status, progress: v.progress, storeName: v.storeName, caseRef: v.caseRef };
+}
+
+/* ─────────────────────────── the photo check (customer's phone) ─────────────────────────── */
+
+/**
+ * GET /api/device/screen — which pattern the store's camera wants this phone to
+ * show. Proxied from GradeIQ; the GradeIQ id never reaches the phone.
+ * state: disabled / failed → skip the photo check and run the tests;
+ * pending → wait; ready → show `pattern` full-screen and echo it back.
+ */
+export async function deviceScreenGet(authorization: string | null): Promise<DeviceScreen> {
+  const r = byTicket(authorization);
+  try {
+    return await deviceScreen(r);
+  } catch (e) {
+    if (e instanceof DeviceScreenUnavailable) throw new HttpError(503, "The photo check can't reach the grading service right now. Keep this screen open — it carries on by itself.");
+    throw e;
+  }
+}
+
+const PATTERN_RE = /^[a-z0-9-]{1,20}$/;
+
+/** POST /api/device/screen { shown } — the pattern this phone is actually showing. */
+export async function deviceScreenPost(authorization: string | null, raw: { shown?: unknown }) {
+  const r = byTicket(authorization);
+  const shown = typeof raw?.shown === "string" ? raw.shown.trim().toLowerCase() : "";
+  if (!PATTERN_RE.test(shown)) throw new HttpError(400, "Say which pattern the screen is showing.");
+  try {
+    await deviceScreenShown(r, shown);
+  } catch (e) {
+    if (e instanceof GradeiqError) throw new HttpError(e.kind === "disabled" ? 409 : 503, e.kind === "disabled" ? "The photo check is not running for this session." : "The photo check can't reach the grading service right now. Keep this screen open.");
+    throw e;
+  }
+  return { ok: true as const };
 }
 
 export { getOrg };
