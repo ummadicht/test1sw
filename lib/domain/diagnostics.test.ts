@@ -21,6 +21,8 @@ import {
   wifiEscape,
   readWifi,
   CODE_ALPHABET,
+  BROWSER_NOTE,
+  isBrowserReport,
   type DeviceReport,
   type TradeModelRef,
   type TestResults,
@@ -322,6 +324,39 @@ test("summary: one fault from two tests is listed once with both reasons; order 
 test("summary: an emulator run is called out", () => {
   const s = summarise(DEFAULT_PLAN, all("pass"), NO_DAMAGE, { ...DEVICE, isPhysicalDevice: false }, MODELS);
   assert.ok(s.notes.some((n) => /emulator/.test(n)));
+});
+
+test("summary: a browser run (appVersion web-…) says so, and what the browser could not test stays UNTESTED", () => {
+  const WEB = { ...DEVICE, appVersion: "web-1.0.0" };
+  // What a browser typically cannot do: charging, buttons, Bluetooth, NFC, biometrics.
+  const results = all("pass", { charging: unsupported, buttons: unsupported, bluetooth: unsupported, nfc: unsupported, faceid: unsupported });
+  const s = summarise(DEFAULT_PLAN, results, NO_DAMAGE, WEB, MODELS);
+  assert.ok(s.notes.includes(BROWSER_NOTE), "the browser note is in the summary");
+  assert.equal(BROWSER_NOTE, "Tested in a web browser — some tests can't run in a browser; the SwapUp Check app covers more.");
+  assert.deepEqual(
+    s.untested.map((u) => u.id),
+    DEFAULT_PLAN.map((p) => p.id).filter((id) => ["charging", "buttons", "bluetooth", "nfc", "faceid"].includes(id)),
+    "unsupported in a browser is untested, never passed"
+  );
+  assert.equal(s.verdict, "incomplete", "charging is critical, and a browser cannot test it");
+  assert.equal(s.notes.filter((n) => n === BROWSER_NOTE).length, 1, "said once");
+
+  // Only the browser's gaps that are not critical → the verdict stands, the note still shows.
+  const s2 = summarise(DEFAULT_PLAN, all("pass", { nfc: unsupported, bluetooth: unsupported }), NO_DAMAGE, WEB, MODELS);
+  assert.equal(s2.verdict, "all_passed");
+  assert.ok(s2.notes.includes(BROWSER_NOTE));
+  assert.ok(isBrowserReport(WEB));
+});
+
+test("summary: the native app (or no app version) gets no browser note", () => {
+  for (const appVersion of ["1.0.0", "0.1.0", null, "webview-1.0"]) {
+    const s = summarise(DEFAULT_PLAN, all("pass"), NO_DAMAGE, { ...DEVICE, appVersion }, MODELS);
+    assert.ok(!s.notes.includes(BROWSER_NOTE), `appVersion ${appVersion} is not a browser`);
+  }
+  assert.ok(!summarise(DEFAULT_PLAN, {}, null, null, MODELS).notes.includes(BROWSER_NOTE), "no device yet → no note");
+  assert.equal(isBrowserReport(null), false);
+  // readDevice keeps the web- prefix the browser build sends.
+  assert.ok(isBrowserReport(readDevice({ modelName: "SM-S901E" }, "web-1.0.0")));
 });
 
 test("summary: a custom plan decides what is critical", () => {
