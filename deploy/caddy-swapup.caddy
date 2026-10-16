@@ -1,4 +1,3 @@
-
 # SwapUp — repair-or-upgrade trade-in desk (pm2 "swapup" on :4500).
 # Its own sslip.io hostname, so it gets a real certificate with no DNS work and
 # needs no basePath (nothing on this box shares its paths).
@@ -7,7 +6,9 @@ swapup.104-197-168-25.sslip.io {
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
+		# SAMEORIGIN, not DENY: the browser build of SwapUp Store may show the
+		# web desk in a frame on this same origin; other sites still cannot.
+		X-Frame-Options "SAMEORIGIN"
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
 	# The Android apps. Served by Caddy from a folder OUTSIDE the app dir, so an
@@ -21,6 +22,60 @@ swapup.104-197-168-25.sslip.io {
 		header Cache-Control "no-cache"
 		file_server
 	}
+
+	# The same two apps in a browser — Expo web exports of swapup-mobile
+	# (dist-web/<app>/, built with baseUrl /app/<app>), uploaded by deploy.sh to
+	# /var/www/swapup-web/<app>/ (outside the app dir for the same reason). Same
+	# origin as the API, so no CORS. Each is a single-page app:
+	#   /app/check/?code=K7M2QX       → index.html (no-cache: a deploy shows at once)
+	#   /app/check/_expo/static/…     → the file (content-hashed: cached for a year
+	#                                    — only when it exists, so a 404 is never cached)
+	#   /app/check/anything-else      → the file if it exists, else index.html
+	# A missing /_expo/ or /assets/ file is a 404, never index.html — a page
+	# must not run HTML as its script, or cache it for a year.
+	# `route` keeps the written order: the prefix is stripped BEFORE the file
+	# checks (in a plain handle, rewrite would sort ahead of uri).
+	redir /app/store /app/store/?{query} 308
+	redir /app/check /app/check/?{query} 308
+	handle /app/store/* {
+		route {
+			uri strip_prefix /app/store
+			root * /var/www/swapup-web/store
+			@store_hashed {
+				path /_expo/static/*
+				file
+			}
+			header @store_hashed Cache-Control "public, max-age=31536000, immutable"
+			@store_fresh not path /_expo/static/*
+			header @store_fresh Cache-Control "no-cache"
+			@store_spa {
+				not file
+				not path /_expo/* /assets/*
+			}
+			rewrite @store_spa /index.html
+			file_server
+		}
+	}
+	handle /app/check/* {
+		route {
+			uri strip_prefix /app/check
+			root * /var/www/swapup-web/check
+			@check_hashed {
+				path /_expo/static/*
+				file
+			}
+			header @check_hashed Cache-Control "public, max-age=31536000, immutable"
+			@check_fresh not path /_expo/static/*
+			header @check_fresh Cache-Control "no-cache"
+			@check_spa {
+				not file
+				not path /_expo/* /assets/*
+			}
+			rewrite @check_spa /index.html
+			file_server
+		}
+	}
+
 	handle {
 		reverse_proxy localhost:4500
 	}
