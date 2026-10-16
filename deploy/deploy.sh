@@ -17,9 +17,25 @@ SSH=(ssh $SSH_OPTS "$VM")
 echo "▸ gates: domain tests + typecheck"
 (cd "$ROOT" && npm test >/dev/null && npx tsc --noEmit -p .)
 
+# The browser versions of the two apps (Expo web exports, swapup-mobile
+# dist-web/<app>/). Caddy serves them at /app/<app>/, so each export must load
+# its scripts from /app/<app>/_expo/… (baseUrl) — a root /_expo/… path would
+# 404 and leave a blank page. Checked here, before anything ships.
+WEB_DIST=${WEB_DIST:-$ROOT/../swapup-mobile/dist-web}
+WEB_APPS=()
+for app in store check; do
+  if [ -f "$WEB_DIST/$app/index.html" ]; then
+    if ! grep -q "/app/$app/_expo/" "$WEB_DIST/$app/index.html"; then
+      echo "✗ $WEB_DIST/$app/index.html does not load its scripts from /app/$app/_expo/ — export it with baseUrl /app/$app" >&2
+      exit 1
+    fi
+    WEB_APPS+=("$app")
+  fi
+done
+
 echo "▸ build in $BUILD (webpack, never turbopack — its chunks break better-sqlite3 on the VM)"
 mkdir -p "$BUILD"
-rsync -a --delete --exclude node_modules --exclude .next --exclude data --exclude .git --exclude '.env*' --exclude '.claude' "$ROOT/" "$BUILD/"
+rsync -a --delete --exclude node_modules --exclude .next --exclude data --exclude .git --exclude '.env*' --exclude '.claude' --exclude /public/app "$ROOT/" "$BUILD/"
 rsync -a --delete "$ROOT/node_modules/" "$BUILD/node_modules/"
 (cd "$BUILD" && rm -rf .next && npx next build --webpack)
 if ls "$BUILD/.next/server/chunks" 2>/dev/null | grep -q '\[turbopack\]'; then echo "turbopack chunks found — refusing to ship" >&2; exit 1; fi
@@ -46,6 +62,16 @@ if ls "$MOBILE_DIST"/swapup-*.apk >/dev/null 2>&1; then
   rsync -az -e "ssh $SSH_OPTS" "$MOBILE_DIST"/swapup-*.apk "$MOBILE_DIST"/swapup-*.json "$VM:/var/www/swapup-downloads/"
 fi
 
+echo "▸ browser versions of the apps (outside the app dir; Caddy serves /app/<app>/)"
+"${SSH[@]}" 'set -e; sudo mkdir -p /var/www/swapup-web/store /var/www/swapup-web/check
+  sudo chown ammar:ammar /var/www/swapup-web /var/www/swapup-web/store /var/www/swapup-web/check
+  sudo grep -q "^SWAPUP_WEB_DIR=" /etc/swapup.env || echo "SWAPUP_WEB_DIR=/var/www/swapup-web" | sudo tee -a /etc/swapup.env >/dev/null'
+for app in "${WEB_APPS[@]+"${WEB_APPS[@]}"}"; do
+  echo "  uploading the $app browser build from $WEB_DIST/$app"
+  rsync -az --delete -e "ssh $SSH_OPTS" "$WEB_DIST/$app/" "$VM:/var/www/swapup-web/$app/"
+done
+[ ${#WEB_APPS[@]} -gt 0 ] || echo "  no $WEB_DIST/<app>/index.html — browser versions not uploaded (the pages say \"not published yet\")"
+
 echo "▸ pm2"
 "${SSH[@]}" "cd ~/swapup && chmod +x deploy/start.sh deploy/patch-caddy.sh && (pm2 describe swapup >/dev/null 2>&1 && pm2 restart swapup --update-env || pm2 start deploy/start.sh --name swapup --interpreter bash) && pm2 save >/dev/null"
 
@@ -61,4 +87,10 @@ done
 echo "  local :4500/login → $code"
 pub=$(curl -s -o /dev/null -w '%{http_code}' "$PUBLIC/login" || true)
 echo "  $PUBLIC/login → $pub"
-[ "$code" = "200" ] && [ "$pub" = "200" ] && echo "✓ deployed" || { echo "✗ health check failed" >&2; exit 1; }
+web_ok=1
+for app in "${WEB_APPS[@]+"${WEB_APPS[@]}"}"; do
+  w=$(curl -s -o /dev/null -w '%{http_code}' "$PUBLIC/app/$app/" || true)
+  echo "  $PUBLIC/app/$app/ → $w"
+  [ "$w" = "200" ] || web_ok=0
+done
+[ "$code" = "200" ] && [ "$pub" = "200" ] && [ "$web_ok" = "1" ] && echo "✓ deployed" || { echo "✗ health check failed" >&2; exit 1; }
