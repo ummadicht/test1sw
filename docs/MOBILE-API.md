@@ -174,6 +174,19 @@ counter": poll about every 700 ms, show `pattern` full-screen, echo what is on s
 `POST /api/device/screen` `{ shown: "<pattern actually on screen>" }` → `{ ok: true }`. The first
 echo is what unlocks the store's camera button.
 
+## 4b. Data clearing after acceptance (store side, via the desk case page)
+
+After the customer accepts (case `locked`, or `in_pickup` while the phone is still at the store),
+the customer factory-resets their own phone from its Settings and the store records what it saw:
+
+`POST /api/cases/:id/action` `{ "action": "data_clear", "steps": { "accountsSignedOut": true, "resetDone": true, "setupScreenSeen": true, "noPreviousAccount": true }, "note": "optional, ≤200 chars" }`
+→ the CaseView with `dataClear` `{label, steps, note, by, at}` and `dataClearState: "done"`.
+Advisor / store manager only (403 otherwise); 400 lists unconfirmed steps; 409 if the case is not at the store
+after acceptance or the record already exists. `dataClearState` is `done | attested | due | not_applicable`
+(`attested` = an older case where the reset was ticked at hand-over). The record is always labelled
+"Factory reset by the customer, seen by the store — not a certified erasure". The customer app only
+shows the steps and opens Settings (Android `Linking.sendIntent`); nothing resets a phone remotely.
+
 ## 5. Downloads
 
 `GET /downloads/swapup-check.apk` and `/downloads/swapup-store.apk` — served by Caddy from
