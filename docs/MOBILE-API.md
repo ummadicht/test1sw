@@ -9,6 +9,9 @@ Two Android apps from one Expo codebase (`~/projects/swapup-mobile`):
   from the test QR's download page, runs the native hardware tests on their own phone, and
   every result streams to the SwapUp server.
 
+Both apps also run **in a browser**, built from the same code with Expo web and served on the
+SwapUp origin itself — `/app/store/` and `/app/check/` (see §7). Same origin = same API, no CORS.
+
 Server: the SwapUp Next.js app (`~/projects/swapup`). Production base URL
 `https://swapup.104-197-168-25.sslip.io`; dev `http://<mac-lan-ip>:4500`.
 
@@ -22,7 +25,10 @@ All bodies are JSON. Errors are `{ "error": "<sentence a person can read>" }` wi
 `200 { token, expiresAt, user: { id, name, role, roleLabel, org: {id,name,demo}, store: {id,name,code,city,kind} | null } }`
 
 The token is the same signed session the web cookie carries. Send it as
-`Authorization: Bearer <token>` on every staff call. Valid 12 h; on 401 the app returns to
+`Authorization: Bearer <token>` on every staff call. **A Bearer header always wins over the
+session cookie** (and a bad one is a 401 — never topped up from the cookie): the browser store
+app shares the desk's origin, so its requests also carry whatever desk cookie that browser has,
+often a different person's. Valid 12 h; on 401 the app returns to
 the sign-in screen. Only counter roles (`advisor`, `store_manager`) may use the store app;
 other roles get `403 "The store app is for store staff."`.
 
@@ -101,9 +107,18 @@ joining.
 
 The code is 6 characters from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`.
 
-`GET /j/<code>` — the public download page the QR opens (HTML). Shows the store name, the
-**Install SwapUp Check** button (APK), the steps to allow installs from the browser, the
-**Open SwapUp Check** button (`swapupcheck://join?code=…&server=…`), and the code to type.
+`GET /j/<code>` — the public page the test QR opens (HTML). Opening it only marks the session
+`opened`; nothing is bound. Three choices, in this order:
+1. **Test in this browser — no install** → `/app/check/?code=<CODE>` (the browser check, §7).
+   On an iPhone it says the app is Android-only and the Android options fold away.
+2. **Install SwapUp Check** (the APK) + the steps to allow installs from the browser.
+3. **Already installed? Open the app** (`swapupcheck://join?code=…&server=…`) and the code to type.
+Anything not published says so instead of linking to a 404.
+
+Links (`joinUrl`, `deepLink`, `downloadUrl`, `session.server`) are built from
+`SWAPUP_PUBLIC_URL` (always set in production), else from the origin the request arrived on —
+so a dev server reached through the web-app proxy (:4620) or a LAN IP hands out links a phone
+can open.
 
 `POST /api/device/join` `{ code, device: DeviceInfo, appVersion, installId }` →
 `200 { ticket, session: { id, caseRef, storeName, plan, server } }`
@@ -112,6 +127,12 @@ The code is 6 characters from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`.
   being used on another phone."` The same installId re-joining (app restarted) gets a fresh
   ticket for the same session (results kept).
 - Unknown/expired code → `404 "That code is not valid any more. Ask the store for a new one."`
+- Refused joins (404/409/400) are rate-limited per IP: 20 in 10 min → `429`. Successful joins
+  and re-joins don't count — the app re-joins on every resume, and a whole store shares one
+  public IP behind its Wi‑Fi.
+- Once the store has **applied** the session, writes and re-joins are refused, but the old
+  ticket still reads `GET /api/device/status` → `applied`; the app shows "The store has your
+  results" rather than an error.
 
 All calls below send `Authorization: Ticket <ticket>`:
 
@@ -150,3 +171,26 @@ them). `GET /downloads` — a small page listing both with version and size.
 
 A skipped or unsupported test is **untested, never passed**. A critical test untested →
 `verdict: "incomplete"`.
+
+## 7. The browser versions (`/app/store/`, `/app/check/`)
+
+Expo web exports of the same codebase (`swapup-mobile`: `bash scripts/export-web.sh store|check`
+→ `dist-web/<app>/`, built with baseUrl `/app/<app>`). Production: `deploy/deploy.sh` uploads
+them to `/var/www/swapup-web/<app>/`, Caddy serves them ahead of the app (SPA fallback to
+`index.html`, hashed `_expo/static/*` cached for a year, a missing `/_expo/` file is a 404).
+Locally: `node scripts/web-dev-proxy.mjs` in swapup-mobile → http://localhost:4620 (the apps,
+everything else proxied to :4500); for `/j` and `/downloads` to offer them, symlink
+`public/app → ../swapup-mobile/dist-web` (gitignored; deploy excludes it).
+
+- **Which app:** `EXPO_PUBLIC_APP_VARIANT`, inlined at export (the URL path is the fallback).
+- **Server:** the page's own origin. A `?server=` on another origin is ignored.
+- **Store:** same staff API with a Bearer token kept in `localStorage`. *Continue pricing*
+  calls `POST /api/auth/handoff` and opens the one-time URL (rewritten to the page origin) in a
+  named tab `swapup-desk`, so the hand-off cookie lands on the desk's origin.
+- **Check:** `/app/check/?code=K7M2QX` joins automatically, then strips `?code=` so a refresh
+  resumes from `localStorage` (warning bar when the browser won't save). `appVersion` is
+  `web-<version>`; the summary then adds the note "Tested in a web browser — …". Tests the browser
+  cannot run are reported `unsupported` (untested, never passed). Device facts: model from UA
+  client hints / user agent, battery on phones only; disk, RAM and physical-vs-emulator are null.
+- **Never send** a Permissions-Policy that blocks camera, microphone, geolocation, motion
+  sensors, Bluetooth or NFC on `/app/check/` — the tests need them.
