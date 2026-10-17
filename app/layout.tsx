@@ -7,7 +7,7 @@ const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono-face", 
 
 export const metadata: Metadata = {
   title: { default: "SwapUp", template: "%s · SwapUp" },
-  description: "Repair or upgrade? Trade-in and upgrade desk for service centres and experience stores, with per-store credit lines.",
+  description: "Repair or upgrade? Trade-in and upgrade desk for SwapUp Experience Centers, with per-store credit lines.",
   robots: { index: false, follow: false },
 };
 

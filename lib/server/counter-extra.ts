@@ -34,5 +34,7 @@ export function quoteSourceKinds(u: SessionUser, caseIds: string[]): Record<stri
  * name the counter pages import.
  */
 export function getCaseForViewer(u: SessionUser, id: string): CaseView {
-  return getCase(u, id);
+  const view = getCase(u, id);
+  // The store's own refurb cost is its business, not the buyback partner's.
+  return u.role === "partner" ? { ...view, refurbCost: null } : view;
 }

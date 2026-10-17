@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Money, Pct, Banner, SourceBadge, ErrorText } from "@/components/ui";
 import type { PartnerQuote } from "@/lib/server/buyback";
+import { buySell } from "@/lib/domain/buySell";
 import { StepCard } from "./StepCard";
 import { fmtWhen } from "./shared";
 import type { CaseOps } from "./ops";
@@ -112,8 +113,123 @@ function PartnerQuoteForm({ ops, partner }: { ops: CaseOps; partner: string }) {
   );
 }
 
-/** ⑤ What the buyback partner pays for the phone as it is — and what it would be worth repaired. */
-export function StepTradeIn({ ops }: { ops: CaseOps }) {
+function LedgerRow({ label, sub, strong, stack, children }: { label: string; sub: React.ReactNode; strong?: boolean; stack?: boolean; children: React.ReactNode }) {
+  // `stack`: the value goes under the label on a phone (an input needs the width).
+  const cols = stack ? "grid-cols-1 gap-y-2 sm:grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto]";
+  return (
+    <div className={`grid ${cols} items-center gap-x-4 px-4 py-3 ${strong ? "bg-surface-2" : ""}`}>
+      <dt className="min-w-0">
+        <div className={strong ? "text-[15px] font-bold" : "text-[14px] font-semibold"}>{label}</div>
+        {sub ? <div className="text-[12.5px] text-muted leading-snug mt-0.5">{sub}</div> : null}
+      </dt>
+      <dd className={`${stack ? "sm:text-right" : "text-right"} ${strong ? "text-[24px] font-[760] tracking-tight" : "text-[17px] font-semibold"}`}>{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * BUY vs SELL — the store's numbers for this trade-in (lib/domain/buySell.ts):
+ * what it pays the customer, what the refurb costs, what it sells for once
+ * refurbished (PriceIQ's Cashify listing less 2–5%), and the margin. The refurb
+ * cost is the advisor's to set; it is saved as the case's refurbCost — the
+ * store's own figure, which moves no price — exactly as the SwapUp Store app does.
+ */
+function BuySellBlock({ ops, partner }: { ops: CaseOps; partner: string }) {
+  const { view, editable, save } = ops;
+  const q = view.quote;
+  const rq = view.repairedQuote;
+  const m = view.marketSell;
+  const b = buySell({ quote: q, repairedQuote: rq, refurbCost: view.refurbCost, repair: view.repair, faultCount: view.faults.length, market: m, partner });
+  const [draft, setDraft] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const shown = draft ?? (b.refurb === null ? "" : String(b.refurb));
+  const typed = Number(shown.replace(/[,\s₹]/g, ""));
+  const changed = draft !== null && shown.trim() !== "" && typed !== b.refurb;
+
+  async function saveRefurb(e: React.FormEvent) {
+    e.preventDefault();
+    if (!shown.trim() || !Number.isInteger(typed) || typed < 0 || typed > 500_000) return setErr("Enter the refurb cost as a whole rupee amount.");
+    setSaving(true);
+    const e2 = await save({ refurbCost: { amount: typed } });
+    setSaving(false);
+    setErr(e2);
+    if (!e2) setDraft(null);
+  }
+
+  const refurbSub =
+    b.refurbBasis === "quote" && view.refurbCost
+      ? `Entered by ${view.refurbCost.by}`
+      : b.refurbBasis === "estimate"
+        ? "SwapUp's repair estimate at list price (step 4)"
+        : b.refurbBasis === "none"
+          ? "Nothing to repair"
+          : b.refurbWhy;
+  const sellSub =
+    b.sellBasis === "market" && m.amount !== null
+      ? `Cashify sells it refurbished from ₹${m.listing.toLocaleString("en-IN")} (${m.grade}${m.grade !== m.gradeWanted ? `, none listed at ${m.gradeWanted}` : ""}) − ${m.markdownBp / 100}% · PriceIQ ${m.week}`
+      : b.sellBasis === "partner"
+        ? `${partner}'s price repaired — PriceIQ: ${m.why ?? "no Cashify listing"}`
+        : rq?.reason
+        ? rq.reason
+        : q?.source.kind === "partner_manual"
+          ? `Only ${partner}'s real rate card may give a repaired value next to a quote from its app — enter it from the app if it showed one.`
+          : b.sellWhy;
+
+  return (
+    <section className="mt-4 rounded-[12px] border border-line overflow-hidden" aria-label="Buy vs sell">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-line">
+        <div className="section-title">Buy vs sell</div>
+        <span className="text-[12px] text-muted">For the store — not an offer to the customer</span>
+      </div>
+      <dl className="divide-y divide-[color:var(--line)]">
+        <LedgerRow label="Buy — pay the customer" sub={b.buy !== null ? `${partner}'s price as it is` : b.buyWhy}>
+          <Money value={b.buy} />
+        </LedgerRow>
+        <LedgerRow label="Refurb cost (quote)" sub={refurbSub} stack={editable}>
+          {editable ? (
+            <form onSubmit={saveRefurb} className="flex items-center sm:justify-end gap-2">
+              <span className="text-muted text-[15px]" aria-hidden>
+                ₹
+              </span>
+              <input
+                className="input num !min-h-[38px] !py-1.5 w-[110px] text-right"
+                inputMode="numeric"
+                aria-label="Refurb cost in rupees"
+                value={shown}
+                placeholder="—"
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  setErr(null);
+                }}
+              />
+              <button className="btn btn-sm btn-primary" disabled={!changed || saving}>
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </form>
+          ) : (
+            <Money value={b.refurb} />
+          )}
+        </LedgerRow>
+        <LedgerRow label="Sell — after refurb" sub={sellSub}>
+          <Money value={b.sell} />
+        </LedgerRow>
+        <LedgerRow label="Margin" sub={b.margin !== null ? "Sell − buy − refurb cost" : b.marginWhy} strong>
+          <Money value={b.margin} className={b.margin !== null && b.margin < 0 ? "text-bad" : ""} />
+        </LedgerRow>
+      </dl>
+      {err ? (
+        <div className="px-4 pb-3">
+          <ErrorText error={err} />
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/** ⑤ What the buyback partner pays for the phone as it is — and, for the store, buy vs sell once repaired. */
+export function StepTradeIn({ ops, showBuySell = true }: { ops: CaseOps; showBuySell?: boolean }) {
   const { view, editable, act, save } = ops;
   const [err, setErr] = useState<string | null>(null);
   const [requoting, setRequoting] = useState(false);
@@ -196,8 +312,10 @@ export function StepTradeIn({ ops }: { ops: CaseOps }) {
         </div>
       )}
 
-      {/* Repaired value */}
-      {view.faults.length > 0 && view.condition ? (
+      {/* Buy vs sell (store staff), or — for the partner — the repaired value alone */}
+      {showBuySell ? (
+        q ? <BuySellBlock ops={ops} partner={partner} /> : null
+      ) : view.faults.length > 0 && view.condition ? (
         <div className="mt-4 rounded-[12px] bg-surface-2 border border-line px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>

@@ -48,7 +48,7 @@ export function AddStoreForm({ orgId, isPlatform, usersHref }: { orgId: string; 
     >
       <div className="grid sm:grid-cols-2 gap-4">
         <Field label="Store name">
-          <input className="input" value={f.name} onChange={set("name")} placeholder="e.g. Indiranagar Service Centre" required minLength={3} maxLength={80} />
+          <input className="input" value={f.name} onChange={set("name")} placeholder="e.g. Indiranagar Experience Center" required minLength={3} maxLength={80} />
         </Field>
         <Field label="Type">
           <select className="select" value={f.kind} onChange={set("kind")}>

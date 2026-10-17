@@ -159,7 +159,7 @@ export function CaseWorkspace({
               <StepFaults ops={ops} />
               <StepCondition ops={ops} />
               <StepRepair ops={ops} />
-              <StepTradeIn ops={ops} />
+              <StepTradeIn ops={ops} showBuySell={role !== "partner"} />
               <StepUpgrade ops={ops} isManager={isManager} bands={bands} />
             </>
           )}

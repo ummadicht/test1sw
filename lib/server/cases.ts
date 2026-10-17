@@ -4,6 +4,7 @@ import { getOrg, getStore, ownStore, storeInScope, canSeeStore, orgPartnerId, ty
 import { partnerQuote, partnerMode, type PartnerQuote, type PartnerMode } from "./buyback";
 import { storeEvents, storePolicy, postEvents } from "./credit";
 import { activeCampaigns } from "./catalog";
+import { caseMarketSell, type CaseMarketSell } from "./marketPrices";
 import {
   type ConditionAnswers,
   type FaultId,
@@ -126,7 +127,11 @@ type CaseRow = {
   fault_sources: string;
   camera_check: string | null;
   data_clear: string | null;
+  refurb_cost: string | null;
 };
+
+/** The store's own cost to put the phone right (BUY vs SELL). Not the customer's repair price. */
+export type RefurbCost = { amount: number; by: string; at: string };
 
 export type Clearance = { outcome: string; accepted: number; shortfall: number; reason: string | null; by: string; at: string };
 
@@ -163,6 +168,10 @@ export type CaseView = {
   /** Why there is no trade-in quote although the phone is described (the camera's identity check). */
   quoteBlocked: string | null;
   manualRepair: ManualQuote | null;
+  /** The store's refurb cost quote (BUY vs SELL) — never read by the advice, the bonus or the partner quote. */
+  refurbCost: RefurbCost | null;
+  /** SELL: what the phone sells for refurbished — PriceIQ's Cashify listing less 2–5% (lib/domain/marketSell.ts). */
+  marketSell: CaseMarketSell;
   partnerManual: PartnerManual | null;
   /** The centre does not repair this brand — only an outside quote can be compared. */
   repairNotServiced: string | null;
@@ -275,6 +284,8 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
     camera: camera ? withoutGradeiqId(camera) : null,
     quoteBlocked: identityBlock(camera),
     manualRepair: parseJson<ManualQuote | null>(c.manual_repair, null),
+    refurbCost: parseJson<RefurbCost | null>(c.refurb_cost, null),
+    marketSell: caseMarketSell({ modelId: tm?.id ?? null, variant: c.variant, model: tm?.model ?? null, condition }),
     partnerManual: parseJson<PartnerManual | null>(c.partner_manual, null),
     repairNotServiced: tm && org?.target_brand && tm.brand !== org.target_brand ? `This centre repairs ${org.target_brand} phones only. Enter the customer's own repair quote to compare.` : null,
     repair: parseJson<RepairEstimate | null>(c.repair, null),
@@ -538,6 +549,8 @@ export type CasePatch = {
   conditionFromFaults?: boolean;
   customer?: { name?: string; phone?: string } | null;
   manualRepair?: { amount: number; reason: string } | null;
+  /** The store's refurb cost (BUY vs SELL). Changes no price: the partner is not re-asked. */
+  refurbCost?: { amount: number } | null;
   /** The partner's quote read off its own app (amount + reference code). */
   partnerQuote?: { amount: number; reference: string; validDays?: number; repairedAmount?: number | null } | null;
   upgradeDeviceId?: string | null;
@@ -677,6 +690,15 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch): 
       sets.manual_repair = JSON.stringify({ amount, reason, by: u.name } satisfies ManualQuote);
     }
     pricingChanged = true;
+  }
+  if (patch.refurbCost !== undefined) {
+    if (patch.refurbCost === null) sets.refurb_cost = null;
+    else {
+      const amount = Number(patch.refurbCost.amount);
+      if (!Number.isInteger(amount) || amount < 0 || amount > 500_000) throw new HttpError(400, "Refurb cost must be a whole rupee amount up to ₹5,00,000.");
+      sets.refurb_cost = JSON.stringify({ amount, by: u.name, at: nowIso() } satisfies RefurbCost);
+    }
+    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.refurb_cost", entity: "case", entityId: id, detail: { amount: patch.refurbCost?.amount ?? null } });
   }
   // A partner quote read off its app describes ONE device in ONE condition. If
   // the description changes, that quote no longer belongs to this phone.

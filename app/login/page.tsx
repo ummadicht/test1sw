@@ -15,13 +15,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     <div className="min-h-screen grid lg:grid-cols-2">
       <div className="hidden lg:flex flex-col justify-between p-12 bg-[color:var(--ink)] text-white">
         <div className="flex items-center gap-3">
-          <BrandMark size={40} />
-          <span className="text-xl font-bold tracking-tight">SwapUp</span>
+          <BrandMark size={18} light />
         </div>
         <div className="max-w-md">
           <h1 className="text-[40px] leading-[1.08] font-[780] tracking-tight">Repair it, or swap up?</h1>
           <p className="mt-4 text-[17px] text-white/75 leading-relaxed">
-            The counter desk for service centres and experience stores: the repair quote and the trade-in value side by side, an honest
+            The counter desk for SwapUp Experience Centers: the repair quote and the trade-in value side by side, an honest
             recommendation, and an upgrade bonus — with every store&apos;s trade-in credit kept inside its limit until the buyback partner collects.
           </p>
         </div>
@@ -30,8 +29,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <div className="flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
           <div className="lg:hidden flex items-center gap-3 mb-8">
-            <BrandMark size={40} />
-            <span className="text-xl font-bold">SwapUp</span>
+            <BrandMark size={18} />
           </div>
           <h2 className="text-2xl font-bold tracking-tight">Sign in</h2>
           <p className="hint mt-1 mb-6">Use the account your store or programme admin gave you.</p>

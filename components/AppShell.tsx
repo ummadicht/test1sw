@@ -58,7 +58,6 @@ export function AppShell({ user, children, wide = false }: { user: SessionUser; 
         <div className={`mx-auto ${wide ? "max-w-[1400px]" : "max-w-[1200px]"} px-4 sm:px-6 h-16 flex items-center gap-4`}>
           <Link href="/" className="flex items-center gap-2.5 no-underline shrink-0">
             <BrandMark />
-            <span className="text-[17px] font-[750] tracking-tight">SwapUp</span>
           </Link>
           <NavLinks items={navFor(user.role)} />
           <div className="ml-auto flex items-center gap-3 min-w-0">

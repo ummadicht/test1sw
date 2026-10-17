@@ -371,6 +371,23 @@ const MIGRATIONS: string[] = [
   ALTER TABLE stores ADD COLUMN counter_code TEXT;
   CREATE UNIQUE INDEX stores_counter_code ON stores (counter_code) WHERE counter_code IS NOT NULL;
   `,
+  /* 10 — BUY vs SELL at the counter. refurb_cost: the store's own cost to put
+          the phone right ({amount, by, at}); NOT the customer's repair price
+          (manual_repair), so it never moves the advice, the bonus or the
+          partner quote. market_listings: PriceIQ's Cashify refurbished listings
+          (lib/server/marketPrices.ts) — the SELL price. Additive only. */ `
+  ALTER TABLE cases ADD COLUMN refurb_cost TEXT;
+  CREATE TABLE market_listings (
+    source TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    variant TEXT NOT NULL,
+    grade TEXT NOT NULL,
+    price INTEGER NOT NULL,
+    week TEXT NOT NULL,
+    listed_as TEXT NOT NULL
+  );
+  CREATE INDEX market_listings_lookup ON market_listings (source, model_id, variant);
+  `,
 ];
 
 function migrate(conn: Database.Database): void {

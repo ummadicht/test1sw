@@ -195,6 +195,38 @@ result in) → `complete` (app said done) → `applied` (staff applied it to the
 A session expires 30 min after creation unless joined; a joined session expires 2 h after
 joining.
 
+## 3b. Refurb cost quote and BUY vs SELL (store side)
+
+After the test is applied, the advisor enters the refurb cost and the trade-in is shown as
+buy vs sell — the same four lines on the desk's case page (step 5) and in the store app
+(`lib/domain/buySell.ts` is the reference implementation):
+
+| Line | From the case (`GET /api/cases/<id>`) |
+| --- | --- |
+| Buy — pay the customer | `quote.amount` when `quote.status === "priced"` |
+| Refurb cost (quote) | `refurbCost.amount`, else `repair.listTotal ?? repair.customerPays` when `repair.status === "quoted"`, else ₹0 when `faults` is empty |
+| Sell — after refurb | `marketSell.amount` (PriceIQ's Cashify refurbished listing less 2–5%), else `repairedQuote.amount` when `repairedQuote.status === "priced"` |
+| Margin | Sell − Buy − Refurb, only when all three are known (negative = a loss) |
+
+`marketSell` is `{ amount, listing, markdownBp, grade, gradeWanted, listings, week, why: null, source }`
+or `{ amount: null, why, source }`. `listing` is the lowest Cashify refurbished ask at `grade` for
+that model + storage (PriceIQ leaf `cashify/sell`); the markdown is 5% up to ₹15,000, 4% up to
+₹30,000, 3% up to ₹50,000, 2% above (`lib/domain/marketSell.ts`). `grade` is the Cashify grade
+the phone comes out at after refurb (`gradeAfterRefurb`); when Cashify lists none at it, the next
+lower listed grade is used and `gradeWanted` keeps the one it should have been.
+
+A missing number is shown as "—" with why (no quote yet; PriceIQ has no listing and the
+partner gave no repaired price; the repair needs a bench quote) — never guessed.
+
+`PATCH /api/cases/<id>` (Bearer, `advisor` / `store_manager` of the case's store; the case still
+`draft` or `quoted`) `{ "refurbCost": { "amount": 4200 } }` → the whole `CaseView`. `amount` is
+whole rupees 0–5,00,000; the staff member's name and the time are stored with it
+(`refurbCost.by`, `refurbCost.at`). `{ "refurbCost": null }` goes back to SwapUp's estimate.
+The refurb cost is the STORE's figure: it changes no price — the partner is not re-asked, and the
+advice, bonus and decision never read it (`manualRepair` is the customer's repair price and still
+does). A partner viewing the case sees `refurbCost: null`. Errors: `400` bad amount, `401` session
+over, `403` not a counter role, `404` case not in your store, `409` the case is past the counter.
+
 ## 4. Customer test app (device side)
 
 The code is 6 characters from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`.

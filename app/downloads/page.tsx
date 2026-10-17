@@ -1,5 +1,5 @@
 import { apkInfo, mb, webAppInfo, type AppId } from "@/lib/server/downloads";
-import { BrandMark } from "@/components/ui";
+import { Wordmark, PillArrow, headline } from "@/components/brand";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Download the apps" };
@@ -11,12 +11,10 @@ const APPS: { app: AppId; name: string; who: string }[] = [
 
 export default function Downloads() {
   return (
-    <main className="min-h-screen bg-canvas">
+    <main className="xc min-h-screen">
       <div className="max-w-2xl mx-auto px-5 py-10">
-        <div className="flex items-center gap-3">
-          <BrandMark size={36} />
-          <span className="text-lg font-bold">SwapUp apps — Android and browser</span>
-        </div>
+        <Wordmark align="left" />
+        <h1 className={`${headline.className} mt-4 text-[30px] leading-tight font-extrabold tracking-[-0.02em]`}>Download the apps</h1>
         <p className="hint !mt-3 text-[14.5px]">
           Each app comes two ways from the same code: an Android app to install, and a browser version that needs no install and works on any phone,
           iPhones included. The Android app can run more tests; the browser marks what it cannot test as &ldquo;Can&apos;t test this in a browser&rdquo;,
@@ -27,7 +25,7 @@ export default function Downloads() {
             const info = apkInfo(a.app);
             const web = webAppInfo(a.app);
             return (
-              <section key={a.app} className="card card-pad" id={a.app}>
+              <section key={a.app} className="xc-card" id={a.app}>
                 <h2 className="text-[19px] font-bold">{a.name}</h2>
                 <p className="hint !mt-1 text-[14.5px]">{a.who}</p>
 
@@ -36,8 +34,11 @@ export default function Downloads() {
                     <div className="section-title">Android app</div>
                     {info ? (
                       <>
-                        <a className="btn btn-primary mt-2 whitespace-normal text-center" href={`/downloads/swapup-${a.app}.apk`}>
-                          Download · v{info.version} · {mb(info.bytes)}
+                        <a className="xc-pill mt-2 !text-[15.5px]" href={`/downloads/swapup-${a.app}.apk`}>
+                          <span>
+                            Download · v{info.version} · {mb(info.bytes)}
+                          </span>
+                          <PillArrow />
                         </a>
                         <p className="hint num break-all">
                           Built {info.builtAt.slice(0, 10)} · SHA-256 {info.sha256}
@@ -53,8 +54,9 @@ export default function Downloads() {
                     {a.app === "store" ? (
                       web ? (
                         <>
-                          <a className="btn mt-2 whitespace-normal text-center" href={web.path}>
-                            Open SwapUp Store in your browser
+                          <a className="xc-pill-outline mt-2 !text-[15.5px]" href={web.path}>
+                            <span>Open in your browser</span>
+                            <PillArrow />
                           </a>
                           <p className="hint">Sign in with the same username and password as this site.</p>
                           <WebVersion version={web.version} builtAt={web.builtAt} />

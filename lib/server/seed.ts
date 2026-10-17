@@ -47,6 +47,7 @@ export function ensureSeeded(): Promise<void> {
       const has = db().prepare(`SELECT COUNT(*) n FROM orgs`).get() as { n: number };
       if (has.n === 0) seedBase();
       backfillModelCodes();
+      renameDemoCentres();
       const demoDone = db().prepare(`SELECT value FROM meta WHERE key = 'demo_cases'`).get();
       if (!demoDone && process.env.SWAPUP_DEMO_CASES !== "0") {
         try {
@@ -76,6 +77,24 @@ function backfillModelCodes(): void {
       const codes = byId.get(r.id);
       if (codes && codes.length) upd.run(JSON.stringify(codes), r.id);
     }
+  })();
+}
+
+/**
+ * Owner, 2026-10-17: "instead of Samsung service center — SwapUp Experience
+ * Center". Databases seeded before that (production) keep the old demo names;
+ * rename them once. Demo programme only, and only names still exactly as seeded,
+ * so nothing a client typed is touched.
+ */
+function renameDemoCentres(): void {
+  const d = db();
+  if (d.prepare(`SELECT 1 FROM meta WHERE key = 'renamed_experience_centers'`).get()) return;
+  d.transaction(() => {
+    d.prepare(`UPDATE orgs SET name = 'SwapUp Experience Centers (demo)' WHERE id = 'org_samsung_svc' AND demo = 1 AND name = 'Samsung Service Centres (demo)'`).run();
+    const st = d.prepare(`UPDATE stores SET name = ? WHERE id = ? AND org_id = 'org_samsung_svc' AND name = ?`);
+    st.run("Andheri West Experience Center", "st_and", "Andheri West Service Centre");
+    st.run("Koramangala Experience Center", "st_kor", "Koramangala Service Centre");
+    d.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('renamed_experience_centers', ?)`).run(nowIso());
   })();
 }
 
@@ -118,12 +137,12 @@ function seedBase(): void {
     org.run("ptn_cashify", "Cashify", "partner", null, null, null, "{}", 0, now);
     const s1 = { ...orgSettingsDefaults(), releaseOn: "collected" };
     const s2 = { ...orgSettingsDefaults(), releaseOn: "cleared", maxAgeDays: 5 };
-    org.run("org_samsung_svc", "Samsung Service Centres (demo)", "client", "oem_service", "Samsung", "ptn_cashify", JSON.stringify(s1), 1, now);
+    org.run("org_samsung_svc", "SwapUp Experience Centers (demo)", "client", "oem_service", "Samsung", "ptn_cashify", JSON.stringify(s1), 1, now);
     org.run("org_xc", "Any Client — Experience Centres (demo)", "client", "experience_center", "Samsung", "ptn_cashify", JSON.stringify(s2), 1, now);
 
     const store = d.prepare(`INSERT INTO stores (id, org_id, name, kind, city, code, credit_limit, created_at) VALUES (?,?,?,?,?,?,?,?)`);
-    store.run("st_and", "org_samsung_svc", "Andheri West Service Centre", "service_center", "Mumbai", "AND", 300_000, now);
-    store.run("st_kor", "org_samsung_svc", "Koramangala Service Centre", "service_center", "Bengaluru", "KOR", 95_000, now);
+    store.run("st_and", "org_samsung_svc", "Andheri West Experience Center", "service_center", "Mumbai", "AND", 300_000, now);
+    store.run("st_kor", "org_samsung_svc", "Koramangala Experience Center", "service_center", "Bengaluru", "KOR", 95_000, now);
     store.run("st_cpx", "org_xc", "Connaught Place Experience Centre", "experience_center", "New Delhi", "CPX", 500_000, now);
 
     const user = d.prepare(`INSERT INTO users (id, org_id, store_id, username, name, role, password_hash, created_at) VALUES (?,?,?,?,?,?,?,?)`);

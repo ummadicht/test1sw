@@ -5,16 +5,18 @@
  * meters or source badges on their own, so a sample price looks the same
  * everywhere and a full credit line is red everywhere.
  */
+import { headline } from "./brand";
 import type { ReactNode } from "react";
 import { inr, fmtBp } from "@/lib/domain/money";
 
-export function BrandMark({ size = 34 }: { size?: number }) {
+/**
+ * The desk's brand: TEXT ONLY (owner, 2026-10-17 — "no logo"). "SWAPUP" in
+ * letter-spaced caps, the same blue ink as the customer pages' wordmark.
+ */
+export function BrandMark({ size = 15, light = false }: { size?: number; light?: boolean }) {
   return (
-    <span className="brandmark" style={{ width: size, height: size }} aria-hidden>
-      <svg width={size * 0.56} height={size * 0.56} viewBox="0 0 24 24" fill="none">
-        <path d="M7 17V7m0 0L3.5 10.5M7 7l3.5 3.5" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M17 7v10m0 0l3.5-3.5M17 17l-3.5-3.5" stroke="#3ddc97" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+    <span className={`${headline.className} font-extrabold`} style={{ fontSize: size, letterSpacing: "0.2em", color: light ? "#fff" : "#1428a0" }}>
+      SWAPUP
     </span>
   );
 }

@@ -380,6 +380,62 @@ fieldset {
   flex: none;
 }
 
+/* ── SwapUp Experience Center — the pages a customer or a store tablet sees
+   (/j/<code>, /downloads). Samsung-like: grey tint, white cards r=26, blue
+   pill CTAs, black outline pill secondary. Text wordmark only, no logo
+   (components/brand.tsx). Same tokens as the SwapUp Check / Store apps. ── */
+.xc {
+  --xc-bg: #f4f4f6;
+  --xc-card: #ffffff;
+  --xc-ink: #111111;
+  --xc-muted: #6e6e73;
+  --xc-blue: #0381fe;
+  --xc-blue-press: #0067d6;
+  --xc-brand: #1428a0;
+  --xc-tint: #e6f0ff;
+  --xc-warn: #c46a00;
+  background: var(--xc-bg);
+  color: var(--xc-ink);
+}
+.xc-card {
+  background: var(--xc-card);
+  border-radius: 26px;
+  padding: 22px;
+}
+.xc-pill,
+.xc-pill-outline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 0 22px 0 24px;
+  border-radius: 999px;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: left;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.xc-pill {
+  background: var(--xc-blue);
+  color: #fff;
+}
+.xc-pill:hover,
+.xc-pill:active {
+  background: var(--xc-blue-press);
+}
+.xc-pill-outline {
+  background: transparent;
+  color: var(--xc-ink);
+  border: 1.5px solid var(--xc-ink);
+}
+.xc-pill-outline:hover,
+.xc-pill-outline:active {
+  background: rgba(17, 17, 17, 0.05);
+}
+
 }
 
 @media print {
