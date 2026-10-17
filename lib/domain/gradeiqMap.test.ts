@@ -301,12 +301,14 @@ test("lcd: a confident sweep failure is display_lines even while the cosmetic gr
   assert.equal(m.faults[0].component, "display_check");
   assert.equal(m.floor.screen, "lines_or_spots");
   assert.equal(m.lcd.verdict, "fail");
+  assert.equal(m.lcd.confirmed, true);
 });
 
 test("lcd: a weak sweep failure is a flag; unknown or incomplete is 'LCD not camera-checked'", () => {
   const weak = mapCamera(snap({}, {}, { displayCheck: { verdict: "fail", confidence: 0.5, patterns: ["white"], requested: ["white"], missing: [] } }), FINAL);
   assert.deepEqual(weak.faults, []);
   assert.match(weak.flags.join(" "), /low confidence/);
+  assert.equal(weak.lcd.confirmed, false);
   const unknown = mapCamera(snap({}, {}, { displayCheck: { verdict: "unknown", confidence: 0, reason: "the phone stayed folded", requested: ["white"], missing: ["white"] } }), FINAL);
   assert.equal(unknown.lcd.cameraChecked, false);
   assert.match(unknown.flags.join(" "), /LCD not camera-checked: the phone stayed folded/);

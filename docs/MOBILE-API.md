@@ -158,8 +158,9 @@ its queue until acknowledged → `{ ok: true, received: n, progress }`.
 `GET /api/device/status` → `{ status, progress, storeName, caseRef }` (lets the app show
 "The store has your results").
 
-**Photo check** (between the damage questions and the tests — §8). "Lay your phone on the
-counter": poll about every 700 ms, show `pattern` full-screen, echo what is on screen.
+**Photo check** (native app: the LAST step, after the tests — §8; changed 2026-10-16 so the
+customer never waits for the store's camera). "Lay it on the counter, screen up": poll about
+every 700 ms, show `pattern` full-screen, echo what is on screen.
 
 `GET /api/device/screen` →
 `{ state, pattern, shown, cosmeticDone, handoffDone, capture: { verdict, code, reasons[], attempt } | null }`
@@ -167,7 +168,8 @@ counter": poll about every 700 ms, show `pattern` full-screen, echo what is on s
   `ready` → show `pattern` (`idle` | `white` | `black` | `red` | `green` | `blue` | `stripes`).
 - `capture.verdict = "retake"` → the store's photos were rejected (show `reasons`; stay on the
   screen — the store retakes).
-- Leave for the tests when `handoffDone` is true, or 30 s after `cosmeticDone`.
+- Leave (to Done) when `handoffDone` is true, or 30 s after `cosmeticDone`; "Finish without photos"
+  after 60 s with no sign of the store's camera.
 - `503 { error }` → the server can't reach GradeIQ just now: keep the screen, keep polling.
 - Never carries the GradeIQ session id or the camera URL.
 

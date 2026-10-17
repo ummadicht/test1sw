@@ -108,7 +108,14 @@ Path prefixes used below:
 - The LCD check is a closed loop between the two phones.
 - If the camera starts before the customer's phone is echoing patterns, the sweep gives up after 4 s (`V2Cam.tsx:1189-1195`). The front shot also loses its black-screen step.
 - The photos still pass and a grade still comes back, but **the LCD was never checked, and nothing says so.** CounterIQ shipped exactly this bug (`ciq/lib/gradeiq.ts:172-187`).
-- Photos come before the tests because that is GradeIQ's designed order: the camera tells the first phone "it can proceed to its functional tests" (`V2Cam.tsx:1116`). It also lets grading run while the customer tests.
+- ~~Photos come before the tests~~ — **changed 2026-10-16 (owner: "this is the customer's app"):
+  SwapUp Check now runs its tests FIRST and shows the photo screen LAST**, so the customer never
+  sits waiting for the store's camera; the advisor has the whole test run to open the camera page.
+  The closed loop above still holds: the camera stays locked until the phone echoes. GradeIQ has
+  no ordering guard — `functional/route.ts` merges at any time, and `persistCosmetic`
+  (`cosmetic/route.ts:418-436`) folds whatever functional results already exist into the
+  assessment. Costs: the AI grade (8–30 s) now runs after the tests instead of during them, and
+  GradeIQ's camera page still says the phone "can proceed to its functional tests" at the end.
 
 **Fail closed, not open.**
 - CounterIQ unlocks the camera whenever `/screen` can't be read (`ciq/lib/gradeiq.ts:215` plus `RetailDesk.tsx:1269`).

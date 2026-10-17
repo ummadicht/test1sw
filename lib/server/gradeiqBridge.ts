@@ -556,7 +556,8 @@ export function gradingView(r: GiqRow): GradingView {
     canOverride = true;
   } else if (!screen) cameraLocked = "Checking whether the customer's phone is ready…";
   else if (typeof screen.shown !== "string") {
-    cameraLocked = "Open SwapUp Check on the customer's phone first — it has to show the screen patterns the camera asks for.";
+    // SwapUp Check runs its tests first and shows the photo screen last.
+    cameraLocked = "The customer's phone shows the photo screen when its tests finish — the camera unlocks by itself then.";
     canOverride = true;
   }
   const unlocked = state === "ready" && !!r.gradeiq_id && open && (deviceReady || !!override);
@@ -573,7 +574,7 @@ export function gradingView(r: GiqRow): GradingView {
   else if (fin.final) msg = `Camera grade ${snap?.cosmeticGrade} (final).`;
   else if (fin.provisional) msg = `Camera grade ${snap?.cosmeticGrade || ""} is provisional. ${fin.reasons[0] ?? ""}`.trim();
   else if (fin.status === "failed") msg = fin.reasons[0];
-  else if (screen?.cosmeticDone) msg = "Photos accepted — the camera grade is being worked out while the customer tests.";
+  else if (screen?.cosmeticDone) msg = "Photos accepted — the camera grade is being worked out.";
   else if (unlocked) msg = override ? "Camera unlocked by override — the LCD will be recorded as not camera-checked." : "The customer's phone is ready. Take the photos on this device.";
   else msg = cameraLocked ?? "";
 

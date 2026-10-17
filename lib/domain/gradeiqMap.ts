@@ -347,7 +347,16 @@ export type MappedFinding = {
 export type CameraFloor = { screen: ScreenState; body: BodyState };
 export const NO_FLOOR: CameraFloor = { screen: "flawless", body: "flawless" };
 
-export type LcdCheck = { cameraChecked: boolean; verdict: "pass" | "fail" | "unknown" | null; reason: string | null };
+export type LcdCheck = {
+  cameraChecked: boolean;
+  verdict: "pass" | "fail" | "unknown" | null;
+  reason: string | null;
+  /**
+   * The verdict may be acted on: a complete pass, or a fail at ≥ CONFIRMED_CONFIDENCE.
+   * A weaker fail is only a flag for a person. Absent on records stored before 2026-10-16.
+   */
+  confirmed?: boolean;
+};
 
 export type CameraMapping = {
   /** The cosmetic grade is final, so its confirmed findings feed the case. */
@@ -525,6 +534,7 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
     lcd = {
       cameraChecked: !incomplete,
       verdict: dc.verdict,
+      confirmed: !incomplete && (dc.verdict === "pass" || (dc.verdict === "fail" && (dc.confidence ?? 0) >= CONFIRMED_CONFIDENCE)),
       reason: incomplete ? dc.reason || (dc.missing.length ? `Not captured: ${dc.missing.join(", ")}.` : dc.note || "The sweep could not judge the screen.") : null,
     };
     if (dc.verdict === "fail") {
@@ -542,7 +552,7 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
     }
   }
   if (opts.lcdOverride) {
-    lcd = { cameraChecked: false, verdict: lcd.verdict, reason: `the camera was unlocked by ${opts.lcdOverride.by} before the customer's phone showed the patterns: ${opts.lcdOverride.reason}` };
+    lcd = { cameraChecked: false, verdict: lcd.verdict, confirmed: false, reason: `the camera was unlocked by ${opts.lcdOverride.by} before the customer's phone showed the patterns: ${opts.lcdOverride.reason}` };
   }
   if (!lcd.cameraChecked) flags.push(`LCD not camera-checked${lcd.reason ? `: ${lcd.reason}` : "."}`);
 
@@ -588,17 +598,36 @@ export function worseDisplay(selfTest: TestOutcome | null | undefined, camera: "
  * phone — the camera sweep IS the display test — so without this every native
  * run reads "incomplete" (display untested). Worse-of when both exist; an
  * unknown or unchecked sweep changes nothing.
+ *
+ * Only a CONFIRMED camera verdict counts: a fail below CONFIRMED_CONFIDENCE is
+ * folded as "not tested" (mapCamera already raised it as a flag), never as a
+ * fail — otherwise Apply would put display_lines on the case for a fault the AI
+ * was not sure of. A confirmed camera fail reads as failed here, but its fault
+ * reaches the case once, from the camera mapping (source camera_ai) — the
+ * summary does not add it again as the phone's own test (see summarise).
  */
 export function resultsWithCameraDisplay(results: TestResults, lcd: LcdCheck, at: string): TestResults {
   if (!lcd.cameraChecked || (lcd.verdict !== "pass" && lcd.verdict !== "fail")) return results;
   const self = results.display?.outcome ?? null;
+  const weakFail = lcd.verdict === "fail" && lcd.confirmed !== true;
+  if (weakFail) {
+    if (self) return results; // the phone's own display test stands; the weak sweep stays a flag
+    return {
+      ...results,
+      display: {
+        outcome: "skip",
+        detail: { method: "store camera LCD sweep (GradeIQ)", camera: "fail", confirmed: false, reason: "the camera's screen sweep failed with low confidence — check the display by eye" },
+        at,
+      },
+    };
+  }
   const combined = worseDisplay(self, lcd.verdict);
   if (!combined) return results;
   return {
     ...results,
     display: {
       outcome: combined,
-      detail: { method: self ? "worse of the phone's display test and the store camera's LCD sweep" : "store camera LCD sweep (GradeIQ)", camera: lcd.verdict, selfTest: self },
+      detail: { method: self ? "worse of the phone's display test and the store camera's LCD sweep" : "store camera LCD sweep (GradeIQ)", camera: lcd.verdict, confirmed: true, selfTest: self },
       at: results.display?.at ?? at,
     },
   };

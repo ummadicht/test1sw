@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SwapUp Flow</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#0f1729;--ink2:#475066;--line:#dfe3ea;--store:#2563eb;--store-bg:#e8f0fe;--cust:#059669;--cust-bg:#e3f6ee;--srv:#7c3aed;--srv-bg:#f0eafe;--giq:#db2777;--giq-bg:#fde8f1;--ptn:#b45309;--ptn-bg:#fdf1de;--prog:#475066;--prog-bg:#eceff4;--warn:#b45309;--bad:#b91c1c}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1120;--card:#131c2e;--ink:#e8ecf4;--ink2:#a3adc2;--line:#25304a;--store:#7aa7ff;--store-bg:#16254a;--cust:#4fd1a5;--cust-bg:#0f3329;--srv:#b79bff;--srv-bg:#26194a;--giq:#ff8cc0;--giq-bg:#3d1428;--ptn:#ffb547;--ptn-bg:#3a2810;--prog:#a3adc2;--prog-bg:#1d2638;--warn:#ffb547;--bad:#ff7b7b}}
+:root[data-theme="dark"]{--bg:#0b1120;--card:#131c2e;--ink:#e8ecf4;--ink2:#a3adc2;--line:#25304a;--store:#7aa7ff;--store-bg:#16254a;--cust:#4fd1a5;--cust-bg:#0f3329;--srv:#b79bff;--srv-bg:#26194a;--giq:#ff8cc0;--giq-bg:#3d1428;--ptn:#ffb547;--ptn-bg:#3a2810;--prog:#a3adc2;--prog-bg:#1d2638;--warn:#ffb547;--bad:#ff7b7b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:26px;margin:0 0 4px}
+.sub{color:var(--ink2);margin:0 0 18px}
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px}
+.chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 10px;font-size:12.5px;font-weight:700;white-space:nowrap}
+.chip::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.store{color:var(--store);background:var(--store-bg)}.cust{color:var(--cust);background:var(--cust-bg)}.srv{color:var(--srv);background:var(--srv-bg)}.giq{color:var(--giq);background:var(--giq-bg)}.ptn{color:var(--ptn);background:var(--ptn-bg)}.prog{color:var(--prog);background:var(--prog-bg)}
+.phase h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);margin:8px 0 8px}
+.flow{position:relative;margin:0 0 6px 14px;padding-left:22px;border-left:2px solid var(--line)}
+.step{position:relative;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:0 0 12px}
+.step::before{content:attr(data-n);position:absolute;left:-37px;top:12px;width:28px;height:28px;border-radius:50%;background:var(--ink);color:var(--bg);font-weight:800;font-size:13px;display:grid;place-items:center}
+.pair .step:last-child::before{display:none}
+.step h3{margin:6px 0 2px;font-size:16px}
+.step p{margin:0;color:var(--ink2);font-size:14px}
+.branch{margin:8px 0 0;border-left:3px solid var(--warn);padding:4px 0 4px 10px;font-size:13.5px;color:var(--ink2)}
+.branch b{color:var(--warn)}.block{border-left-color:var(--bad)}.block b{color:var(--bad)}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 4px}.pair .step{margin:0}
+.dev{font-size:11.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);margin-bottom:4px}
+.ends{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.end{border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13px;background:var(--bg);color:var(--ink2)}
+.end b{display:block;color:var(--ink);font-size:13.5px}
+@media (max-width:640px){.pair{grid-template-columns:1fr}.pair .step:last-child::before{display:none}.flow{margin-left:10px;padding-left:20px}.step::before{left:-35px}}
+</style>
+</head>
+<body>
+<main>
+<h1>SwapUp — how a trade-in flows</h1>
+<p class="sub">Two devices at the counter: the <b>advisor's</b> (SwapUp Store) and the <b>customer's phone</b> (SwapUp Check). The SwapUp server, GradeIQ and Cashify work behind them. Every step below was checked against the code on 16 Oct 2026.</p>
+<div class="legend">
+<span class="chip store">Store staff · SwapUp Store / desk</span><span class="chip cust">Customer's phone · SwapUp Check</span><span class="chip srv">SwapUp server</span><span class="chip giq">GradeIQ (AI grading)</span><span class="chip ptn">Cashify (buyback partner)</span><span class="chip prog">Programme (brand / client)</span>
+</div>
+
+<div class="phase"><h2>Once — set up the store</h2></div>
+<div class="flow">
+<div class="step" data-n="1"><span class="chip store">Store staff</span><h3>Sign up in SwapUp Store</h3><p><b>Join with an invite code</b> from your manager (you become an advisor), or <b>register a new store</b> (you become its manager).</p>
+<div class="branch"><b>Register</b> only works where the programme allows self-sign-up (demo programmes do). Otherwise the programme adds the store from the desk — it is live at once with its credit limit, and step 2 is skipped.</div></div>
+<div class="step" data-n="2"><span class="chip prog">Programme</span><h3>Approve the store, set its credit limit</h3><p>Until then the store can test phones and see quotes, but cannot take a trade-in.</p></div>
+<div class="step" data-n="3"><span class="chip store">Store staff</span><h3>Sign in · manager saves the store Wi‑Fi</h3><p>Optional: the Wi‑Fi goes into a QR so a customer's phone can join and download the app. Without it, the customer uses mobile data.</p></div>
+</div>
+
+<div class="phase"><h2>Customer arrives</h2></div>
+<div class="flow">
+<div class="step" data-n="4"><span class="chip store">Advisor</span><h3>New trade-in → QR + 6-character code</h3><p>SwapUp opens a case (e.g. SU-AND-00010) and shows the test QR, the code (letters and numbers, valid 30 min) and the Wi‑Fi QR if saved.</p></div>
+<div class="step" data-n="5"><span class="chip cust">Customer's phone</span><h3>Scan → SwapUp Check</h3><p><b>Android:</b> install the app (Wi‑Fi or mobile data) or use the browser. <b>iPhone:</b> browser only. The browser version asks a few questions and guides each test; some tests can't run in a browser.</p></div>
+</div>
+
+<div class="phase"><h2>Test — the phone first, then photos</h2></div>
+<div class="flow">
+<div class="step" data-n="6"><span class="chip cust">Customer's phone (Android app)</span><h3>Tests start at once — no questions</h3><p>Allow camera, mic and location, then it checks by itself: battery level, sensors, motion, network and GPS, speaker + mic, earpiece, vibration, flash, cameras; Bluetooth and NFC are checked as present. The customer only <b>swipes every square</b>, <b>plugs in the charger</b> (45 s, else "not tested") and lifts the phone if a camera asks.</p>
+<div class="branch"><b>Not tested automatically:</b> buttons, multi-touch, fingerprint / face unlock, battery health — the advisor checks these.</div></div>
+<div class="pair">
+<div class="step" data-n="7"><div class="dev">Customer's phone</div><span class="chip cust">SwapUp Check</span><h3>"Tests done — lay it on the counter"</h3><p>Last step: shows the coloured screens the camera asks for.</p></div>
+<div class="step" data-n="7"><div class="dev">Advisor's device</div><span class="chip store">SwapUp Store</span> <span class="chip giq">GradeIQ</span><h3>"Take photos"</h3><p>Unlocks once the phone shows its photo screen. GradeIQ's AI looks for cracks, scratches and screen faults.</p></div>
+</div>
+<div class="branch"><b>No advisor camera within 1 minute →</b> "Finish without photos": the screen shows as not camera-checked. The advisor can still photograph the outside and checks the screen by eye. <b>Browser checks</b> never show the photo screen, so the advisor uses "Take photos anyway" with a reason.</div>
+<div style="height:12px"></div>
+<div class="step" data-n="8"><span class="chip srv">Server</span> <span class="chip giq">GradeIQ</span> <span class="chip store">Advisor</span><h3>Results → "Apply to case"</h3><p>Samsung model and storage fill in when the model code matches (otherwise pick by hand). Failed tests add faults. Camera damage is added only when GradeIQ's grade is final and at least 70% sure — anything weaker is a flag to check by eye. The camera's letter grade guides; it never sets the price.</p></div>
+</div>
+
+<div class="phase"><h2>Repair or upgrade?</h2></div>
+<div class="flow">
+<div class="step" data-n="9"><span class="chip srv">Server</span><h3>Repair price</h3><p>Samsung India part prices + labour + 18% GST, with warranty / Care+ applied.</p>
+<div class="branch"><b>No automatic price</b> for liquid, no power, frame or network faults, parts not in the price book, or non-Samsung phones — type the service centre's (or customer's) quote.</div></div>
+<div class="step" data-n="10"><span class="chip ptn">Cashify</span><h3>Trade-in price</h3><p>In this order: the amount typed from the Cashify app (with its reference) → Cashify live API (only with a signed contract) → Cashify's uploaded rate card → SAMPLE (cannot be used for a real trade-in).</p></div>
+<div class="step" data-n="11"><span class="chip store">Advisor</span><h3>Pick the new phone · bonus worked out</h3><p>The 2–5% bonus comes from the best running campaign (with any ₹ cap). A manager can change it within that campaign's band, with a reason.</p></div>
+<div class="step" data-n="12"><span class="chip srv">Server</span><h3>Recommendation</h3><p>Repair costs <b>half the new phone's price or more</b>, or as much as the phone is worth repaired → leans <b>upgrade</b>. Repair <b>20% of a new phone or less</b>, or it adds more value than it costs → leans <b>repair</b>. Both → "either". Covered by warranty / Care+ → repair. The bonus never counts.</p>
+<div class="ends"><div class="end"><b>Chooses repair</b>case closes</div><div class="end"><b>Walks away</b>case closes</div><div class="end"><b>Takes the trade-in</b>go to 13</div></div></div>
+</div>
+
+<div class="phase"><h2>Customer accepts</h2></div>
+<div class="flow">
+<div class="step" data-n="13"><span class="chip store">Advisor</span><h3>Customer details + hand-over checks</h3><p>Name, mobile, ID type and its last 4 characters (only those are stored). Customer owns it · SIM and card out · IMEI matches *#06# · no EMI / finance lock · government IMEI check (KYM, SMS to 14422).</p>
+<div class="branch block"><b>Blocks:</b> KYM flags the phone · IMEI already traded in · store not approved · not enough credit left for this trade-in · SAMPLE price in a real programme · quote expired · camera says it's a different phone (until a manager overrides).</div></div>
+<div class="step" data-n="14"><span class="chip srv">Server</span><h3>Trade-in locked — credit HELD</h3><p>The trade-in value is held on the store's credit line. Customer pays new price − trade-in − bonus. Print the receipt and device tag.</p></div>
+<div class="step" data-n="15"><span class="chip cust">Customer</span> <span class="chip store">Advisor</span><h3>Clear the customer's data</h3><p>The customer signs out of Samsung + Google and factory-resets from Settings (SwapUp Check shows how). The advisor ticks what they saw: setup screen, no old-account prompt. Recorded as "not a certified erasure".</p></div>
+</div>
+
+<div class="phase"><h2>Pickup and settlement</h2></div>
+<div class="flow">
+<div class="step" data-n="16"><span class="chip store">Store manager</span><h3>Book a pickup</h3><p>Choose the waiting phones. Phones without a data-clear record are flagged (a warning, not a block).</p>
+<div class="branch"><b>Cancel:</b> while a phone is not on a pickup (take it off first), a manager can cancel with a reason → full credit released.</div></div>
+<div class="step" data-n="17"><span class="chip ptn">Cashify</span><h3>Schedule → collect</h3><p>If the programme releases credit <b>on collection</b>, the hold is released here.</p></div>
+<div class="step" data-n="18"><span class="chip ptn">Cashify</span><h3>Inspect each phone → verdict</h3>
+<div class="ends"><div class="end"><b>Cleared</b>full value</div><div class="end"><b>Regraded</b>lower value</div><div class="end"><b>Rejected</b>phone comes back</div><div class="end"><b>Not received</b>dispute</div></div>
+<p style="margin-top:8px">If credit releases <b>on clearance</b>, it's released here. A shortfall (trade-in − accepted) is charged to the store by default (a programme setting); "not received" always is. A chargeback stays on the line until a recovery is recorded.</p></div>
+<div class="step" data-n="19"><span class="chip ptn">Cashify</span><h3>Settle with a payment reference</h3><p>UTR and amount recorded. Settling doesn't move the credit line — that frees on collection or clearance.</p></div>
+</div>
+</main>
+</body>
+</html>

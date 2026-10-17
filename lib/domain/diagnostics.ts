@@ -288,6 +288,14 @@ export function summarise(
     const r = results[id];
     if (!r || r.outcome !== "fail") continue;
     anyFailed = true;
+    // A display fail that only the store camera found (folded in by
+    // resultsWithCameraDisplay) is the camera's finding: it reaches the case from
+    // the camera mapping as camera_ai, not as a failed phone test.
+    const d = r.detail as Record<string, unknown> | null | undefined;
+    if (id === "display" && d?.camera === "fail" && d?.selfTest !== "fail") {
+      notes.push("The store camera's screen sweep found a display fault. It goes on the case as a camera finding.");
+      continue;
+    }
     const what = `${name(id)} test failed on the phone`;
     if (id === "camera") {
       const side = cameraSide(r.detail);

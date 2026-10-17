@@ -526,3 +526,49 @@ test("wifi: the manager's form is checked with reasons they can fix", () => {
   assert.ok(!wep.ok && /WEP/.test(wep.reason));
   assert.ok(readWifi({ ssid: "Old", password: "abcde", security: "WEP" }).ok);
 });
+
+/* ─────────── the store camera's LCD sweep folded into `display` (gradeiqMap.resultsWithCameraDisplay) ─────────── */
+
+test("camera display fold: pass completes a native run; a CONFIRMED fail reads failed but is not a phone-test fault", async () => {
+  const { resultsWithCameraDisplay } = await import("./gradeiqMap.ts");
+  const native = all("pass");
+  delete native.display; // the native app never posts display when the store photographed it
+  const passLcd = { cameraChecked: true, verdict: "pass" as const, reason: null, confirmed: true };
+  const p = resultsWithCameraDisplay(native, passLcd, AT);
+  assert.equal(p.display?.outcome, "pass");
+  assert.equal(summarise(DEFAULT_PLAN, p, NO_DAMAGE, DEVICE, MODELS).faults.length, 0);
+
+  const failLcd = { cameraChecked: true, verdict: "fail" as const, reason: null, confirmed: true };
+  const f = resultsWithCameraDisplay(native, failLcd, AT);
+  assert.equal(f.display?.outcome, "fail");
+  const s = summarise(DEFAULT_PLAN, f, NO_DAMAGE, DEVICE, MODELS);
+  // The camera mapping puts display_lines on the case as camera_ai; the summary must not add it as "tested".
+  assert.deepEqual(faultIds(s), []);
+  assert.match(s.notes.join(" "), /camera finding/);
+});
+
+test("camera display fold: a LOW-confidence camera fail is 'not tested — check by eye', never a fault", async () => {
+  const { resultsWithCameraDisplay } = await import("./gradeiqMap.ts");
+  const native = all("pass");
+  delete native.display;
+  const weak = { cameraChecked: true, verdict: "fail" as const, reason: null, confirmed: false };
+  const w = resultsWithCameraDisplay(native, weak, AT);
+  assert.equal(w.display?.outcome, "skip");
+  assert.match(String((w.display?.detail as Record<string, unknown>).reason), /low confidence/);
+  assert.deepEqual(faultIds(summarise(DEFAULT_PLAN, w, NO_DAMAGE, DEVICE, MODELS)), []);
+  // A record without `confirmed` (stored before the field existed) is treated as weak, not as a fail.
+  const legacy = { cameraChecked: true, verdict: "fail" as const, reason: null };
+  assert.equal(resultsWithCameraDisplay(native, legacy, AT).display?.outcome, "skip");
+  // The phone's own display test stands when the camera is unsure.
+  const withSelf = all("pass");
+  assert.equal(resultsWithCameraDisplay(withSelf, weak, AT).display?.outcome, "pass");
+});
+
+test("camera display fold: the phone's own display FAIL is still a phone-test fault (worse-of)", async () => {
+  const { resultsWithCameraDisplay } = await import("./gradeiqMap.ts");
+  const selfFail = all("pass", { display: fail() });
+  const passLcd = { cameraChecked: true, verdict: "pass" as const, reason: null, confirmed: true };
+  const r = resultsWithCameraDisplay(selfFail, passLcd, AT);
+  assert.equal(r.display?.outcome, "fail");
+  assert.deepEqual(faultIds(summarise(DEFAULT_PLAN, r, NO_DAMAGE, DEVICE, MODELS)), ["display_lines"]);
+});
