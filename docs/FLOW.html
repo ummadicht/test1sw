@@ -37,9 +37,9 @@ h1{font-size:26px;margin:0 0 4px}
 <body>
 <main>
 <h1>SwapUp — how a trade-in flows</h1>
-<p class="sub">Two devices at the counter: the <b>advisor's</b> (SwapUp Store) and the <b>customer's phone</b> (SwapUp Check). The SwapUp server, GradeIQ and Cashify work behind them. Every step below was checked against the code on 16 Oct 2026.</p>
+<p class="sub">Two devices at the counter: the <b>store's tablet</b> (iPad or Android tablet, SwapUp Store, signed in for the store) and the <b>customer's phone</b> (SwapUp Check). The advisor never scans anything — the customer scans the tablet's QR. The SwapUp server, GradeIQ and Cashify work behind them. Every step below was checked against the code on 16 Oct 2026.</p>
 <div class="legend">
-<span class="chip store">Store staff · SwapUp Store / desk</span><span class="chip cust">Customer's phone · SwapUp Check</span><span class="chip srv">SwapUp server</span><span class="chip giq">GradeIQ (AI grading)</span><span class="chip ptn">Cashify (buyback partner)</span><span class="chip prog">Programme (brand / client)</span>
+<span class="chip store">Store tablet · SwapUp Store / desk</span><span class="chip cust">Customer's phone · SwapUp Check</span><span class="chip srv">SwapUp server</span><span class="chip giq">GradeIQ (AI grading)</span><span class="chip ptn">Cashify (buyback partner)</span><span class="chip prog">Programme (brand / client)</span>
 </div>
 
 <div class="phase"><h2>Once — set up the store</h2></div>
@@ -47,12 +47,12 @@ h1{font-size:26px;margin:0 0 4px}
 <div class="step" data-n="1"><span class="chip store">Store staff</span><h3>Sign up in SwapUp Store</h3><p><b>Join with an invite code</b> from your manager (you become an advisor), or <b>register a new store</b> (you become its manager).</p>
 <div class="branch"><b>Register</b> only works where the programme allows self-sign-up (demo programmes do). Otherwise the programme adds the store from the desk — it is live at once with its credit limit, and step 2 is skipped.</div></div>
 <div class="step" data-n="2"><span class="chip prog">Programme</span><h3>Approve the store, set its credit limit</h3><p>Until then the store can test phones and see quotes, but cannot take a trade-in.</p></div>
-<div class="step" data-n="3"><span class="chip store">Store staff</span><h3>Sign in · manager saves the store Wi‑Fi</h3><p>Optional: the Wi‑Fi goes into a QR so a customer's phone can join and download the app. Without it, the customer uses mobile data.</p></div>
+<div class="step" data-n="3"><span class="chip store">Store tablet</span><h3>Sign the store tablet in · save the store Wi‑Fi</h3><p><b>Android tablet:</b> the SwapUp Store app. <b>iPad:</b> the browser version (add it to the Home Screen). Optional: the manager saves the store Wi‑Fi so the tablet shows it as a QR for the customer's phone; without it the customer uses mobile data.</p></div>
 </div>
 
 <div class="phase"><h2>Customer arrives</h2></div>
 <div class="flow">
-<div class="step" data-n="4"><span class="chip store">Advisor</span><h3>New trade-in → QR + 6-character code</h3><p>SwapUp opens a case (e.g. SU-AND-00010) and shows the test QR, the code (letters and numbers, valid 30 min) and the Wi‑Fi QR if saved.</p></div>
+<div class="step" data-n="4"><span class="chip store">Advisor on the tablet</span><h3>New trade-in → the tablet shows a QR</h3><p>SwapUp opens a case (e.g. SU-AND-00010). The tablet shows the test QR, a 6-character code (letters and numbers, valid 30 min) and the Wi‑Fi QR if saved. The advisor turns the tablet to the customer.</p></div>
 <div class="step" data-n="5"><span class="chip cust">Customer's phone</span><h3>Scan → SwapUp Check</h3><p><b>Android:</b> install the app (Wi‑Fi or mobile data) or use the browser. <b>iPhone:</b> browser only. The browser version asks a few questions and guides each test; some tests can't run in a browser.</p></div>
 </div>
 
@@ -62,7 +62,7 @@ h1{font-size:26px;margin:0 0 4px}
 <div class="branch"><b>Not tested automatically:</b> buttons, multi-touch, fingerprint / face unlock, battery health — the advisor checks these.</div></div>
 <div class="pair">
 <div class="step" data-n="7"><div class="dev">Customer's phone</div><span class="chip cust">SwapUp Check</span><h3>"Tests done — lay it on the counter"</h3><p>Last step: shows the coloured screens the camera asks for.</p></div>
-<div class="step" data-n="7"><div class="dev">Advisor's device</div><span class="chip store">SwapUp Store</span> <span class="chip giq">GradeIQ</span><h3>"Take photos"</h3><p>Unlocks once the phone shows its photo screen. GradeIQ's AI looks for cracks, scratches and screen faults.</p></div>
+<div class="step" data-n="7"><div class="dev">Store tablet</div><span class="chip store">SwapUp Store</span> <span class="chip giq">GradeIQ</span><h3>"Take photos"</h3><p>Unlocks once the phone shows its photo screen. The tablet's camera photographs the phone on the counter; GradeIQ's AI looks for cracks, scratches and screen faults. (Flash photos only on Android tablets in Chrome.)</p></div>
 </div>
 <div class="branch"><b>No advisor camera within 90 seconds →</b> "Finish without photos": the screen shows as not camera-checked. The advisor can still photograph the outside and checks the screen by eye. <b>Browser checks</b> never show the photo screen, so the advisor uses "Take photos anyway" with a reason.</div>
 <div style="height:12px"></div>
