@@ -542,9 +542,9 @@ test("camera display fold: pass completes a native run; a CONFIRMED fail reads f
   const f = resultsWithCameraDisplay(native, failLcd, AT);
   assert.equal(f.display?.outcome, "fail");
   const s = summarise(DEFAULT_PLAN, f, NO_DAMAGE, DEVICE, MODELS);
-  // The camera mapping puts display_lines on the case as camera_ai; the summary must not add it as "tested".
-  assert.deepEqual(faultIds(s), []);
-  assert.match(s.notes.join(" "), /camera finding/);
+  // Listed (so "faults found" never sits over an empty list), credited to the camera — never to a phone test.
+  assert.deepEqual(faultIds(s), ["display_lines"]);
+  assert.deepEqual(s.faults[0].sources, ["camera_ai"]);
 });
 
 test("camera display fold: a LOW-confidence camera fail is 'not tested — check by eye', never a fault", async () => {

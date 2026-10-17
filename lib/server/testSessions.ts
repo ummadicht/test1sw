@@ -20,6 +20,7 @@ import {
   type GradingView,
   type DeviceScreen,
   cameraEvidence,
+  cameraGradePending,
 } from "./gradeiqBridge";
 import { GradeiqError } from "./gradeiq";
 import { applyCameraFloor, addFaultSources, blankCameraCheck, resultsWithCameraDisplay, type CaseCameraCheck } from "../domain/gradeiqMap";
@@ -303,6 +304,11 @@ export async function applyTestSession(u: SessionUser, id: string) {
   const v = view(fresh);
   const s = v.summary;
   if (!s) throw new HttpError(409, "There are no results to apply yet.");
+  // Photos are the phone's last step, so "complete" can arrive seconds before the
+  // camera grade. Apply is one-shot: wait for the grade (≤ 180 s) rather than
+  // turning confirmed damage into "not final" flags.
+  if (cameraGradePending(fresh))
+    throw new HttpError(409, "The store camera's grade is still being worked out — usually under 30 seconds. Apply again in a moment.");
   const c = getCase(u, r.case_id);
   if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "The case is past the counter, so the results can't change it any more.");
 

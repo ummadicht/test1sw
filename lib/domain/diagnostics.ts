@@ -62,7 +62,7 @@ export type ModelMatch = {
 export type DiagnosticSummary = {
   model: ModelMatch;
   /** sources: where the fault came from — the phone's own test, or the customer's answer (both possible). */
-  faults: { id: FaultId; because: string; sources: ("tested" | "declared")[] }[];
+  faults: { id: FaultId; because: string; sources: ("tested" | "declared" | "camera_ai")[] }[];
   untested: { id: string; name: string; critical: boolean }[];
   notes: string[];
   verdict: "all_passed" | "faults_found" | "incomplete";
@@ -272,8 +272,8 @@ export function summarise(
   const nameOf = new Map(plan.map((p) => [p.id, p.name]));
   const name = (id: string) => nameOf.get(id) ?? id;
   const reasons = new Map<FaultId, string[]>();
-  const sources = new Map<FaultId, Set<"tested" | "declared">>();
-  const add = (f: FaultId, why: string, source: "tested" | "declared" = "tested") => {
+  const sources = new Map<FaultId, Set<"tested" | "declared" | "camera_ai">>();
+  const add = (f: FaultId, why: string, source: "tested" | "declared" | "camera_ai" = "tested") => {
     const list = reasons.get(f) ?? [];
     if (!list.includes(why)) list.push(why);
     reasons.set(f, list);
@@ -289,11 +289,11 @@ export function summarise(
     if (!r || r.outcome !== "fail") continue;
     anyFailed = true;
     // A display fail that only the store camera found (folded in by
-    // resultsWithCameraDisplay) is the camera's finding: it reaches the case from
-    // the camera mapping as camera_ai, not as a failed phone test.
+    // resultsWithCameraDisplay) is the camera's finding, not a failed phone test:
+    // listed so the advisor sees it, with the camera as its source.
     const d = r.detail as Record<string, unknown> | null | undefined;
     if (id === "display" && d?.camera === "fail" && d?.selfTest !== "fail") {
-      notes.push("The store camera's screen sweep found a display fault. It goes on the case as a camera finding.");
+      add("display_lines", "The store camera's screen sweep found a display fault", "camera_ai");
       continue;
     }
     const what = `${name(id)} test failed on the phone`;
@@ -346,7 +346,7 @@ export function summarise(
 
   const faults = [...reasons.entries()]
     .sort((a, b) => FAULT_ORDER.indexOf(a[0]) - FAULT_ORDER.indexOf(b[0]))
-    .map(([id, why]) => ({ id, because: why.join("; "), sources: (["tested", "declared"] as const).filter((x) => sources.get(id)?.has(x)) }));
+    .map(([id, why]) => ({ id, because: why.join("; "), sources: (["tested", "declared", "camera_ai"] as const).filter((x) => sources.get(id)?.has(x)) }));
 
   const verdict: DiagnosticSummary["verdict"] = untested.some((u) => u.critical)
     ? "incomplete"

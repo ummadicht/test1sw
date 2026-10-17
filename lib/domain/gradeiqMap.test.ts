@@ -295,7 +295,7 @@ test("map: flags for what the camera could not judge", () => {
 /* ─────────────────────────── the LCD sweep ─────────────────────────── */
 
 test("lcd: a confident sweep failure is display_lines even while the cosmetic grade is provisional", () => {
-  const s = snap({}, { refining: true }, { displayCheck: { verdict: "fail", confidence: 0.84, findings: [{ label: "Green line" }], patterns: ["white"], captures: [], requested: ["white"], missing: [] } });
+  const s = snap({}, { refining: true }, { displayCheck: { verdict: "fail", confidence: 0.84, findings: [{ label: "Green line", severity: "moderate" }], patterns: ["white"], captures: [], requested: ["white"], missing: [] } });
   const m = mapCamera(s, finality(s));
   assert.deepEqual(ids(m.faults), ["display_lines"]);
   assert.equal(m.faults[0].component, "display_check");
@@ -309,6 +309,15 @@ test("lcd: a weak sweep failure is a flag; unknown or incomplete is 'LCD not cam
   assert.deepEqual(weak.faults, []);
   assert.match(weak.flags.join(" "), /low confidence/);
   assert.equal(weak.lcd.confirmed, false);
+  // GradeIQ says "fail" for ANY finding while keeping the model's confidence (maybe a pass's):
+  // confident but minor-only is a flag, not display_lines.
+  const minor = mapCamera(snap({}, {}, { displayCheck: { verdict: "fail", confidence: 0.9, findings: [{ label: "faint speck", severity: "minor" }], patterns: ["white"], requested: ["white"], missing: [] } }), FINAL);
+  assert.deepEqual(minor.faults, []);
+  assert.equal(minor.lcd.confirmed, false);
+  assert.match(minor.flags.join(" "), /only minor marks/);
+  // A stored snapshot without severities is never confirmed.
+  const legacy = mapCamera(snap({}, {}, { displayCheck: { verdict: "fail", confidence: 0.9, findings: [{ label: "line" }], patterns: ["white"], requested: ["white"], missing: [] } }), FINAL);
+  assert.deepEqual(legacy.faults, []);
   const unknown = mapCamera(snap({}, {}, { displayCheck: { verdict: "unknown", confidence: 0, reason: "the phone stayed folded", requested: ["white"], missing: ["white"] } }), FINAL);
   assert.equal(unknown.lcd.cameraChecked, false);
   assert.match(unknown.flags.join(" "), /LCD not camera-checked: the phone stayed folded/);
@@ -420,7 +429,7 @@ test("disagreements: customer 'not cracked', camera confirmed → the worse answ
 });
 
 test("disagreements: self-test and camera sweep disagree on the display → both shown, lines_or_spots", () => {
-  const s = snap({}, {}, { displayCheck: { verdict: "fail", confidence: 0.9, patterns: ["white"], requested: ["white"], missing: [] } });
+  const s = snap({}, {}, { displayCheck: { verdict: "fail", confidence: 0.9, findings: [{ label: "Green line", severity: "moderate" }], patterns: ["white"], requested: ["white"], missing: [] } });
   const m = mapCamera(s, finality(s));
   const d = disagreements(null, { display: { outcome: "pass", detail: null, at: AT } }, s, m, finality(s));
   assert.equal(d.length, 1);

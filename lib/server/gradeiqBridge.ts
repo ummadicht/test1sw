@@ -464,13 +464,15 @@ export type DeviceScreen = {
   cosmeticDone: boolean;
   handoffDone: boolean;
   capture: { verdict: string; code: string | null; reasons: string[]; attempt: number } | null;
+  /** When GradeIQ's camera page first opened for this session — lets the phone tell "camera on its way" from "nobody there". */
+  connectedAt: string | null;
 };
 
 export class DeviceScreenUnavailable extends Error {}
 
 /** GET /api/device/screen — never carries the GradeIQ id. */
 export async function deviceScreen(r: GiqRow): Promise<DeviceScreen> {
-  const idle: DeviceScreen = { state: r.gradeiq_state, pattern: "idle", shown: null, cosmeticDone: false, handoffDone: false, capture: null };
+  const idle: DeviceScreen = { state: r.gradeiq_state, pattern: "idle", shown: null, cosmeticDone: false, handoffDone: false, capture: null, connectedAt: null };
   if (!giq.gradeiqConfig().enabled) return { ...idle, state: "disabled" };
   if (r.gradeiq_state === "pending" && !mem.creating.has(r.id) && !mem.createTimers.has(r.id)) void ensureCreated(r.id);
   if (r.gradeiq_state !== "ready" || !r.gradeiq_id) return idle;
@@ -478,7 +480,7 @@ export async function deviceScreen(r: GiqRow): Promise<DeviceScreen> {
   const l = live(row(r.id) ?? r);
   if (l.screenError || !l.screen) throw new DeviceScreenUnavailable(l.screenError ?? "The photo check has not started yet.");
   const s = l.screen;
-  return { state: "ready", pattern: s.pattern, shown: s.shown, cosmeticDone: s.cosmeticDone, handoffDone: s.handoffDone, capture: s.capture };
+  return { state: "ready", pattern: s.pattern, shown: s.shown, cosmeticDone: s.cosmeticDone, handoffDone: s.handoffDone, capture: s.capture, connectedAt: s.connectedAt ?? null };
 }
 
 /** POST /api/device/screen {shown} — the pattern the customer's phone is actually showing. */
@@ -521,8 +523,39 @@ export type GradingView = {
   disagreements: Disagreement[];
   /** Stopped waiting for a final grade (180 s after the photos were accepted). */
   timedOut: boolean;
+  /** Photos are in but the grade (or the LCD verdict) isn't final yet — Apply waits (cameraGradePending). */
+  gradePending: boolean;
   syncedAt: string | null;
 };
+
+/**
+ * The photos are in and GradeIQ is still working out the grade or the LCD
+ * verdict, inside the 180 s window. Applying now would turn the camera's
+ * confirmed damage into "not final, so not added" flags, and Apply is one-shot —
+ * so Apply waits. With photos as the phone's LAST step, the phone reports
+ * "complete" about a second after the photos, well before the grade lands.
+ */
+export function cameraGradePending(r: GiqRow): boolean {
+  if (!giq.gradeiqConfig().enabled || r.gradeiq_state !== "ready" || !r.gradeiq_id || !r.gradeiq_cosmetic_done_at) return false;
+  if (pullWindowOver(r)) return false;
+  const { snap, fin } = storedFinality(r);
+  const l = live(r);
+  const lcdIn = !!snap?.displayCheck || (!!l.handoffAt && !!r.gradeiq_synced_at && r.gradeiq_synced_at > l.handoffAt);
+  return !(fin.final && lcdIn);
+}
+
+function isBrowserCheck(deviceJson: string | null): boolean {
+  return (parseJson<{ appVersion?: string | null } | null>(deviceJson, null)?.appVersion ?? "").startsWith("web-");
+}
+
+/** SwapUp Check 0.3.0+ (native) runs its tests first and shows the photo screen last. */
+export function photosLastApp(deviceJson: string | null): boolean {
+  const v = parseJson<{ appVersion?: string | null } | null>(deviceJson, null)?.appVersion ?? "";
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
+  if (!m || v.startsWith("web-")) return false;
+  const [maj, min] = [Number(m[1]), Number(m[2])];
+  return maj > 0 || min >= 3;
+}
 
 export function cameraEvidence(r: GiqRow): { snap: GradeiqSnapshot | null; fin: Finality; mapping: CameraMapping; override: CameraOverrideInfo } {
   const override = parseJson<CameraOverrideInfo>(r.gradeiq_override, null);
@@ -544,7 +577,12 @@ export function gradingView(r: GiqRow): GradingView {
   const state: GradeiqState = cfg.enabled ? r.gradeiq_state : "disabled";
   const open = SYNC_STATUSES.includes(r.status);
   const screen = l.screen;
-  const deviceReady = state === "ready" && open && !l.screenError && typeof screen?.shown === "string";
+  // GradeIQ never clears `shown`, so an echo from a phone that then LEFT the photo
+  // screen without photos (it records display skip with detail.photos) must not
+  // keep counting as "ready".
+  const resultsNow = parseJson<TestResults>(r.results, {});
+  const photosEnded = ["skipped", "unavailable"].includes(String((resultsNow.display?.detail as Record<string, unknown> | null | undefined)?.photos ?? ""));
+  const deviceReady = state === "ready" && open && !l.screenError && typeof screen?.shown === "string" && !photosEnded;
   const sync = syncStatus(r);
 
   let cameraLocked: string | null = null;
@@ -555,9 +593,15 @@ export function gradingView(r: GiqRow): GradingView {
     cameraLocked = `Can't confirm the customer's phone is ready (${l.screenError}). An override needs your name and a reason, and the LCD is then recorded as not camera-checked.`;
     canOverride = true;
   } else if (!screen) cameraLocked = "Checking whether the customer's phone is ready…";
-  else if (typeof screen.shown !== "string") {
-    // SwapUp Check runs its tests first and shows the photo screen last.
-    cameraLocked = "The customer's phone shows the photo screen when its tests finish — the camera unlocks by itself then.";
+  else if (typeof screen.shown !== "string" || photosEnded) {
+    cameraLocked =
+      r.status === "complete" || photosEnded
+        ? "The customer's phone finished without showing the photo screen. Photos now need an override with your name and a reason (the LCD is then not camera-checked)."
+        : photosLastApp(r.device)
+          ? "The customer's phone shows the photo screen when its tests finish — the camera unlocks by itself then."
+          : isBrowserCheck(r.device)
+            ? "A browser check can't show the photo screen. Use \"Take photos anyway\" with a reason — the LCD is then not camera-checked."
+            : "Open SwapUp Check on the customer's phone and keep it on the photo screen — it has to show the patterns the camera asks for.";
     canOverride = true;
   }
   const unlocked = state === "ready" && !!r.gradeiq_id && open && (deviceReady || !!override);
@@ -601,6 +645,7 @@ export function gradingView(r: GiqRow): GradingView {
     assessment: snap || state === "ready" ? assessmentView(snap, fin, mapping) : null,
     disagreements: disagreements(declared, results, snap, mapping, fin),
     timedOut: pullWindowOver(r),
+    gradePending: cameraGradePending(r),
     syncedAt: r.gradeiq_synced_at,
   };
 }

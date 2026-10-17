@@ -64,7 +64,8 @@ export type GiqDisplayCheck = {
   verdict: "pass" | "fail" | "unknown";
   confidence: number | null;
   note: string;
-  findings: { type: string; label: string; confidence: number | null; pattern: string | null }[];
+  /** severity: GradeIQ's minor | moderate | severe (it defaults a missing one to minor); null on snapshots stored before 2026-10-17. */
+  findings: { type: string; label: string; confidence: number | null; pattern: string | null; severity: string | null }[];
   patterns: string[];
   captures: { pattern: string; photo: string }[];
   requested: string[];
@@ -194,7 +195,7 @@ function readDisplayCheck(v: unknown, publicUrl: string): GiqDisplayCheck | null
     note: text(d.note, 300),
     findings: arr(d.findings)
       .slice(0, 20)
-      .map((f) => ({ type: text(obj(f).type, 40), label: text(obj(f).label, 160), confidence: numOrNull(obj(f).confidence), pattern: text(obj(f).pattern, 20) || null })),
+      .map((f) => ({ type: text(obj(f).type, 40), label: text(obj(f).label, 160), confidence: numOrNull(obj(f).confidence), pattern: text(obj(f).pattern, 20) || null, severity: text(obj(f).severity, 12) || null })),
     patterns: arr(d.patterns).map((p) => text(p, 20)).filter(Boolean),
     captures,
     requested: arr(d.requested).map((p) => text(p, 20)).filter(Boolean),
@@ -534,11 +535,11 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
     lcd = {
       cameraChecked: !incomplete,
       verdict: dc.verdict,
-      confirmed: !incomplete && (dc.verdict === "pass" || (dc.verdict === "fail" && (dc.confidence ?? 0) >= CONFIRMED_CONFIDENCE)),
+      confirmed: !incomplete && (dc.verdict === "pass" || displayFailConfirmed(dc)),
       reason: incomplete ? dc.reason || (dc.missing.length ? `Not captured: ${dc.missing.join(", ")}.` : dc.note || "The sweep could not judge the screen.") : null,
     };
     if (dc.verdict === "fail") {
-      if ((dc.confidence ?? 0) >= CONFIRMED_CONFIDENCE) {
+      if (displayFailConfirmed(dc)) {
         addFault(outFaults, {
           id: "display_lines",
           because: `Camera screen sweep failed (${pct(dc.confidence)})${dc.findings[0]?.label ? `: ${dc.findings[0].label}` : ""}`,
@@ -548,7 +549,12 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
           box: null,
         });
         if (SCREEN_ORDER.indexOf("lines_or_spots") > SCREEN_ORDER.indexOf(floor.screen)) floor = { ...floor, screen: "lines_or_spots" };
-      } else flags.push(`Camera screen sweep failed with low confidence (${pct(dc.confidence)}). Check the display by eye.`);
+      } else
+        flags.push(
+          (dc.confidence ?? 0) >= CONFIRMED_CONFIDENCE
+            ? `Camera screen sweep noted only minor marks${dc.findings[0]?.label ? ` (${dc.findings[0].label})` : ""}. Check the display by eye.`
+            : `Camera screen sweep failed with low confidence (${pct(dc.confidence)}). Check the display by eye.`
+        );
     }
   }
   if (opts.lcdOverride) {
@@ -557,6 +563,21 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
   if (!lcd.cameraChecked) flags.push(`LCD not camera-checked${lcd.reason ? `: ${lcd.reason}` : "."}`);
 
   return { usable, floor, faults: outFaults, suggested: outSuggested, flags: [...new Set(flags)], findings, lcd, identity: identityOf(s) };
+}
+
+/**
+ * A camera screen-sweep "fail" that may go on the case. GradeIQ reports "fail"
+ * whenever its model lists ANY finding, but keeps the model's own confidence —
+ * which may be the confidence of a "pass" (gradeiq lib/displayCheck.ts:144-150).
+ * So confidence alone proves nothing: it also takes at least one moderate or
+ * severe finding. Anything less is a flag for a person to check by eye.
+ */
+export function displayFailConfirmed(dc: Pick<GiqDisplayCheck, "verdict" | "confidence" | "findings">): boolean {
+  return (
+    dc.verdict === "fail" &&
+    (dc.confidence ?? 0) >= CONFIRMED_CONFIDENCE &&
+    dc.findings.some((f) => f.severity === "moderate" || f.severity === "severe")
+  );
 }
 
 /**
