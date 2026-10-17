@@ -116,6 +116,22 @@ Path prefixes used below:
   (`cosmetic/route.ts:418-436`) folds whatever functional results already exist into the
   assessment. Costs: the AI grade (8–30 s) now runs after the tests instead of during them, and
   GradeIQ's camera page still says the phone "can proceed to its functional tests" at the end.
+- **Two camera passes — photos first, screen check last (2026-10-17, `su/docs/TWO-PASS-CAMERA.md`).**
+  Owner's counter order: customer (found by mobile) → photos → Wi‑Fi + QR → the phone downloads/opens
+  SwapUp Check → it tests itself → the store camera checks the screen colours → continue. Only the
+  sweep needs the phone, so GradeIQ's camera page takes a `pass`:
+  - **Pass 1, `/v2/cam/{id}?pass=photos`** — angles, torch twins and the cosmetic grade; no sweep, no
+    Settings photo, never drives a pattern on the phone. Ends with `/screen {cosmeticDone:true}` and
+    **no** `handoffDone`. SwapUp offers it as `grading.photosUrl` the moment the GradeIQ session is
+    `ready` — before the phone has joined, so it is not behind the camera lock.
+  - **Pass 2, `/v2/cam/{id}?pass=screen`** — after the tests, with the phone on its photo screen: the
+    existing closed-loop `displaySweep()` (`/display` report), then `/screen {handoffDone:true}`.
+    `grading.screenUrl`, behind the same fail-closed lock as before (deviceReady or an override).
+  - No `pass` = the single pass as before; `grading.cameraUrl` keeps it for SwapUp Store ≤ 0.4.x.
+  - The closed loop still holds: the sweep only runs against a phone that is echoing. What moved is
+    the photos, which never needed the phone. SwapUp Check ignores a `cosmeticDone` / `capture` that
+    was already on `/screen` when its photo screen mounted (pass 1's), so it waits for pass 2.
+  - The pull window now opens at the LATER of the photos and the handoff (§3.3).
 
 **Fail closed, not open.**
 - CounterIQ unlocks the camera whenever `/screen` can't be read (`ciq/lib/gradeiq.ts:215` plus `RetailDesk.tsx:1269`).
@@ -174,6 +190,8 @@ Two comments wrongly claim the names are identical: `sum/src/diagnostics/catalog
 
 - **While photos are being taken:** while the Store app is watching, `GET /screen` (light) every 2 s. It shows `capture.verdict` (for example `retake` with reasons) and `cosmeticDone`.
 - **After `cosmeticDone`:** `GET /api/sessions/{id}` every 5 s until the grade is final, for at most 180 s. Then stop and keep the last snapshot.
+  - **The 180 s run from the LATER of `cosmeticDone` and `handoffDone`** (as SwapUp first saw each — `pullWindowStart` in `su/lib/domain/gradeiqMap.ts`). With two camera passes the screen check comes minutes after the photos; a window counted from the photos alone would have closed before the LCD verdict existed. The handoff reopens it, so the verdict (and a grade still refining) get their own 180 s. No photos accepted = no window; Apply still pulls once.
+  - Between the passes, a grade that is already final is not pulled again (each pull downloads the whole session, photos and all); the pulls resume at the handoff until the LCD verdict is in.
 - **A cosmetic grade is final only when all of these hold:**
   - `cosmetic_grade` is not empty.
   - `cosmetic.tierUsed` ≠ `stub`.
@@ -249,7 +267,7 @@ Store four layers separately and show them side by side:
 | No vision key, quota hit, or provider error | `tierUsed = stub`, `cosmetic_grade = ''` (`visionAgents.ts:301-330, 448-460`) | "Camera grading failed. Check condition by eye." | — | **No grade.** GradeIQ's own pricing would still price it at a 0.6 factor (`pricing/engine.ts:64-66`), which is one more reason never to call `/offer` |
 | Coverage below 50% | No grade (`visionAgents.ts:620-634`) | "Not enough of the phone was visible. Retake." | — | No grade |
 | Not conclusive | `conclusive = false`, `gradeRange` | "Camera grade B–D. Confirm by eye." | — | The advisor's answer must be no better than confirmed findings |
-| Pro pass stuck on `refining` | Still `refining` 180 s after `cosmeticDone`. This is a known GradeIQ bug (`cosmetic/route.ts:262-267, 318, 374-376`), and vision calls have no timeout (`giq/lib/visionProvider.ts:117-257`) | "Provisional grade (final check did not finish). Confirm by eye." | — | The Flash result is stored as provisional; it is never shown as final |
+| Pro pass stuck on `refining` | Still `refining` 180 s after the later of `cosmeticDone` and the handoff (§3.3). This is a known GradeIQ bug (`cosmetic/route.ts:262-267, 318, 374-376`), and vision calls have no timeout (`giq/lib/visionProvider.ts:117-257`) | "Provisional grade (final check did not finish). Confirm by eye." | — | The Flash result is stored as provisional; it is never shown as final |
 | LCD sweep aborted | `displayCheck.reason`, or `missing[]` not empty | "LCD not camera-checked: <reason>" | — | Display condition comes from the self-test and the advisor only |
 | Functional forward fails | HTTP error on call 3 | Small "GradeIQ out of sync, retrying" | Unaffected: SwapUp's own results are authoritative | Retry with backoff; full map, so no gap |
 | GradeIQ goes down mid-session | Errors on calls 4–6 | Keep the last snapshot with its time | — | The snapshot is used only if it was final |
@@ -336,8 +354,8 @@ Implementation choices worth knowing (each stricter than or clarifying §3):
 - **Identity:** either GradeIQ check saying `mismatch` blocks the partner quote server-side (`reprice` asks for no quote; `CaseView.quoteBlocked`; also a lock blocker) — even from a provisional grade, because it protects the store. Only a **store manager** can accept the phone (`PATCH /api/cases/<id>` `{cameraOverride:{identity:true, reason}}`). Missing identity = `unverified`, never a pass.
 - **Advisor overrides:** removing a `camera_ai` fault or recording a better screen/body than the camera's floor → 409 unless the PATCH carries `cameraOverride: { reason }` (≥ 8 chars, name stored, audited). "Fill condition from faults" applies the camera floor too.
 - **Apply now merges the condition** (`mergeCondition`, then the camera floor) instead of rebuilding it from faults, so a worse answer the advisor recorded survives — what `mergeCondition`'s comment always promised.
-- **Camera lock (fail closed):** `cameraUrl` is withheld until GradeIQ `/screen.shown` is a string. An unreadable `/screen`, or a customer phone that can't run Check, can be overridden with `POST /api/test-sessions/<id>/camera-override {reason}`; the name and reason are kept on the session and the case is marked "LCD not camera-checked" at once.
-- **Pull cadence:** only while staff poll `GET /api/test-sessions/<id>`: `/screen` at most every 2 s (the customer's phone: every 0.5 s through the proxy); the whole session every 5 s from `cosmeticDone` until final **and** the LCD verdict is in, for at most 180 s; a retake restarts the window. The staff GET waits ≤ 1.5 s for this, then answers from what is stored.
+- **Camera lock (fail closed):** `cameraUrl` (single pass) and `screenUrl` (pass 2) are withheld until GradeIQ `/screen.shown` is a string. An unreadable `/screen`, or a customer phone that can't run Check, can be overridden with `POST /api/test-sessions/<id>/camera-override {reason}`; the name and reason are kept on the session and the case is marked "LCD not camera-checked" at once. `photosUrl` (pass 1) is not locked: the photos need nothing on the phone. `photosDone` = `cosmeticDone` seen; `screenDone` = an LCD verdict exists or `handoffDone` was seen.
+- **Pull cadence:** only while staff poll `GET /api/test-sessions/<id>`: `/screen` at most every 2 s (the customer's phone: every 0.5 s through the proxy); the whole session every 5 s from `cosmeticDone` until final **and** the LCD verdict is in, for at most 180 s from the later of `cosmeticDone` and the handoff (§3.3); a retake restarts the window. `timedOut` and `gradePending` use the same window. The staff GET waits ≤ 1.5 s for this, then answers from what is stored.
 - **Forwarding:** per session, one request at a time, outside every transaction; a body is sent only when its hash differs from the last one GradeIQ acknowledged — except that every new screen sweep forces a full re-send, because the sweep rewrites GradeIQ's `display` and drops results posted during its AI call (§5 #7). Failures back off 2 s → 60 s and show `outOfSync`. A create retries twice (5 s, 20 s) and then waits for Retry. A server restart is recovered lazily on the next staff or device poll.
 - **Deploy gate** (`su/deploy/deploy.sh`): the VM must get a 404 **with GradeIQ's JSON body** `{"error":"not found"}` — a wrong basePath also answers 404, but with an HTML page. Skipped only when `/etc/swapup.env` says `GRADEIQ_ENABLED=0`. Missing `GRADEIQ_*` lines are appended; existing ones are never changed.
 - **Local dev:** GradeIQ's dev server has no `NEXT_PUBLIC_BASE_PATH`, so it serves at the root: `GRADEIQ_BASE_URL=http://127.0.0.1:3700`, `GRADEIQ_PUBLIC_URL=http://localhost:3700` in `su/.env.local` (gitignored).

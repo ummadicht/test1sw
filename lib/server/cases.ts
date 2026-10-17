@@ -22,6 +22,7 @@ import { bestCampaign, type BonusResult, type Campaign } from "../domain/bonus";
 import { decide, type Decision } from "../domain/decision";
 import { canHold } from "../domain/credit";
 import { readImei } from "../domain/imei";
+import { indianMobile } from "../domain/phone";
 import { type CaseStatus, assertTransition, OPEN_TRADE_STATUSES, cancelEvents } from "../domain/lifecycle";
 import { DATA_CLEAR_LABEL, DATA_CLEAR_STATUSES, DATA_CLEAR_STEPS, dataClearState, missingDataClearSteps, type DataClearRecord, type DataClearState } from "../domain/dataClear";
 import {
@@ -442,6 +443,11 @@ export function dataClearDueIds(storeId: string): Set<string> {
 
 const COUNTER_ROLES = ["advisor", "store_manager"] as const;
 
+/** "+91 98200 12345" → "9820012345", so the customer lookup by mobile finds it; anything else as typed digits. */
+function storedMobile(raw: string | null | undefined): string {
+  return indianMobile(raw) ?? digitsOnly(raw).slice(0, 10);
+}
+
 function requireCounter(u: SessionUser): void {
   if (!(COUNTER_ROLES as readonly string[]).includes(u.role)) throw new HttpError(403, "Only store staff work cases at the counter.");
 }
@@ -454,7 +460,7 @@ export function createCase(u: SessionUser, input: { customerName?: string; custo
   const now = nowIso();
   const customer =
     input.customerName || input.customerPhone
-      ? JSON.stringify({ name: (input.customerName || "").trim().slice(0, 80), phone: digitsOnly(input.customerPhone).slice(0, 10), idType: null, idLast4: null })
+      ? JSON.stringify({ name: (input.customerName || "").trim().slice(0, 80), phone: storedMobile(input.customerPhone), idType: null, idLast4: null })
       : null;
   db()
     .prepare(
@@ -654,7 +660,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch): 
     sets.customer = patch.customer
       ? JSON.stringify({
           name: (patch.customer.name ?? prev?.name ?? "").trim().slice(0, 80),
-          phone: digitsOnly(patch.customer.phone ?? prev?.phone).slice(0, 10),
+          phone: storedMobile(patch.customer.phone ?? prev?.phone),
           idType: prev?.idType ?? null,
           idLast4: prev?.idLast4 ?? null,
         })

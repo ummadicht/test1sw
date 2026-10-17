@@ -211,7 +211,20 @@ export async function exportDeviceFax(id: string): Promise<Record<string, unknow
   return fax;
 }
 
-/** The camera page the STORE device opens. Staff-only: the id is the only key to the session. */
-export function cameraUrl(id: string): string {
-  return `${gradeiqConfig().publicUrl}/v2/cam/${id}`;
+/**
+ * One of the two camera passes (docs/TWO-PASS-CAMERA.md):
+ *   photos  the exterior photos and the cosmetic grade — needs nothing on the
+ *           customer's phone, so it can run before the phone has joined.
+ *   screen  the LCD sweep only — needs SwapUp Check on the customer's phone,
+ *           showing its photo screen after the tests.
+ */
+export type CameraPass = "photos" | "screen";
+
+/**
+ * The camera page the STORE device opens. Staff-only: the id is the only key to
+ * the session. No `pass` = GradeIQ's original single pass (photos, sweep and
+ * Settings photo in one go), which SwapUp Store ≤ 0.4.x still opens.
+ */
+export function cameraUrl(id: string, pass?: CameraPass): string {
+  return `${gradeiqConfig().publicUrl}/v2/cam/${id}${pass ? `?pass=${pass}` : ""}`;
 }

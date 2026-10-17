@@ -9,6 +9,8 @@ import {
   assessmentView,
   disagreements,
   gradeiqFunctionalMap,
+  pullWindowStart,
+  pullWindowClosed,
   type GiqScreen,
   type GradeiqSnapshot,
   type Finality,
@@ -32,7 +34,10 @@ import {
  *            "GradeIQ out of sync".
  *   pull     only while a staff client is watching (lazy on GET): /screen at
  *            most every 2 s; the whole session every 5 s once the photos are
- *            accepted, for at most 180 s — then the last snapshot is kept.
+ *            accepted, for at most 180 s from the LATER of the photos and the
+ *            camera page finishing (pullWindowStart — with two camera passes the
+ *            screen check comes minutes after the photos) — then the last
+ *            snapshot is kept.
  *   abandon  cancel / reissue stop all calls; the old id is recorded.
  *
  * Nothing here invents a grade: no GradeIQ session, no reachable GradeIQ, no
@@ -45,7 +50,6 @@ const SYNC_STATUSES = ["joined", "testing", "complete"];
 const SCREEN_EVERY_MS = 2_000;
 const DEVICE_SCREEN_EVERY_MS = 500;
 const PULL_EVERY_MS = 5_000;
-const PULL_WINDOW_MS = 180_000;
 const MAX_AUTO_CREATES = 3;
 
 /** The columns the bridge reads — a slice of the test_sessions row. */
@@ -364,7 +368,8 @@ function refreshScreen(id: string, gradeiqId: string, maxAgeMs: number): Promise
     // Written only when something changed: the customer's phone polls this every 700 ms.
     if (JSON.stringify(next) !== JSON.stringify(prev) || !r.gradeiq_screen_at) saveLive(id, next, now);
     if (screen) {
-      // The 180 s pull window starts when the photos are accepted; a retake restarts it.
+      // The pull window opens when the photos are accepted (and again at the
+      // handoff above — pullWindowStart); a retake restarts it.
       if (screen.cosmeticDone && !r.gradeiq_cosmetic_done_at) db().prepare(`UPDATE test_sessions SET gradeiq_cosmetic_done_at = ? WHERE id = ?`).run(now, id);
       if (!screen.cosmeticDone && r.gradeiq_cosmetic_done_at) db().prepare(`UPDATE test_sessions SET gradeiq_cosmetic_done_at = NULL WHERE id = ?`).run(id);
     }
@@ -376,8 +381,17 @@ function refreshScreen(id: string, gradeiqId: string, maxAgeMs: number): Promise
   return entry.promise;
 }
 
-function pullWindowOver(r: Pick<GiqRow, "gradeiq_cosmetic_done_at">, now = Date.now()): boolean {
-  return !!r.gradeiq_cosmetic_done_at && now - Date.parse(r.gradeiq_cosmetic_done_at) > PULL_WINDOW_MS;
+/**
+ * When this session's pull window opened: the later of the photos being
+ * accepted and the camera page finishing (live().handoffAt, stamped by
+ * refreshScreen). null until the photos are accepted.
+ */
+function windowStart(r: Pick<GiqRow, "gradeiq_cosmetic_done_at" | "gradeiq_screen">): string | null {
+  return pullWindowStart(r.gradeiq_cosmetic_done_at, live(r).handoffAt);
+}
+
+function pullWindowOver(r: Pick<GiqRow, "gradeiq_cosmetic_done_at" | "gradeiq_screen">, now = Date.now()): boolean {
+  return pullWindowClosed(windowStart(r), now);
 }
 
 /** The finality of what is stored, with the 180 s cap applied. */
@@ -388,7 +402,7 @@ function storedFinality(r: GiqRow): { snap: GradeiqSnapshot | null; fin: Finalit
 }
 
 function pullDue(r: GiqRow): boolean {
-  if (r.gradeiq_state !== "ready" || !r.gradeiq_id || !r.gradeiq_cosmetic_done_at) return false;
+  if (r.gradeiq_state !== "ready" || !r.gradeiq_id || !windowStart(r)) return false;
   if (pullWindowOver(r)) return false;
   if (r.gradeiq_synced_at && Date.now() - Date.parse(r.gradeiq_synced_at) < PULL_EVERY_MS) return false;
   const { snap, fin } = storedFinality(r);
@@ -396,7 +410,14 @@ function pullDue(r: GiqRow): boolean {
   // Done once the grade is final AND the LCD sweep's verdict is in (or the
   // camera finished its whole sequence and we have looked since).
   const lcdIn = !!snap?.displayCheck || (!!l.handoffAt && !!r.gradeiq_synced_at && r.gradeiq_synced_at > l.handoffAt);
-  return !(fin.final && lcdIn);
+  // Photos first (two passes): until the screen check has run there is no LCD
+  // verdict to fetch, so a final grade needs no more pulls — each one downloads
+  // the whole session, photos and all. The handoff reopens the window and the
+  // pulls resume until its verdict is in.
+  const screenCheckToCome = !snap?.displayCheck && !l.handoffAt;
+  // Photos skipped: there is no grade to wait for — only the screen check's verdict.
+  if (!r.gradeiq_cosmetic_done_at) return !lcdIn;
+  return !(fin.final && (lcdIn || screenCheckToCome));
 }
 
 /** Pull the whole session now and store the snapshot. Returns it, or null when GradeIQ could not be read. */
@@ -439,9 +460,12 @@ export async function refreshGrading(id: string, waitMs = 1_500): Promise<void> 
   const r = row(id);
   if (!r) return;
   if (r.gradeiq_state === "pending" && !mem.creating.has(id) && !mem.createTimers.has(id)) void ensureCreated(id);
-  if (r.gradeiq_state !== "ready" || !r.gradeiq_id || !SYNC_STATUSES.includes(r.status)) return;
+  // Photos first: pass 1 runs while the session is still waiting/opened (the
+  // customer's phone hasn't joined), so /screen and the grade are read from then
+  // on. Forwarding the phone's results still starts only once it has joined.
+  if (r.gradeiq_state !== "ready" || !r.gradeiq_id || !["waiting", "opened", ...SYNC_STATUSES].includes(r.status)) return;
   const st = mem.sync.get(id);
-  if (syncStatus(r).state !== "in_sync" && syncStatus(r).state !== "idle" && !st?.running && !st?.timer) scheduleSync(id);
+  if (SYNC_STATUSES.includes(r.status) && syncStatus(r).state !== "in_sync" && syncStatus(r).state !== "idle" && !st?.running && !st?.timer) scheduleSync(id);
   const work = (async () => {
     await refreshScreen(id, r.gradeiq_id!, SCREEN_EVERY_MS);
     const r2 = row(id);
@@ -480,7 +504,16 @@ export async function deviceScreen(r: GiqRow): Promise<DeviceScreen> {
   const l = live(row(r.id) ?? r);
   if (l.screenError || !l.screen) throw new DeviceScreenUnavailable(l.screenError ?? "The photo check has not started yet.");
   const s = l.screen;
-  return { state: "ready", pattern: s.pattern, shown: s.shown, cosmeticDone: s.cosmeticDone, handoffDone: s.handoffDone, capture: s.capture, connectedAt: s.connectedAt ?? null };
+  const hideStale = checkBefore050(r.device) && !s.handoffDone;
+  return {
+    state: "ready",
+    pattern: s.pattern,
+    shown: s.shown,
+    cosmeticDone: hideStale ? false : s.cosmeticDone,
+    handoffDone: s.handoffDone,
+    capture: hideStale ? null : s.capture,
+    connectedAt: s.connectedAt ?? null,
+  };
 }
 
 /** POST /api/device/screen {shown} — the pattern the customer's phone is actually showing. */
@@ -505,9 +538,21 @@ export type GradingView = {
   /** The customer's phone is echoing screen patterns (GradeIQ /screen `shown` is a string). */
   deviceReady: boolean;
   cameraConnected: boolean;
-  /** GradeIQ's camera page for the STORE device. Staff-only; withheld until deviceReady (or an override). */
+  /**
+   * GradeIQ's camera page for the STORE device, the original single pass (photos +
+   * screen sweep). Staff-only; withheld until deviceReady (or an override). Kept as
+   * it was for SwapUp Store ≤ 0.4.x; newer apps use photosUrl, then screenUrl.
+   */
   cameraUrl: string | null;
-  /** Why cameraUrl is withheld (null when it is not). */
+  /**
+   * Pass 1 — the exterior photos only (`?pass=photos`). Staff-only. Offered as soon
+   * as camera grading is ready and the session is open or still waiting: it needs
+   * nothing on the customer's phone, so it is NOT gated on deviceReady.
+   */
+  photosUrl: string | null;
+  /** Pass 2 — the screen check only (`?pass=screen`). Same gate as cameraUrl: the phone must be showing its photo screen. */
+  screenUrl: string | null;
+  /** Why cameraUrl / screenUrl are withheld (null when they are not). */
   cameraLocked: string | null;
   canOverride: boolean;
   override: CameraOverrideInfo;
@@ -515,13 +560,17 @@ export type GradingView = {
   pattern: string | null;
   cosmeticDone: boolean;
   handoffDone: boolean;
+  /** The photos were accepted (GradeIQ's cosmeticDone seen) — pass 1, or the photo half of the single pass. */
+  photosDone: boolean;
+  /** The screen check ran: an LCD verdict exists, or the camera page said it finished (handoffDone seen). */
+  screenDone: boolean;
   capture: { verdict: string; reasons: string[] } | null;
   sync: { state: "idle" | "in_sync" | "sending" | "retrying"; error: string | null; forwardedAt: string | null };
   /** "GradeIQ out of sync, retrying". SwapUp's own results stay authoritative either way. */
   outOfSync: boolean;
   assessment: AssessmentView | null;
   disagreements: Disagreement[];
-  /** Stopped waiting for a final grade (180 s after the photos were accepted). */
+  /** Stopped waiting for a final grade (180 s after the later of the photos being accepted and the screen check finishing). */
   timedOut: boolean;
   /** Photos are in but the grade (or the LCD verdict) isn't final yet — Apply waits (cameraGradePending). */
   gradePending: boolean;
@@ -530,13 +579,14 @@ export type GradingView = {
 
 /**
  * The photos are in and GradeIQ is still working out the grade or the LCD
- * verdict, inside the 180 s window. Applying now would turn the camera's
+ * verdict, inside the 180 s pull window (which opens again when the screen
+ * check finishes — pullWindowStart). Applying now would turn the camera's
  * confirmed damage into "not final, so not added" flags, and Apply is one-shot —
  * so Apply waits. With photos as the phone's LAST step, the phone reports
  * "complete" about a second after the photos, well before the grade lands.
  */
 export function cameraGradePending(r: GiqRow): boolean {
-  if (!giq.gradeiqConfig().enabled || r.gradeiq_state !== "ready" || !r.gradeiq_id || !r.gradeiq_cosmetic_done_at) return false;
+  if (!giq.gradeiqConfig().enabled || r.gradeiq_state !== "ready" || !r.gradeiq_id || !windowStart(r)) return false;
   if (pullWindowOver(r)) return false;
   const { snap, fin } = storedFinality(r);
   const l = live(r);
@@ -544,9 +594,28 @@ export function cameraGradePending(r: GiqRow): boolean {
   // or the camera page still running its screen sweep. A failed grade (stub tier,
   // too little visible) or a provisional one that is no longer refining (a case
   // on the phone, say) will not become final by waiting — it needs a retake.
+  // The screen check finished but its verdict hasn't been read since: Apply would record "LCD not checked".
+  const pulledSinceHandoff = !!l.handoffAt && !!r.gradeiq_synced_at && r.gradeiq_synced_at > l.handoffAt;
+  const lcdPending = !!l.handoffAt && !snap?.displayCheck && !pulledSinceHandoff;
+  // Photos skipped: no grade can come — wait only for the screen check's verdict.
+  if (!r.gradeiq_cosmetic_done_at) return lcdPending;
   const settled = fin.final || fin.status === "failed" || (fin.status === "provisional" && !snap?.refining);
   const sweepRunning = !snap?.displayCheck && !l.handoffAt;
-  return !settled || sweepRunning;
+  return !settled || sweepRunning || lcdPending;
+}
+
+/**
+ * SwapUp Check before 0.5.0 counts a cosmeticDone or capture verdict already on
+ * GradeIQ's /screen as "the camera is here" and leaves its photo screen 30 s
+ * after cosmeticDone. With photos first, pass 1 leaves exactly that behind
+ * before the phone even joins — so those builds would walk off before the
+ * screen check. For them, /screen shows neither until the camera's handoff.
+ */
+function checkBefore050(deviceJson: string | null): boolean {
+  const v = parseJson<{ appVersion?: string | null } | null>(deviceJson, null)?.appVersion ?? "";
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
+  if (!m || v.startsWith("web-")) return false;
+  return Number(m[1]) === 0 && Number(m[2]) < 5;
 }
 
 function isBrowserCheck(deviceJson: string | null): boolean {
@@ -589,6 +658,10 @@ export function gradingView(r: GiqRow): GradingView {
   const photosEnded = ["skipped", "unavailable"].includes(String((resultsNow.display?.detail as Record<string, unknown> | null | undefined)?.photos ?? ""));
   const deviceReady = state === "ready" && open && !l.screenError && typeof screen?.shown === "string" && !photosEnded;
   const sync = syncStatus(r);
+  // Two camera passes (docs/TWO-PASS-CAMERA.md): the photos can be in before the
+  // customer's phone has even joined, and the screen check comes after its tests.
+  const photosDone = !!r.gradeiq_cosmetic_done_at || !!screen?.cosmeticDone;
+  const screenDone = !!snap?.displayCheck || !!l.handoffAt;
 
   let cameraLocked: string | null = null;
   let canOverride = false;
@@ -599,13 +672,20 @@ export function gradingView(r: GiqRow): GradingView {
     canOverride = true;
   } else if (!screen) cameraLocked = "Checking whether the customer's phone is ready…";
   else if (typeof screen.shown !== "string" || photosEnded) {
+    // Once the photos are in (pass 1), only the screen check is left behind this
+    // lock — say that, not "photos". The single pass never gets here with photos
+    // done: it takes them with the phone already echoing.
     cameraLocked =
       r.status === "complete" || photosEnded
-        ? "The customer's phone finished without showing the photo screen. Photos now need an override with your name and a reason (the LCD is then not camera-checked)."
+        ? photosDone
+          ? "The customer's phone finished without showing the photo screen. The screen check now needs an override with your name and a reason (the LCD is then not camera-checked)."
+          : "The customer's phone finished without showing the photo screen. Photos now need an override with your name and a reason (the LCD is then not camera-checked)."
         : photosLastApp(r.device)
           ? "The customer's phone shows the photo screen when its tests finish — the camera unlocks by itself then."
           : isBrowserCheck(r.device)
-            ? "A browser check can't show the photo screen. Use \"Take photos anyway\" with a reason — the LCD is then not camera-checked."
+            ? photosDone
+              ? "A browser check can't show the photo screen. The screen check needs an override with your name and a reason — the LCD is then not camera-checked."
+              : "A browser check can't show the photo screen. Use \"Take photos anyway\" with a reason — the LCD is then not camera-checked."
             : "Open SwapUp Check on the customer's phone and keep it on the photo screen — it has to show the patterns the camera asks for.";
     canOverride = true;
   }
@@ -614,16 +694,41 @@ export function gradingView(r: GiqRow): GradingView {
     cameraLocked = null;
     canOverride = false;
   }
+  // Pass 1 needs nothing on the customer's phone, so it is offered the moment the
+  // GradeIQ session exists — before the phone joins, which is the point of it.
+  const photosOpen = state === "ready" && !!r.gradeiq_id && ["waiting", "opened", ...SYNC_STATUSES].includes(r.status);
+
+  // What the grade itself says, once it says anything.
+  const gradeLine = fin.final
+    ? `Camera grade ${snap?.cosmeticGrade} (final).`
+    : fin.provisional
+      ? `Camera grade ${snap?.cosmeticGrade || ""} is provisional. ${fin.reasons[0] ?? ""}`.trim()
+      : fin.status === "failed"
+        ? fin.reasons[0]
+        : null;
+  // Photos in, screen check still to come: tell the advisor what happens next,
+  // or the grade alone would read as if the camera were finished.
+  let next: string | null = null;
+  if (state === "ready" && photosDone && !screenDone) {
+    if (unlocked)
+      next = override
+        ? "Check the screen on this device. It was unlocked by override, so the LCD will be recorded as not camera-checked."
+        : "The customer's phone is on its photo screen. Check its screen on this device.";
+    else if (r.status === "waiting" || r.status === "opened") next = "Next, connect the customer's phone. The screen check comes after its tests.";
+    else if ((r.status === "joined" || r.status === "testing") && !l.screenError && !photosEnded && photosLastApp(r.device))
+      next = "The customer's phone is testing itself. The screen check comes after its tests.";
+    else next = cameraLocked;
+  }
 
   let msg: string;
   if (!cfg.enabled) msg = "Camera grading is switched off. Check the condition by eye.";
   else if (state === "disabled") msg = "This session started without camera grading. Press Retry to add it, or check the condition by eye.";
   else if (state === "pending") msg = r.gradeiq_error ? `Setting up camera grading… ${r.gradeiq_error}` : "Setting up camera grading…";
   else if (state === "failed") msg = `Camera grading unavailable. Check the condition by eye. ${r.gradeiq_error ?? ""}`.trim();
-  else if (fin.final) msg = `Camera grade ${snap?.cosmeticGrade} (final).`;
-  else if (fin.provisional) msg = `Camera grade ${snap?.cosmeticGrade || ""} is provisional. ${fin.reasons[0] ?? ""}`.trim();
-  else if (fin.status === "failed") msg = fin.reasons[0];
-  else if (screen?.cosmeticDone) msg = "Photos accepted — the camera grade is being worked out.";
+  else if (gradeLine) msg = next ? `${gradeLine} ${next}` : gradeLine;
+  else if (next) msg = `Photos accepted — ${next.charAt(0).toLowerCase()}${next.slice(1)}`;
+  else if (photosDone) msg = screenDone ? "Photos and screen checked — the camera grade is being worked out." : "Photos accepted — the camera grade is being worked out.";
+  else if (screenDone) msg = "Screen checked. No photos were accepted, so there is no camera grade — check the condition by eye.";
   else if (unlocked) msg = override ? "Camera unlocked by override — the LCD will be recorded as not camera-checked." : "The customer's phone is ready. Take the photos on this device.";
   else msg = cameraLocked ?? "";
 
@@ -637,6 +742,8 @@ export function gradingView(r: GiqRow): GradingView {
     deviceReady,
     cameraConnected: !!screen?.connectedAt,
     cameraUrl: unlocked ? giq.cameraUrl(r.gradeiq_id!) : null,
+    photosUrl: photosOpen ? giq.cameraUrl(r.gradeiq_id!, "photos") : null,
+    screenUrl: unlocked ? giq.cameraUrl(r.gradeiq_id!, "screen") : null,
     cameraLocked,
     canOverride,
     override,
@@ -644,6 +751,8 @@ export function gradingView(r: GiqRow): GradingView {
     pattern: screen?.pattern ?? null,
     cosmeticDone: !!screen?.cosmeticDone,
     handoffDone: !!screen?.handoffDone,
+    photosDone,
+    screenDone,
     capture: screen?.capture ? { verdict: screen.capture.verdict, reasons: screen.capture.reasons } : null,
     sync,
     outOfSync: sync.state === "retrying" || sync.state === "sending",
@@ -687,8 +796,9 @@ export async function evidenceForApply(id: string): Promise<ApplyEvidence> {
   let r = row(id)!;
   let devicefax = false;
   if (cfg.enabled && r.gradeiq_state === "ready" && r.gradeiq_id) {
-    // /screen first: it is what records when the photos were accepted (the 180 s
-    // window). On the override paths nothing else may have polled it since.
+    // /screen first: it is what records when the photos were accepted and when
+    // the camera page finished (the pull window). On the override paths nothing
+    // else may have polled it since.
     await refreshScreen(id, r.gradeiq_id, 0).catch(() => {});
     const snap = await pullSnapshot(id);
     if (!snap) notes.push("GradeIQ could not be read at Apply; the last camera result was used only if it was final.");

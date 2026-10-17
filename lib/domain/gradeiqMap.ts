@@ -272,7 +272,7 @@ export type Finality = {
  * gate said ok, and no case or cover on the phone. GradeIQ's `status` is
  * ignored: a cosmetic-only session still reads "open".
  *
- * `timedOut`: SwapUp stopped waiting (180 s after the photos were accepted).
+ * `timedOut`: SwapUp stopped waiting (the pull window — pullWindowStart — ran out).
  */
 export function finality(s: GradeiqSnapshot | null, opts: { timedOut: boolean } = { timedOut: false }): Finality {
   const out = (status: Finality["status"], reasons: string[]): Finality => ({ status, final: status === "final", provisional: status === "provisional", reasons });
@@ -291,6 +291,38 @@ export function finality(s: GradeiqSnapshot | null, opts: { timedOut: boolean } 
   if (s.refining) reasons.push(opts.timedOut ? "Provisional grade (final check did not finish). Confirm by eye." : "Provisional grade — the final check is still running.");
   if (s.capture?.verdict !== "ok" && s.capture?.verdict !== "retake") reasons.push("The camera's photos were not accepted yet.");
   return reasons.length ? out("provisional", reasons) : out("final", []);
+}
+
+/* ─────────────────────────── the pull window ─────────────────────────── */
+
+/** How long SwapUp keeps pulling GradeIQ for a final grade and the LCD verdict before it keeps what it has. */
+export const PULL_WINDOW_MS = 180_000;
+
+/**
+ * When the pull window opens: the LATER of the photos being accepted
+ * (`cosmeticDoneAt`) and the camera page finishing (`handoffAt`).
+ *
+ * With one camera pass the two are a minute apart at most. With two passes
+ * (docs/TWO-PASS-CAMERA.md) the photos come first and the screen check only
+ * after the customer's phone has tested itself — minutes later — so a window
+ * that started at the photos would have closed before the screen check's LCD
+ * verdict existed, and it would never be pulled. Opening it again at the
+ * handoff gives that verdict (and a grade still refining) its own 180 s.
+ *
+ * null = the photos are not accepted yet: there is no camera grade to wait for.
+ * Both times are SwapUp's own stamps of when it first SAW each flag.
+ */
+export function pullWindowStart(cosmeticDoneAt: string | null, handoffAt: string | null): string | null {
+  // Photos skipped: the screen check alone still has a verdict to fetch, from its handoff.
+  if (!cosmeticDoneAt) return handoffAt;
+  if (!handoffAt) return cosmeticDoneAt;
+  // An unreadable handoff stamp never moves the window (NaN compares false).
+  return Date.parse(handoffAt) > Date.parse(cosmeticDoneAt) ? handoffAt : cosmeticDoneAt;
+}
+
+/** True once the window that opened at `start` has run its 180 s. No window (null) is never "over". */
+export function pullWindowClosed(start: string | null, now: number, windowMs = PULL_WINDOW_MS): boolean {
+  return !!start && now - Date.parse(start) > windowMs;
 }
 
 /* ─────────────────────────── the confirmed bar ─────────────────────────── */

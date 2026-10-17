@@ -72,6 +72,29 @@ a rejected store → 403. 5 wrong tries for one person on one tablet lock that p
 `POST /api/stores/<storeId>/wifi` (store_manager / org_admin) `{ ssid, password, security, hidden }`
 → same shape. `{ ssid: "" }` clears it. Special characters `\ ; , : "` are escaped in `qr`.
 
+## 2b. Returning customers (find by mobile)
+
+The counter starts with the customer's mobile number (since 2026-10-17, `docs/TWO-PASS-CAMERA.md`).
+
+`GET /api/customers?phone=<10 digits>` (Bearer, `advisor` / `store_manager`) →
+
+```json
+{
+  "customer": { "name": "Meera Iyer", "phone": "9820012345" } | null,
+  "history": [{ "caseId", "ref", "status", "storeName", "device": "Samsung Galaxy S22 128GB" | null, "createdAt" }]
+}
+```
+
+- Matched on the phone recorded on earlier **cases of the caller's own organisation** (any of its
+  stores — a sister store's customer is still a returning customer); never another client's.
+- `history`: newest first, at most 10, every status (the app labels them). `customer` is null when
+  no case has the number; `customer.name` is the newest name any of them recorded, `""` when none did
+  (a case opened with only the number) — ask for it.
+- The number is reduced to digits first; `+91` / `91` and a leading `0` are dropped. Anything that is
+  not a 10-digit Indian mobile (6–9 first) → `400 "Enter a 10-digit Indian mobile number."`
+- `partner`, `org_admin`, `platform` → `403` (no counter). Then create as before
+  (`POST /api/test-sessions` with `customerName` + `customerPhone`).
+
 ## 3. Test sessions (store side)
 
 `POST /api/test-sessions` (Bearer, advisor/store_manager)
@@ -193,9 +216,14 @@ every 700 ms, show `pattern` full-screen, echo what is on screen.
 - Leave (to Done) when `handoffDone` is true, or 30 s after `cosmeticDone`; "Finish without photos"
   after 90 s with no store camera page (a NEW `connectedAt` — a page loaded after the screen mounted —
   a pattern request or a capture verdict counts as connected), or over a pattern left unchanged for 90 s.
+- Two camera passes (2026-10-17, §8): the store's photos (pass 1) are usually taken BEFORE the phone
+  joins, so `cosmeticDone: true` and a `capture` verdict may already be there when this screen mounts.
+  Those are pass 1's — only a `cosmeticDone` / `capture` that appears or changes after the screen
+  mounted counts as connected or starts the 30 s. `handoffDone` comes only from the screen check (pass 2).
 - `connectedAt` (since 2026-10-17): GradeIQ's stamp of the last camera-page load; never cleared.
 - Apply (`POST /api/test-sessions/<id>/apply`) answers **409** while the photos are in but the camera
-  grade or LCD verdict is still being worked out (≤ 180 s); `grading.gradePending` says so.
+  grade or LCD verdict is still being worked out (≤ 180 s from the later of the photos and the screen
+  check); `grading.gradePending` says so.
 - `503 { error }` → the server can't reach GradeIQ just now: keep the screen, keep polling.
 - Never carries the GradeIQ session id or the camera URL.
 
@@ -269,9 +297,28 @@ SwapUp Check is built on GradeIQ: every test session gets a GradeIQ session in t
 automatically — no extra questions — and its screen echoes the patterns the **store device's**
 camera asks for; GradeIQ's AI vision grades cracks, scratches and the LCD from those photos.
 
-Store-app flow: wait for `grading.deviceReady` → button **Take photos** opens `grading.cameraUrl`
-in Chrome (`Linking.openURL`, not the WebView: the page needs the camera, HTTPS and, on Android,
-the torch) → watch `grading.capture` / `grading.assessment` → Apply.
+**Two camera passes (2026-10-17, `docs/TWO-PASS-CAMERA.md`).** The screen sweep needs SwapUp Check
+open on the customer's phone, which it can't be before the phone has joined — so the camera page is
+split in two, and the counter runs: customer (found by mobile, §2b) → **photos** → Wi‑Fi + QR → the
+phone downloads/opens SwapUp Check and tests itself → **screen check** → Apply → continue pricing.
+
+1. **Take photos** — `grading.photosUrl` (`/v2/cam/<id>?pass=photos`): the exterior photos and the
+   cosmetic grade. Offered as soon as `state` is `ready` and the session is `waiting`…`complete`;
+   **not** gated on the phone (it needs nothing there). `grading.photosDone` once GradeIQ accepts them.
+2. **Connect the customer's phone** — the Wi‑Fi QR, test QR and code (§3), then its tests.
+3. **Check the screen** — `grading.screenUrl` (`/v2/cam/<id>?pass=screen`): the LCD sweep only, while
+   the phone shows its photo screen. Same fail-closed lock (and override) as `cameraUrl`.
+   `grading.screenDone` once an LCD verdict exists or the page reported it finished.
+4. Watch `grading.assessment` → Apply (waits while `gradePending`).
+
+Open both in Chrome (`Linking.openURL`, not the WebView: the page needs the camera, HTTPS and, on
+Android, the torch). `grading.message` speaks to the two-pass states once the photos are in ("Photos
+accepted — next, connect the customer's phone. The screen check comes after its tests."); before
+that it explains the screen-check lock, so the photos card should carry its own copy.
+
+SwapUp Store ≤ 0.4.x (single pass): wait for `grading.deviceReady` → **Take photos** opens
+`grading.cameraUrl` (photos, sweep and Settings photo in one go) → Apply. Unchanged; an app that gets
+no `photosUrl` from the server (an older server) falls back to it.
 
 ```ts
 type GradingView = {
@@ -281,19 +328,24 @@ type GradingView = {
   canRetry: boolean;               // show Retry → POST …/grading-retry
   deviceReady: boolean;            // the customer's phone is echoing patterns
   cameraConnected: boolean;
-  cameraUrl: string | null;        // GradeIQ /v2/cam/<id> — ONLY when deviceReady (or overridden); never in a QR
-  cameraLocked: string | null;     // why the camera button is locked
+  cameraUrl: string | null;        // GradeIQ /v2/cam/<id>, the single pass — ONLY when deviceReady (or overridden); never in a QR
+  photosUrl: string | null;        // /v2/cam/<id>?pass=photos — as soon as state is ready and the session is waiting…complete; no device gate; never in a QR
+  screenUrl: string | null;        // /v2/cam/<id>?pass=screen — same gate as cameraUrl; never in a QR
+  cameraLocked: string | null;     // why cameraUrl / screenUrl are locked
   canOverride: boolean;            // offer "Start without the customer's phone" → …/camera-override {reason}
   override: { by: string; reason: string; at: string } | null;
   screenReadable: boolean;
   pattern: string | null; cosmeticDone: boolean; handoffDone: boolean;
+  photosDone: boolean;             // the photos were accepted (pass 1, or the single pass's photos)
+  screenDone: boolean;             // the screen check ran: an LCD verdict exists, or the camera page finished
   capture: { verdict: string; reasons: string[] } | null;   // e.g. "retake" + reasons
   sync: { state: "idle" | "in_sync" | "sending" | "retrying"; error: string | null; forwardedAt: string | null };
   outOfSync: boolean;              // show "GradeIQ out of sync, retrying" — SwapUp's own results stay authoritative
   assessment: AssessmentView | null;
   disagreements: { topic: "screen"|"back"|"display"|"identity"; customer: string|null; tested: string|null;
                    camera: string; final: string; message: string; photoIndex: number|null; box: Box|null }[];
-  timedOut: boolean;               // stopped waiting 180 s after the photos were accepted
+  timedOut: boolean;               // stopped waiting: 180 s after the LATER of the photos and the screen check
+  gradePending: boolean;           // photos in, grade or LCD verdict still being worked out — Apply waits
   syncedAt: string | null;
 };
 type AssessmentView = {
@@ -321,9 +373,13 @@ type AssessmentView = {
 ```
 
 Rules the server enforces:
-- **Camera lock fails closed.** `cameraUrl` is null until GradeIQ's `/screen` reports the
-  customer's phone echoing (`shown` is a string). Unreadable `/screen` → `cameraLocked` says so;
-  only `camera-override` with a reason unlocks it, and the LCD is then "not camera-checked".
+- **Camera lock fails closed.** `cameraUrl` and `screenUrl` are null until GradeIQ's `/screen`
+  reports the customer's phone echoing (`shown` is a string). Unreadable `/screen` → `cameraLocked`
+  says so; only `camera-override` with a reason unlocks them, and the LCD is then "not
+  camera-checked". `photosUrl` has no such lock: the photos need nothing on the phone.
+- **The pull window** (the session pulled every 5 s for a final grade and the LCD verdict) runs
+  180 s from the LATER of the photos being accepted and the screen check finishing — with the photos
+  first, the screen check comes minutes later and would otherwise never be pulled. No photos, no window.
 - **Only confirmed damage changes the case:** confidence ≥ 0.7, corroborated, located with a box,
   from a FINAL grade (a grade letter, a real model tier, no refinement running, photos accepted,
   no case on the phone). Weaker sightings are flags. A provisional grade is never applied.

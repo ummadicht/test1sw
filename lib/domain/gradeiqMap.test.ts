@@ -16,6 +16,9 @@ import {
   reconcileFaultSources,
   disagreements,
   assessmentView,
+  pullWindowStart,
+  pullWindowClosed,
+  PULL_WINDOW_MS,
   type GradeiqSnapshot,
 } from "./gradeiqMap.ts";
 import { mergeCondition, unionFaults, type TestResults, type Declared } from "./diagnostics.ts";
@@ -505,4 +508,32 @@ test("lcd: the model's own outright fail (no findings) at ≥70% is confirmed; f
   assert.match(low.lcd.doubt ?? "", /low confidence/);
   const minor = mapCamera(snap({}, {}, { displayCheck: { verdict: "fail", confidence: 0.9, findings: [{ label: "speck", severity: "minor" }], patterns: ["white"], requested: ["white"], missing: [] } }), FINAL);
   assert.match(minor.lcd.doubt ?? "", /only minor marks \(speck\)/);
+});
+
+test("pull window: opens at the LATER of the photos and the camera page finishing", () => {
+  const photos = "2026-10-17T10:00:00.000Z";
+  const screen = "2026-10-17T10:06:30.000Z"; // the screen check, after the phone's tests
+  assert.equal(pullWindowStart(null, null), null, "no photos, nothing to wait for");
+  assert.equal(pullWindowStart(null, screen), screen, "photos skipped: the screen check's handoff opens the window for its verdict");
+  assert.equal(pullWindowStart(photos, null), photos, "photos in, screen check still to come");
+  assert.equal(pullWindowStart(photos, screen), screen, "two passes: the screen check reopens it");
+  assert.equal(pullWindowStart(screen, photos), screen, "a handoff seen before a retake's photos doesn't pull it back");
+  assert.equal(pullWindowStart(photos, "not a time"), photos, "an unreadable stamp never moves it");
+});
+
+test("pull window: 180 s from its start; a screen check minutes after the photos still gets pulled", () => {
+  const photos = Date.parse("2026-10-17T10:00:00.000Z");
+  const screen = "2026-10-17T10:06:30.000Z";
+  assert.equal(PULL_WINDOW_MS, 180_000);
+  assert.equal(pullWindowClosed(null, photos + 10 * 60_000), false, "no window is never over");
+  const onePass = pullWindowStart(new Date(photos).toISOString(), null);
+  assert.equal(pullWindowClosed(onePass, photos + 180_000), false, "exactly 180 s is still inside");
+  assert.equal(pullWindowClosed(onePass, photos + 180_001), true);
+  // The phone tested itself for 6½ minutes: the photos' window closed long ago,
+  // but the screen check's verdict must still be waited for.
+  const twoPass = pullWindowStart(new Date(photos).toISOString(), screen);
+  const afterScreen = Date.parse(screen) + 5_000;
+  assert.equal(pullWindowClosed(onePass, afterScreen), true, "what the old rule would have said");
+  assert.equal(pullWindowClosed(twoPass, afterScreen), false);
+  assert.equal(pullWindowClosed(twoPass, Date.parse(screen) + 180_001), true);
 });
