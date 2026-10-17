@@ -496,3 +496,13 @@ test("staff view: grade, range and review flags travel with the letter; nothing 
   assert.equal(none.grade, null, "no grade is no grade — never a letter");
   assert.equal(none.identity.verdict, "unverified");
 });
+
+test("lcd: the model's own outright fail (no findings) at ≥70% is confirmed; flags say WHY a fail wasn't", () => {
+  const outright = mapCamera(snap({}, {}, { displayCheck: { verdict: "fail", confidence: 0.95, note: "green tint", findings: [], patterns: ["white"], requested: ["white"], missing: [] } }), FINAL);
+  assert.deepEqual(ids(outright.faults), ["display_lines"]);
+  assert.equal(outright.lcd.confirmed, true);
+  const low = mapCamera(snap({}, {}, { displayCheck: { verdict: "fail", confidence: 0.4, findings: [{ label: "line", severity: "severe" }], patterns: ["white"], requested: ["white"], missing: [] } }), FINAL);
+  assert.match(low.lcd.doubt ?? "", /low confidence/);
+  const minor = mapCamera(snap({}, {}, { displayCheck: { verdict: "fail", confidence: 0.9, findings: [{ label: "speck", severity: "minor" }], patterns: ["white"], requested: ["white"], missing: [] } }), FINAL);
+  assert.match(minor.lcd.doubt ?? "", /only minor marks \(speck\)/);
+});

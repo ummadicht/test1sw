@@ -357,6 +357,8 @@ export type LcdCheck = {
    * A weaker fail is only a flag for a person. Absent on records stored before 2026-10-16.
    */
   confirmed?: boolean;
+  /** Why a "fail" was not confirmed (minor marks only / low confidence), for the advisor. */
+  doubt?: string | null;
 };
 
 export type CameraMapping = {
@@ -536,6 +538,7 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
       cameraChecked: !incomplete,
       verdict: dc.verdict,
       confirmed: !incomplete && (dc.verdict === "pass" || displayFailConfirmed(dc)),
+      doubt: displayFailDoubt(dc),
       reason: incomplete ? dc.reason || (dc.missing.length ? `Not captured: ${dc.missing.join(", ")}.` : dc.note || "The sweep could not judge the screen.") : null,
     };
     if (dc.verdict === "fail") {
@@ -549,12 +552,10 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
           box: null,
         });
         if (SCREEN_ORDER.indexOf("lines_or_spots") > SCREEN_ORDER.indexOf(floor.screen)) floor = { ...floor, screen: "lines_or_spots" };
-      } else
-        flags.push(
-          (dc.confidence ?? 0) >= CONFIRMED_CONFIDENCE
-            ? `Camera screen sweep noted only minor marks${dc.findings[0]?.label ? ` (${dc.findings[0].label})` : ""}. Check the display by eye.`
-            : `Camera screen sweep failed with low confidence (${pct(dc.confidence)}). Check the display by eye.`
-        );
+      } else {
+        const doubt = displayFailDoubt(dc) ?? "the camera's screen sweep was not sure";
+        flags.push(`${doubt[0].toUpperCase()}${doubt.slice(1)}. Check the display by eye.`);
+      }
     }
   }
   if (opts.lcdOverride) {
@@ -573,11 +574,18 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
  * severe finding. Anything less is a flag for a person to check by eye.
  */
 export function displayFailConfirmed(dc: Pick<GiqDisplayCheck, "verdict" | "confidence" | "findings">): boolean {
-  return (
-    dc.verdict === "fail" &&
-    (dc.confidence ?? 0) >= CONFIRMED_CONFIDENCE &&
-    dc.findings.some((f) => f.severity === "moderate" || f.severity === "severe")
-  );
+  if (dc.verdict !== "fail" || (dc.confidence ?? 0) < CONFIRMED_CONFIDENCE) return false;
+  // No findings at all: only the model's own outright "fail" produces that, so the confidence is the fail's.
+  if (dc.findings.length === 0) return true;
+  return dc.findings.some((f) => f.severity === "moderate" || f.severity === "severe");
+}
+
+/** Why a camera screen-sweep "fail" was not confirmed, in words for the advisor (null when it was, or isn't a fail). */
+export function displayFailDoubt(dc: Pick<GiqDisplayCheck, "verdict" | "confidence" | "findings"> | null | undefined): string | null {
+  if (!dc || dc.verdict !== "fail" || displayFailConfirmed(dc)) return null;
+  return (dc.confidence ?? 0) >= CONFIRMED_CONFIDENCE
+    ? `the camera's screen sweep noted only minor marks${dc.findings[0]?.label ? ` (${dc.findings[0].label})` : ""}`
+    : `the camera's screen sweep failed with low confidence (${pct(dc.confidence)})`;
 }
 
 /**
@@ -620,12 +628,13 @@ export function worseDisplay(selfTest: TestOutcome | null | undefined, camera: "
  * run reads "incomplete" (display untested). Worse-of when both exist; an
  * unknown or unchecked sweep changes nothing.
  *
- * Only a CONFIRMED camera verdict counts: a fail below CONFIRMED_CONFIDENCE is
- * folded as "not tested" (mapCamera already raised it as a flag), never as a
- * fail — otherwise Apply would put display_lines on the case for a fault the AI
- * was not sure of. A confirmed camera fail reads as failed here, but its fault
- * reaches the case once, from the camera mapping (source camera_ai) — the
- * summary does not add it again as the phone's own test (see summarise).
+ * Only a CONFIRMED camera verdict counts (displayFailConfirmed: ≥ 70% and a
+ * moderate/severe finding, or the model's own outright fail). An unconfirmed
+ * fail is folded as "not tested — check by eye" with its doubt (minor marks
+ * only / low confidence), never as a fail: Apply would otherwise put
+ * display_lines on the case for a fault the AI was not sure of. A confirmed
+ * camera fail reads as failed; summarise lists it as display_lines with source
+ * camera_ai (the same fault the camera mapping adds — unioned, so once).
  */
 export function resultsWithCameraDisplay(results: TestResults, lcd: LcdCheck, at: string): TestResults {
   if (!lcd.cameraChecked || (lcd.verdict !== "pass" && lcd.verdict !== "fail")) return results;
@@ -637,7 +646,7 @@ export function resultsWithCameraDisplay(results: TestResults, lcd: LcdCheck, at
       ...results,
       display: {
         outcome: "skip",
-        detail: { method: "store camera LCD sweep (GradeIQ)", camera: "fail", confirmed: false, reason: "the camera's screen sweep failed with low confidence — check the display by eye" },
+        detail: { method: "store camera LCD sweep (GradeIQ)", camera: "fail", confirmed: false, reason: `${lcd.doubt ?? "the camera's screen sweep was not sure"} — check the display by eye` },
         at,
       },
     };
@@ -864,7 +873,9 @@ export function disagreements(declared: Declared | null, results: TestResults, s
       camera: cam === "fail" ? `screen sweep failed (${pct(s?.displayCheck?.confidence ?? null)})` : "screen sweep passed",
       final: recorded ? SCREEN_LABEL.lines_or_spots : "not recorded",
       message: `Phone's own display test ${self === "pass" ? "passed" : "failed"}; the camera's screen sweep ${cam === "fail" ? "failed" : "passed"}. ${
-        recorded ? `Recorded as "${SCREEN_LABEL.lines_or_spots}"` : "The camera was not confident enough, so nothing is recorded"
+        recorded
+          ? `Recorded as "${SCREEN_LABEL.lines_or_spots}"`
+          : `Nothing is recorded: ${displayFailDoubt(s?.displayCheck) ?? "the camera's screen sweep was not sure"}`
       } — check the screen by eye.`,
       photoIndex: null,
       box: null,

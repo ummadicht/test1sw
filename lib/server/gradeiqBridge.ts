@@ -540,8 +540,13 @@ export function cameraGradePending(r: GiqRow): boolean {
   if (pullWindowOver(r)) return false;
   const { snap, fin } = storedFinality(r);
   const l = live(r);
-  const lcdIn = !!snap?.displayCheck || (!!l.handoffAt && !!r.gradeiq_synced_at && r.gradeiq_synced_at > l.handoffAt);
-  return !(fin.final && lcdIn);
+  // Wait only while something can still change: a grade still being worked out,
+  // or the camera page still running its screen sweep. A failed grade (stub tier,
+  // too little visible) or a provisional one that is no longer refining (a case
+  // on the phone, say) will not become final by waiting — it needs a retake.
+  const settled = fin.final || fin.status === "failed" || (fin.status === "provisional" && !snap?.refining);
+  const sweepRunning = !snap?.displayCheck && !l.handoffAt;
+  return !settled || sweepRunning;
 }
 
 function isBrowserCheck(deviceJson: string | null): boolean {
@@ -658,6 +663,8 @@ export function recordOverride(id: string, info: NonNullable<CameraOverrideInfo>
 }
 
 export type ApplyEvidence = {
+  /** The grade is still being worked out (cameraGradePending): Apply must wait. Nothing was exported. */
+  pending: boolean;
   state: GradeiqState;
   gradeiqId: string | null;
   snap: GradeiqSnapshot | null;
@@ -680,8 +687,16 @@ export async function evidenceForApply(id: string): Promise<ApplyEvidence> {
   let r = row(id)!;
   let devicefax = false;
   if (cfg.enabled && r.gradeiq_state === "ready" && r.gradeiq_id) {
+    // /screen first: it is what records when the photos were accepted (the 180 s
+    // window). On the override paths nothing else may have polled it since.
+    await refreshScreen(id, r.gradeiq_id, 0).catch(() => {});
     const snap = await pullSnapshot(id);
     if (!snap) notes.push("GradeIQ could not be read at Apply; the last camera result was used only if it was final.");
+    const now = row(id)!;
+    if (cameraGradePending(now)) {
+      const ev = cameraEvidence(now);
+      return { pending: true, state: now.gradeiq_state, gradeiqId: now.gradeiq_id, ...ev, devicefax: false, notes };
+    }
     try {
       const fax = await giq.exportDeviceFax(r.gradeiq_id);
       db().prepare(`UPDATE test_sessions SET gradeiq_devicefax = ? WHERE id = ?`).run(JSON.stringify({ fetchedAt: nowIso(), devicefax: fax }), id);
@@ -692,5 +707,5 @@ export async function evidenceForApply(id: string): Promise<ApplyEvidence> {
     r = row(id)!;
   }
   const { snap, fin, mapping, override } = cameraEvidence(r);
-  return { state: cfg.enabled ? r.gradeiq_state : "disabled", gradeiqId: r.gradeiq_id, snap, fin, mapping, override, devicefax, notes };
+  return { pending: false, state: cfg.enabled ? r.gradeiq_state : "disabled", gradeiqId: r.gradeiq_id, snap, fin, mapping, override, devicefax, notes };
 }

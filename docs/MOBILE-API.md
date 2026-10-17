@@ -100,7 +100,7 @@ type TestSessionView = {
 };
 type DiagnosticSummary = {
   model: { modelId: string|null; label: string|null; variant: string|null; match: "exact"|"family"|"none"; why: string };
-  faults: { id: FaultId; because: string; sources: ("tested"|"declared")[] }[]; // SwapUp fault ids (lib/domain/condition.ts)
+  faults: { id: FaultId; because: string; sources: ("tested"|"declared"|"camera_ai")[] }[]; // SwapUp fault ids (lib/domain/condition.ts); camera_ai = a display fail only the store camera's confirmed LCD sweep found
   untested: { id: string; name: string; critical: boolean }[]; // skipped / unsupported / never run
   notes: string[];                                             // things that are not faults but worth saying
   verdict: "all_passed" | "faults_found" | "incomplete";
@@ -169,7 +169,11 @@ every 700 ms, show `pattern` full-screen, echo what is on screen.
 - `capture.verdict = "retake"` → the store's photos were rejected (show `reasons`; stay on the
   screen — the store retakes).
 - Leave (to Done) when `handoffDone` is true, or 30 s after `cosmeticDone`; "Finish without photos"
-  after 60 s with no sign of the store's camera.
+  after 90 s with no store camera page (a NEW `connectedAt` — a page loaded after the screen mounted —
+  a pattern request or a capture verdict counts as connected), or over a pattern left unchanged for 90 s.
+- `connectedAt` (since 2026-10-17): GradeIQ's stamp of the last camera-page load; never cleared.
+- Apply (`POST /api/test-sessions/<id>/apply`) answers **409** while the photos are in but the camera
+  grade or LCD verdict is still being worked out (≤ 180 s); `grading.gradePending` says so.
 - `503 { error }` → the server can't reach GradeIQ just now: keep the screen, keep polling.
 - Never carries the GradeIQ session id or the camera URL.
 

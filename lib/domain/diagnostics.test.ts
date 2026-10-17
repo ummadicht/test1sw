@@ -551,7 +551,7 @@ test("camera display fold: a LOW-confidence camera fail is 'not tested — check
   const { resultsWithCameraDisplay } = await import("./gradeiqMap.ts");
   const native = all("pass");
   delete native.display;
-  const weak = { cameraChecked: true, verdict: "fail" as const, reason: null, confirmed: false };
+  const weak = { cameraChecked: true, verdict: "fail" as const, reason: null, confirmed: false, doubt: "the camera's screen sweep failed with low confidence (50%)" };
   const w = resultsWithCameraDisplay(native, weak, AT);
   assert.equal(w.display?.outcome, "skip");
   assert.match(String((w.display?.detail as Record<string, unknown>).reason), /low confidence/);

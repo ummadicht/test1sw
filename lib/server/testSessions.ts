@@ -293,6 +293,8 @@ export async function applyTestSession(u: SessionUser, id: string) {
   // snapshot, outside any transaction. Only a FINAL grade's confirmed damage
   // counts; anything weaker stays a flag for the advisor.
   const cam = await evidenceForApply(r.id);
+  const GRADE_WAIT = "The store camera's grade is still being worked out — usually under 30 seconds. Apply again in a moment.";
+  if (cam.pending) throw new HttpError(409, GRADE_WAIT);
   const now = nowIso();
 
   // Those were up to two GradeIQ round trips: read the session and the case
@@ -307,8 +309,7 @@ export async function applyTestSession(u: SessionUser, id: string) {
   // Photos are the phone's last step, so "complete" can arrive seconds before the
   // camera grade. Apply is one-shot: wait for the grade (≤ 180 s) rather than
   // turning confirmed damage into "not final" flags.
-  if (cameraGradePending(fresh))
-    throw new HttpError(409, "The store camera's grade is still being worked out — usually under 30 seconds. Apply again in a moment.");
+  if (cameraGradePending(fresh)) throw new HttpError(409, GRADE_WAIT);
   const c = getCase(u, r.case_id);
   if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "The case is past the counter, so the results can't change it any more.");
 
