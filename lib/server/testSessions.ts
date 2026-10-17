@@ -217,10 +217,57 @@ function requireCounter(u: SessionUser): void {
   if (u.role !== "advisor" && u.role !== "store_manager") throw new HttpError(403, "Only store staff run customer tests.");
 }
 
+/**
+ * THE STANDING TEST CODE — demo programmes only. Owner, 2026-10-17: "make a
+ * standard code for test, AAAAAA". Every NEW phone that joins it gets its own
+ * fresh test session (and case) at the demo store, so anyone can try SwapUp
+ * Check without a store tablet making a code; a phone that re-joins gets its
+ * own session back. It is refused outright when no demo programme exists, and
+ * a real programme's store never receives these sessions.
+ */
+export const DEMO_CODE = normaliseCode(process.env.SWAPUP_DEMO_CODE || "AAAAAA") ?? "AAAAAA";
+
+type DemoTarget = { store: StoreRow; staff: SessionUser };
+
+/** The demo programme's counter (Andheri when it exists) and the staff member its test sessions are opened under. */
+function demoTarget(): DemoTarget | null {
+  const store = db()
+    .prepare(
+      `SELECT s.* FROM stores s JOIN orgs o ON o.id = s.org_id
+       WHERE o.demo = 1 AND s.active = 1 AND COALESCE(s.status, 'active') = 'active'
+       ORDER BY CASE WHEN s.code = 'AND' THEN 0 ELSE 1 END, s.created_at LIMIT 1`
+    )
+    .get() as StoreRow | undefined;
+  if (!store) return null;
+  const u = db()
+    .prepare(
+      `SELECT id, username, name, role, org_id, store_id FROM users
+       WHERE store_id = ? AND active = 1 AND role IN ('advisor','store_manager')
+       ORDER BY CASE role WHEN 'advisor' THEN 0 ELSE 1 END, created_at LIMIT 1`
+    )
+    .get(store.id) as { id: string; username: string; name: string; role: SessionUser["role"]; org_id: string; store_id: string | null } | undefined;
+  if (!u) return null;
+  return { store, staff: { id: u.id, username: u.username, name: u.name, role: u.role, orgId: u.org_id, storeId: u.store_id, exp: Date.now() + 60_000 } };
+}
+
+/** The demo-code session this install should join: its own open one, else an unclaimed one, else a new one. */
+function demoSessionFor(installId: string, origin?: string | null): string | null {
+  const open = `status IN ('waiting','opened','joined','testing','complete') AND expires_at > ?`;
+  const now = nowIso();
+  const mine = db().prepare(`SELECT id FROM test_sessions WHERE code = ? AND install_id = ? AND ${open} ORDER BY created_at DESC LIMIT 1`).get(DEMO_CODE, installId, now) as { id: string } | undefined;
+  if (mine) return mine.id;
+  const free = db().prepare(`SELECT id FROM test_sessions WHERE code = ? AND install_id IS NULL AND ${open} ORDER BY created_at DESC LIMIT 1`).get(DEMO_CODE, now) as { id: string } | undefined;
+  if (free) return free.id;
+  const d = demoTarget();
+  if (!d) return null;
+  return createTestSession(d.staff, { customerName: `Test phone (code ${DEMO_CODE})` }, origin, { fixedCode: DEMO_CODE }).session.id;
+}
+
 function freshCode(): string {
   for (let i = 0; i < 20; i++) {
     let code = "";
     for (let k = 0; k < 6; k++) code += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
+    if (code === DEMO_CODE) continue;
     const clash = db()
       .prepare(`SELECT 1 FROM test_sessions WHERE code = ? AND status IN ('waiting','opened','joined','testing','complete') AND expires_at > ?`)
       .get(code, nowIso());
@@ -231,7 +278,12 @@ function freshCode(): string {
 
 /* ─────────────────────────── staff side ─────────────────────────── */
 
-export function createTestSession(u: SessionUser, input: { caseId?: string | null; customerName?: string; customerPhone?: string }, origin?: string | null) {
+export function createTestSession(
+  u: SessionUser,
+  input: { caseId?: string | null; customerName?: string; customerPhone?: string },
+  origin?: string | null,
+  internal: { fixedCode?: string } = {}
+) {
   requireCounter(u);
   const store = ownStore(u);
   let caseId = input.caseId || null;
@@ -243,14 +295,14 @@ export function createTestSession(u: SessionUser, input: { caseId?: string | nul
   }
   const now = nowIso();
   const id = newId("ts");
-  const code = freshCode();
+  const code = internal.fixedCode ?? freshCode();
   db()
     .prepare(
       `INSERT INTO test_sessions (id, code, case_id, store_id, org_id, created_by, status, plan, results, created_at, expires_at, updated_at, gradeiq_state)
        VALUES (?,?,?,?,?,?,'waiting',?,'{}',?,?,?,?)`
     )
     .run(id, code, caseId, store.id, store.org_id, u.id, JSON.stringify(DEFAULT_PLAN), now, new Date(Date.now() + UNJOINED_TTL_MS).toISOString(), now, initialGradeiqState());
-  audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "test_session.create", entity: "test_session", entityId: id, detail: { caseId } });
+  audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "test_session.create", entity: "test_session", entityId: id, detail: { caseId, ...(internal.fixedCode ? { via: "standing demo code" } : {}) } });
   // The GradeIQ session is created in the background once this commits — a
   // slow GradeIQ never holds up the counter.
   kickCreate(id);
@@ -479,6 +531,11 @@ export function setStoreWifi(u: SessionUser, storeId: string, raw: unknown) {
 export function openByCode(raw: string): { ok: true; code: string; storeName: string; caseRef: string; status: SessionStatus } | { ok: false } {
   const code = normaliseCode(raw);
   if (!code) return { ok: false };
+  if (code === DEMO_CODE) {
+    // Nothing is created by opening the link — only by a phone joining.
+    const d = demoTarget();
+    return d ? { ok: true, code, storeName: d.store.name, caseRef: `${DEMO_CODE} (test)`, status: "opened" } : { ok: false };
+  }
   const r0 = db()
     .prepare(`SELECT * FROM test_sessions WHERE code = ? ORDER BY created_at DESC LIMIT 1`)
     .get(code) as Row | undefined;
@@ -539,8 +596,14 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
   if (!installId) throw new HttpError(400, "The app did not send its install id — update SwapUp Check.");
   const invalid = new HttpError(404, "That code is not valid any more. Ask the store for a new one.");
   if (!code) throw invalid;
+  const demoId = code === DEMO_CODE ? demoSessionFor(installId, origin) : null;
+  if (code === DEMO_CODE && !demoId) throw invalid;
   return tx(() => {
-    const r0 = db().prepare(`SELECT * FROM test_sessions WHERE code = ? ORDER BY created_at DESC LIMIT 1`).get(code) as Row | undefined;
+    const r0 = (
+      demoId
+        ? db().prepare(`SELECT * FROM test_sessions WHERE id = ?`).get(demoId)
+        : db().prepare(`SELECT * FROM test_sessions WHERE code = ? ORDER BY created_at DESC LIMIT 1`).get(code)
+    ) as Row | undefined;
     if (!r0) throw invalid;
     const r = expireIfDue(r0);
     if (!["waiting", "opened", "joined", "testing", "complete"].includes(r.status)) throw invalid;
