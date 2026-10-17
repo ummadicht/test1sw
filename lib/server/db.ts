@@ -388,6 +388,25 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX market_listings_lookup ON market_listings (source, model_id, variant);
   `,
+  /* 11 — the answer screen (docs/MOBILE-API.md §3c). variant_source: where the
+          storage came from — measured (the phone's own disk reading),
+          catalogue (the model comes in one size), customer (a CLAIM typed on
+          their phone: locking needs the advisor's "Settings › About phone"
+          tick) or advisor. storage_quotes: the partner's what-if price for
+          each size, JSON [{variant, amount, reason, sample}], kept only while
+          the storage is unknown so the answer asks with priced chips.
+          Additive only. */ `
+  ALTER TABLE cases ADD COLUMN variant_source TEXT;
+  ALTER TABLE cases ADD COLUMN storage_quotes TEXT;
+  `,
+  /* 12 — measured_storage: the size the phone read off its own disk at Apply
+          (storageVariant of totalDiskBytes), whatever the model's list says;
+          null = it didn't measure. The matcher drops a size that isn't on the
+          list (a 1TB Ultra on file as 256/512GB), so without this the answer
+          would say "the phone couldn't measure its storage" and offer only
+          sizes the phone has ruled out. Additive only. */ `
+  ALTER TABLE cases ADD COLUMN measured_storage TEXT;
+  `,
 ];
 
 function migrate(conn: Database.Database): void {

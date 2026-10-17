@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import { Money, Banner, ErrorText } from "@/components/ui";
 import { StepCard } from "./StepCard";
 import { ID_TYPES } from "./shared";
@@ -23,9 +23,13 @@ type Kym = (typeof KYM_OPTIONS)[number][0];
 
 type CheckKey = (typeof CHECKS)[number][0];
 
-/** ⑦ Take the trade-in: who the customer is, the hand-over checks, and the credit it uses. */
+/**
+ * ⑦ Take the trade-in: who the customer is, the hand-over checks, and the credit it uses.
+ * The IMEI is asked here, first, when the case has none — only taking the phone needs it.
+ * The forwarded ref is the first field (the IMEI when it is asked, else the name).
+ */
 export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function LockForm({ ops }, nameRef) {
-  const { view, editable, busy, act } = ops;
+  const { view, editable, busy, act, save } = ops;
   const [name, setName] = useState(view.customer?.name ?? "");
   const [phone, setPhone] = useState(view.customer?.phone ?? "");
   const [idType, setIdType] = useState("");
@@ -39,16 +43,57 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
   const [kym, setKym] = useState<Kym | "">("");
   const [kymRef, setKymRef] = useState("");
   const [imeiAck, setImeiAck] = useState(false);
+  // The storage tick confirms ONE size: if the storage changes, it is unticked.
+  const [storageSeenFor, setStorageSeenFor] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // IMEI — asked here while the case has none; kept on screen once typed here, so a typo can be fixed.
+  const [imeiTypedHere, setImeiTypedHere] = useState(false);
+  const [imei, setImei] = useState(view.imei ?? "");
+  const [imeiErr, setImeiErr] = useState<string | null>(null);
+  const askImei = !view.imei || imeiTypedHere;
+  const savedImei = view.imei ?? "";
+  const lastSaved = useRef(savedImei);
+  const imeiSent = useRef<string | null>(null);
+  useEffect(() => {
+    // Keep the field in step with the server's reading (it completes a 14-digit IMEI).
+    if (savedImei !== lastSaved.current) {
+      lastSaved.current = savedImei;
+      setImei(savedImei);
+    }
+  }, [savedImei]);
+
+  async function saveImei() {
+    const d = imei.replace(/\D/g, "");
+    if (d === (view.imei ?? "") || d === imeiSent.current) return;
+    if (!d) {
+      setImeiErr(await save({ imei: null }, { imei: null, imeiCheck: null }));
+      return;
+    }
+    if (d.length !== 14 && d.length !== 15) {
+      setImeiErr(`An IMEI has 15 digits — this has ${d.length}.`);
+      return;
+    }
+    imeiSent.current = d;
+    const e = await save({ imei: d });
+    imeiSent.current = null;
+    setImeiErr(e);
+  }
 
   const digits = phone.replace(/\D/g, "");
   const phoneOk = /^[6-9]\d{9}$/.test(digits);
   const last4Ok = /^[A-Za-z0-9]{4}$/.test(idLast4);
   const anyImeiInvalid = view.imeiCheck === "invalid" || view.imei2Check === "invalid";
-  const allChecked = CHECKS.every(([k]) => checks[k]) && (!anyImeiInvalid || imeiAck);
+  const ticked = CHECKS.every(([k]) => checks[k]);
+  // A storage the customer typed (the phone couldn't measure it) is enough to show a price; taking the phone needs it seen.
+  const variant = view.device?.variant ?? null;
+  const storageClaimed = view.variantSource === "customer";
+  const storageSeen = storageClaimed && !!variant && storageSeenFor === variant;
+  const storageOk = !storageClaimed || storageSeen;
+  const imeiAckOk = !anyImeiInvalid || imeiAck;
   const kymBlocked = !!kym && kym !== "clear";
-  const formOk = name.trim().length >= 2 && phoneOk && !!idType && last4Ok && allChecked && kym === "clear";
+  const formOk = name.trim().length >= 2 && phoneOk && !!idType && last4Ok && kym === "clear" && ticked && storageOk && imeiAckOk;
   const blockers = view.lockBlockers;
   const cc = view.creditCheck;
   const d = view.decision?.upgrade;
@@ -70,14 +115,23 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
                   ? "Do the government IMEI check (KYM) and record what it says."
                   : kymBlocked
                     ? "The government register flags this phone — do not take it."
-                    : "Tick every hand-over check before taking the phone."
+                    : !ticked
+                      ? "Tick every hand-over check before taking the phone."
+                      : !storageOk
+                        ? `Confirm before taking the phone: Settings › About phone shows ${variant ?? "the storage"} (the customer typed it — the phone couldn't measure it).`
+                        : "An IMEI fails its check digit. Re-read it from *#06#, or confirm it is correct."
       );
       return;
     }
     setSubmitting(true);
     const e2 = await act("lock", {
       customer: { name: name.trim(), phone: digits, idType, idLast4: idLast4.toUpperCase() },
-      checks: { ...checks, kym: { status: kym, reference: kymRef.trim() || null }, imeiCheckAck: anyImeiInvalid ? imeiAck : undefined },
+      checks: {
+        ...checks,
+        kym: { status: kym, reference: kymRef.trim() || null },
+        imeiCheckAck: anyImeiInvalid ? imeiAck : undefined,
+        storageSeen: storageClaimed ? storageSeen : undefined,
+      },
     });
     setSubmitting(false);
     setErr(e2);
@@ -91,10 +145,52 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
           until the partner collects it. Next, the customer clears their data from the phone&apos;s Settings — the next screen walks you through it.
         </p>
 
+        {askImei ? (
+          <div>
+            <label className="block">
+              <span className="label">IMEI</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={askImei ? nameRef : undefined}
+                  className="input num max-w-[260px]"
+                  value={imei}
+                  onChange={(e) => {
+                    setImei(e.target.value.replace(/[^\d\s]/g, ""));
+                    setImeiTypedHere(true);
+                    setImeiErr(null);
+                  }}
+                  onBlur={saveImei}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      saveImei();
+                    }
+                  }}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="15 digits"
+                  maxLength={18}
+                  disabled={!editable}
+                  aria-invalid={!!imeiErr || view.imeiCheck === "invalid" || undefined}
+                />
+                {view.imei && view.imeiCheck === "valid" && imei.replace(/\D/g, "") === view.imei ? <span className="pill pill-up">✓ Check digit OK</span> : null}
+                {view.imeiCheck === "invalid" ? <span className="pill pill-warn">⚠ Check digit fails — re-read it</span> : null}
+              </div>
+            </label>
+            {imeiErr ? (
+              <span className="hint" style={{ color: "var(--bad)" }}>
+                {imeiErr}
+              </span>
+            ) : (
+              <span className="hint">Dial *#06# on the phone, or scan the barcode on the box. 14 digits are completed automatically.</span>
+            )}
+          </div>
+        ) : null}
+
         <div className="grid sm:grid-cols-2 gap-3">
           <label className="block">
             <span className="label">Customer name</span>
-            <input ref={nameRef} className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" maxLength={80} disabled={!editable} />
+            <input ref={askImei ? undefined : nameRef} className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" maxLength={80} disabled={!editable} />
           </label>
           <label className="block">
             <span className="label">Mobile</span>
@@ -193,6 +289,20 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
                 <span className="text-[14.5px]">{label}</span>
               </label>
             ))}
+            {storageClaimed && variant ? (
+              <label className="flex items-start gap-3 rounded-[10px] border border-line px-3 py-2.5 cursor-pointer has-[:checked]:border-[color:var(--up)] has-[:checked]:bg-up-bg">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 w-5 h-5 accent-[color:var(--up)]"
+                  checked={storageSeen}
+                  onChange={(e) => setStorageSeenFor(e.target.checked ? variant : null)}
+                  disabled={!editable}
+                />
+                <span className="text-[14.5px]">
+                  Settings › About phone shows {variant} <span className="text-muted">(the customer typed it — the phone couldn&apos;t measure it)</span>
+                </span>
+              </label>
+            ) : null}
             {anyImeiInvalid ? (
               <label className="flex items-start gap-3 rounded-[10px] border border-[color:var(--warn)] bg-warn-bg px-3 py-2.5 cursor-pointer">
                 <input type="checkbox" className="mt-0.5 w-5 h-5" checked={imeiAck} onChange={(e) => setImeiAck(e.target.checked)} disabled={!editable} />

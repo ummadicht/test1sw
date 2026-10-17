@@ -156,7 +156,8 @@ export function StepUpgrade({ ops, isManager, bands }: { ops: CaseOps; isManager
     setErr(
       await save(
         { upgradeDeviceId: d.id },
-        { upgrade: { deviceId: d.id, label: `${d.brand} ${d.model} ${d.variant}`, model: d.model, series: d.series, variant: d.variant, price: d.price, supportEndYear: d.supportEndYear } }
+        // A staff choice is never "suggested" — it stands across later storage changes.
+        { upgrade: { deviceId: d.id, label: `${d.brand} ${d.model} ${d.variant}`, model: d.model, series: d.series, variant: d.variant, price: d.price, supportEndYear: d.supportEndYear, suggested: false } }
       )
     );
   }
@@ -169,11 +170,16 @@ export function StepUpgrade({ ops, isManager, bands }: { ops: CaseOps; isManager
       {up && !picking ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-[12px] border-[1.5px] border-[color:var(--up)] bg-up-bg px-4 py-3">
           <div className="min-w-0">
-            <div className="text-[18px] font-[720] leading-tight">{up.label}</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[18px] font-[720] leading-tight">{up.label}</span>
+              {up.suggested ? <span className="pill pill-fix">Suggested</span> : null}
+            </div>
             <div className="text-[13px] text-ink-2">
               <Money value={up.price} className="font-semibold" />
               {up.supportEndYear ? ` · security updates until ${up.supportEndYear}` : ""}
             </div>
+            {/* SwapUp's pick, and why — staff can change it; then it is theirs. */}
+            {up.suggested && up.why ? <div className="text-[13px] text-ink-2 mt-0.5">{up.why}</div> : null}
           </div>
           {editable ? (
             <div className="flex gap-2">

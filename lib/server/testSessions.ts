@@ -41,6 +41,7 @@ import {
   readWifi,
   wifiQr,
   matchModel,
+  storageVariant,
   batteryHealthResult,
   type PlanItem,
   type TestResults,
@@ -50,7 +51,19 @@ import {
   type TradeModelRef,
   type StoreWifi,
 } from "../domain/diagnostics";
-import { scanFirstApp, planForApp, readPhase, identityForJoin, imeiAgreement, phoneMayPost, nextBatteryHealth, type PhonePhase, type ImeiAgreement } from "../domain/phoneLed";
+import {
+  scanFirstApp,
+  planForApp,
+  readPhase,
+  identityForJoin,
+  imeiAgreement,
+  phoneMayPost,
+  nextBatteryHealth,
+  storageFromTest,
+  storageModelId,
+  type PhonePhase,
+  type ImeiAgreement,
+} from "../domain/phoneLed";
 
 /**
  * SWAPUP CHECK SESSIONS — the customer tests their own phone; the store watches.
@@ -482,30 +495,54 @@ export async function applyTestSession(u: SessionUser, id: string) {
   // What the advisor reads at the top of the case's camera record: things the
   // customer's phone SAID that the case does not simply take.
   const identityFlags: string[] = [];
+  const refs = tradeModelRefs();
+  const pick = v.declared?.picked ?? null;
+  const picked = pick ? (refs.find((m) => m.id === pick.modelId) ?? null) : null;
   if (s.model.modelId) {
     patch.modelId = s.model.modelId;
-    if (s.model.variant) patch.variant = s.model.variant;
-    // The phone's code matched, but the customer said it isn't their phone (or picked
-    // another): record it — the match stands, the advisor checks.
-    const picked = v.declared?.picked ? tradeModelRefs().find((m) => m.id === v.declared!.picked!.modelId) : null;
-    if (v.declared?.identityConfirmed === false || (picked && picked.id !== s.model.modelId)) {
+    // The phone's code matched, but the customer picked another model (or said "No"
+    // and picked nothing): record it — the match stands, the advisor checks. Saying
+    // "No" and then picking the SAME model is agreement, not a dispute.
+    if ((picked && picked.id !== s.model.modelId) || (v.declared?.identityConfirmed === false && !picked)) {
       identityFlags.push(
         `Model: the phone reports ${s.model.label ?? "a known model"}, but the customer said that isn't right${picked ? ` and picked ${picked.brand} ${picked.model}` : ""}. Check Settings › About phone before pricing.`
       );
     }
-  } else if (!c.device && v.declared?.picked) {
-    // The phone's model code isn't one SwapUp knows and the case has no model:
-    // the customer's own pick fills it — as a CLAIM the advisor checks, never a match.
-    const tm = tradeModelRefs().find((m) => m.id === v.declared!.picked!.modelId);
-    if (tm) {
-      patch.modelId = tm.id;
-      const variant = v.declared.picked.variant && tm.variants.includes(v.declared.picked.variant) ? v.declared.picked.variant : null;
-      if (variant) patch.variant = variant;
+  } else if (picked && (!c.device || c.device.modelId === picked.id)) {
+    // The phone's model code isn't one SwapUp knows: the customer's own pick fills
+    // the case's model — as a CLAIM the advisor checks, never a match. A case that
+    // already has that model keeps it; the pick can still settle the storage.
+    patch.modelId = picked.id;
+    if (!c.device)
       identityFlags.push(
-        `Model: customer picked ${[`${tm.brand} ${tm.model}`, variant].filter(Boolean).join(" · ")} on their phone — the phone didn't report a model code SwapUp knows. Check the model${variant ? " and storage" : ""} before pricing.`
+        `Model: customer picked ${picked.brand} ${picked.model} on their phone — the phone didn't report a model code SwapUp knows. Check the model before pricing.`
       );
-    }
   }
+  // Storage (lib/domain/phoneLed.ts storageFromTest): the phone's measurement, else
+  // the model's only size, else the customer's own pick — a claim, flagged here and
+  // ticked in Settings › About phone before the trade-in is locked. Never a guess:
+  // nothing found leaves it to one row of priced chips on the answer screen. A size
+  // the phone measured that isn't on the model's list is kept on the case too, so the
+  // answer says so instead of "couldn't measure" — and no pick is used against it.
+  // A re-test that can't measure (the browser) keeps an earlier reading of the SAME model:
+  // a pick on the second test must not undo what the phone measured on the first.
+  const measuredNow = storageVariant(v.device?.totalDiskBytes);
+  const claim = picked && pick ? { modelId: picked.id, variant: pick.variant ?? null } : null;
+  const caseModel = { caseModelId: c.device?.modelId ?? null, caseVariant: c.device?.variant ?? null };
+  const sizesOf = storageModelId({ match: s.model, picked: claim, caseModelId: caseModel.caseModelId });
+  const earlier = sizesOf && sizesOf === caseModel.caseModelId ? c.measuredStorage : null;
+  const measured = measuredNow ?? earlier;
+  const storage = storageFromTest({
+    match: s.model,
+    picked: claim,
+    variants: refs.find((m) => m.id === sizesOf)?.variants ?? [],
+    ...caseModel,
+    measured,
+    caseSource: c.variantSource,
+  });
+  if (storage.variant) patch.variant = storage.variant;
+  else if (storage.clear) patch.variant = null;
+  if (storage.flag) identityFlags.push(storage.flag);
   const testedFaults = s.faults.map((f) => f.id);
   const cameraFaults = cam.mapping.faults.map((f) => f.id);
   patch.faults = unionFaults(unionFaults(c.faults, testedFaults), cameraFaults);
@@ -579,8 +616,9 @@ export async function applyTestSession(u: SessionUser, id: string) {
   };
   recordCameraCheck(r.case_id, check, sources);
 
-  // updateCase re-prices (partner quote, repair estimate, decision) outside any transaction.
-  await updateCase(u, r.case_id, patch);
+  // updateCase re-prices (partner quote, repair estimate, decision) outside any
+  // transaction, and suggests the new phone unless staff already chose one.
+  const after = await updateCase(u, r.case_id, patch, { variantSource: storage.source ?? undefined, autoUpgrade: true, measuredStorage: measuredNow ?? (earlier ? undefined : null) });
   // The ticket stays valid for STATUS reads only (byTicket refuses writes once
   // applied), so the customer's phone can show "the store has your results".
   db().prepare(`UPDATE test_sessions SET status = 'applied', applied_at = ?, updated_at = ? WHERE id = ?`).run(now, now, r.id);
@@ -595,11 +633,27 @@ export async function applyTestSession(u: SessionUser, id: string) {
       faults: patch.faults,
       model: s.model,
       ...(patch.modelId && !s.model.modelId ? { modelSource: "customer picked" } : {}),
+      storage: { variant: after.device?.variant ?? null, source: after.variantSource, measured },
+      upgrade: after.upgrade?.suggested ? after.upgrade.deviceId : null,
       imei: agreement,
       camera: { state: cam.state, grade: check.grade, final: check.final, faults: cameraFaults, identity: check.identity.verdict, lcdChecked: check.lcd.cameraChecked },
     },
   });
   return { session: view(rowById(r.id)!, { staff: true }), caseId: r.case_id };
+}
+
+/**
+ * The storage a case already has for this model — a size on the case, or the phone's own
+ * reading from an earlier test — or null. The join uses it so a re-test doesn't ask the
+ * customer a question whose answer Apply would set aside (lib/domain/phoneLed.ts storageFromTest).
+ */
+function settledOnCase(caseId: string, modelId: string | null): string | null {
+  if (!modelId) return null;
+  const c = db().prepare(`SELECT model_id, variant, measured_storage FROM cases WHERE id = ?`).get(caseId) as
+    | { model_id: string | null; variant: string | null; measured_storage: string | null }
+    | undefined;
+  if (!c || c.model_id !== modelId) return null;
+  return c.variant ?? c.measured_storage ?? null;
 }
 
 export function cancelTestSession(u: SessionUser, id: string) {
@@ -857,6 +911,8 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
       .run(installId, sha(ticket), JSON.stringify(device), JSON.stringify(plan), now, now, firstJoin ? new Date(Date.now() + JOINED_TTL_MS).toISOString() : r.expires_at, now, r.id);
     audit({ orgId: r.org_id, storeId: r.store_id, action: firstJoin ? "test_session.join" : "test_session.rejoin", entity: "test_session", entityId: r.id, detail: { model: device.modelName, ip } });
     const v = view(rowById(r.id)!);
+    const refs = tradeModelRefs();
+    const match = v.summary?.model ?? matchModel(device, refs);
     return {
       ticket,
       session: {
@@ -869,7 +925,11 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
         results: v.results,
         declared: v.declared,
         // The Identify card: SwapUp's model match on the phone's own model code — never a price.
-        identity: identityForJoin(v.summary?.model ?? matchModel(device, tradeModelRefs())),
+        // `variants`: that model's sizes, so the confirm card can ask "How much storage?" when the
+        // phone couldn't measure it — none when it measured, even a size that isn't on file, and
+        // none when the case already settled this model's storage (a browser re-test): Apply
+        // would not use the answer, so the customer isn't asked for it.
+        identity: identityForJoin(match, refs.find((m) => m.id === match.modelId)?.variants ?? [], storageVariant(device.totalDiskBytes) ?? settledOnCase(r.case_id, match.modelId)),
         // Started from the store's counter code: the phone also asks for the customer's name and number.
         customerStarted: v.customerStarted,
       },

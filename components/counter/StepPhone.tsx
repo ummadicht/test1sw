@@ -81,7 +81,8 @@ export function StepPhone({ ops, brands, initialModel }: { ops: CaseOps; brands:
   }
 
   async function pickVariant(v: string) {
-    if (!view.device) return;
+    // The pressed chip again is no news: nothing to save (the server would keep the size's source anyway).
+    if (!view.device || view.device.variant === v) return;
     setErr(await save({ variant: v }, { device: { ...view.device, variant: v } }));
   }
 
@@ -107,7 +108,8 @@ export function StepPhone({ ops, brands, initialModel }: { ops: CaseOps; brands:
     setErr(await save({ coverage: c }, { coverage: c }));
   }
 
-  const done = !!view.device?.variant && !!view.imei;
+  // Done = the phone is priceable (model + storage). The IMEI is only needed to take the trade-in — step 7 asks for it.
+  const done = !!view.device?.variant;
   const variants = model && view.device && model.id === view.device.modelId ? model.variants : [];
 
   return (
@@ -185,7 +187,10 @@ export function StepPhone({ ops, brands, initialModel }: { ops: CaseOps; brands:
 
         {/* Storage */}
         {view.device && !picking ? (
-          <ChipGroup label="Storage" hint={!view.device.variant ? "Settings → About phone → Storage, or the box label." : undefined}>
+          <ChipGroup
+            label="Storage"
+            hint={!view.device.variant ? "Settings → About phone → Storage, or the box label." : view.variantSource === "customer" ? (view.offer?.storage.note ?? undefined) : undefined}
+          >
             {variants.length ? (
               variants.map((v) => (
                 <button key={v} type="button" className="chip" aria-pressed={view.device?.variant === v} disabled={!editable} onClick={() => pickVariant(v)}>

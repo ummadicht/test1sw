@@ -7,6 +7,9 @@ import {
   readPhase,
   planForApp,
   identityForJoin,
+  storageFromTest,
+  storageModelId,
+  storageOnSave,
   imeiAgreement,
   scanFirstMessage,
   scanFirstLock,
@@ -98,7 +101,7 @@ test("plan: battery_health only for the apps that have the step", () => {
 
 test("identity at join: the model match in the phone's terms, never a price", () => {
   const id = identityForJoin(matchModel(NATIVE_060, MODELS));
-  assert.deepEqual(Object.keys(id).sort(), ["label", "match", "modelId", "reason", "variant"]);
+  assert.deepEqual(Object.keys(id).sort(), ["label", "match", "modelId", "reason", "variant", "variants"]);
   assert.equal(id.label, "Samsung Galaxy S22");
   assert.equal(id.match, "exact");
   assert.equal(id.variant, "128GB");
@@ -109,6 +112,161 @@ test("identity at join: the model match in the phone's terms, never a price", ()
   assert.equal(none.modelId, null);
   assert.match(none.reason, /choose the model by hand/i);
   assert.ok(!/₹|price|quote|amount/i.test(JSON.stringify(id)), "nothing priced");
+});
+
+test("identity at join: the matched model's storage sizes, so the phone can ask when it couldn't measure", () => {
+  const unmeasured = matchModel({ ...NATIVE_060, totalDiskBytes: null }, MODELS);
+  const id = identityForJoin(unmeasured, ["128GB", "256GB"]);
+  assert.equal(id.modelId, "galaxy-s22");
+  assert.equal(id.variant, null);
+  assert.deepEqual(id.variants, ["128GB", "256GB"]);
+  assert.deepEqual(identityForJoin(matchModel(NATIVE_060, MODELS)).variants, [], "no list given → empty, never invented");
+  const none = identityForJoin(matchModel({ ...NATIVE_060, modelName: "Pixel 7", manufacturer: "Google", brand: "google" }, MODELS), ["128GB"]);
+  assert.deepEqual(none.variants, [], "no model matched → no sizes");
+});
+
+test("identity at join: a phone that measured its storage is never asked — not even for a size that isn't on file", () => {
+  // 1TB on a model listed as 128/256GB: the matcher drops the size, but the phone DID measure it.
+  const oneTb = { ...NATIVE_060, totalDiskBytes: 1000204886016 };
+  const m = matchModel(oneTb, MODELS);
+  assert.equal(m.variant, null);
+  const id = identityForJoin(m, ["128GB", "256GB"], "1TB");
+  assert.equal(id.variant, null);
+  assert.deepEqual(id.variants, [], "offering 128/256GB would offer only sizes the phone has ruled out");
+  assert.match(id.reason, /1TB/, "the matcher's own words say what it read");
+  // Measured and on the list: the size is there already; nothing to ask either.
+  assert.deepEqual(identityForJoin(matchModel(NATIVE_060, MODELS), ["128GB", "256GB"], "128GB").variants, []);
+});
+
+/* ─────────────────────────── storage at Apply ─────────────────────────── */
+
+const S22 = { modelId: "galaxy-s22", variant: null as string | null };
+const SIZES = ["128GB", "256GB"];
+const NONE = { variant: null, source: null, flag: null };
+
+test("storage at Apply: the phone's measurement always wins — a different claim is flagged, not used", () => {
+  const r = storageFromTest({ match: { ...S22, variant: "128GB" }, picked: { modelId: "galaxy-s22", variant: "256GB" }, variants: SIZES, caseModelId: "galaxy-s22", caseVariant: "256GB" });
+  assert.deepEqual(r, {
+    variant: "128GB",
+    source: "measured",
+    flag: "Storage: the customer said 256GB, the phone measures 128GB. The measurement is used.",
+  });
+  assert.equal(storageFromTest({ match: { ...S22, variant: "128GB" }, picked: { modelId: "galaxy-s22", variant: "128GB" }, variants: SIZES, caseModelId: null, caseVariant: null }).flag, null, "the same size: nothing to flag");
+  assert.equal(storageFromTest({ match: { ...S22, variant: "128GB" }, picked: { modelId: "galaxy-a54", variant: "256GB" }, variants: SIZES, caseModelId: null, caseVariant: null }).flag, null, "another model's size is the identity flag's business");
+});
+
+test("storage at Apply: a size the case already has is never overwritten by a claim", () => {
+  assert.deepEqual(storageFromTest({ match: S22, picked: { modelId: "galaxy-s22", variant: "256GB" }, variants: SIZES, caseModelId: "galaxy-s22", caseVariant: "128GB" }), NONE);
+  assert.deepEqual(storageFromTest({ match: S22, picked: null, variants: ["256GB"], caseModelId: "galaxy-s22", caseVariant: "128GB" }), NONE, "not even the one catalogue size");
+});
+
+test("storage at Apply: a model sold in one size needs no question", () => {
+  assert.deepEqual(storageFromTest({ match: S22, picked: null, variants: ["256GB"], caseModelId: null, caseVariant: null }), { variant: "256GB", source: "catalogue", flag: null });
+  // The case's size was for ANOTHER model: the match replaces the model, and its one size fills in.
+  assert.deepEqual(storageFromTest({ match: S22, picked: null, variants: ["256GB"], caseModelId: "galaxy-a54", caseVariant: "128GB" }).source, "catalogue");
+});
+
+test("storage at Apply: the customer's pick of the same model fills it — as a claim, with its flag", () => {
+  const flag = "Storage: the customer said 256GB — the phone couldn't measure it. Check Settings › About phone before the trade-in.";
+  assert.deepEqual(storageFromTest({ match: S22, picked: { modelId: "galaxy-s22", variant: "256GB" }, variants: SIZES, caseModelId: null, caseVariant: null }), { variant: "256GB", source: "customer", flag });
+  // No model code matched: the pick names the model too, when the case has none or the same one.
+  const unmatched = { modelId: null, variant: null };
+  assert.deepEqual(storageFromTest({ match: unmatched, picked: { modelId: "galaxy-s22", variant: "256GB" }, variants: SIZES, caseModelId: null, caseVariant: null }).source, "customer");
+  assert.deepEqual(storageFromTest({ match: unmatched, picked: { modelId: "galaxy-s22", variant: "256GB" }, variants: SIZES, caseModelId: "galaxy-s22", caseVariant: null }).source, "customer");
+  assert.equal(storageModelId({ match: unmatched, picked: { modelId: "galaxy-s22" }, caseModelId: "galaxy-s22" }), "galaxy-s22");
+  assert.equal(storageModelId({ match: { modelId: "galaxy-a54" }, picked: { modelId: "galaxy-s22" }, caseModelId: null }), "galaxy-a54", "the phone's match names the model");
+});
+
+test("storage at Apply: another model's pick, or a size not on the list, fills nothing", () => {
+  assert.deepEqual(storageFromTest({ match: S22, picked: { modelId: "galaxy-a54", variant: "128GB" }, variants: SIZES, caseModelId: null, caseVariant: null }), NONE);
+  assert.deepEqual(storageFromTest({ match: S22, picked: { modelId: "galaxy-s22", variant: "1TB" }, variants: SIZES, caseModelId: null, caseVariant: null }), NONE);
+  assert.deepEqual(storageFromTest({ match: S22, picked: { modelId: "galaxy-s22", variant: null }, variants: SIZES, caseModelId: null, caseVariant: null }), NONE);
+  // No match, and the pick would replace the case's own model: not this path's to change.
+  assert.equal(storageModelId({ match: { modelId: null }, picked: { modelId: "galaxy-s22" }, caseModelId: "galaxy-a54" }), null);
+  assert.deepEqual(storageFromTest({ match: { modelId: null, variant: null }, picked: { modelId: "galaxy-s22", variant: "256GB" }, variants: SIZES, caseModelId: "galaxy-a54", caseVariant: null }), NONE);
+});
+
+test("storage at Apply: nothing measured, nothing picked → nothing (the answer screen asks)", () => {
+  assert.deepEqual(storageFromTest({ match: S22, picked: null, variants: SIZES, caseModelId: null, caseVariant: null }), NONE);
+  assert.deepEqual(storageFromTest({ match: { modelId: null, variant: null }, picked: null, variants: [], caseModelId: null, caseVariant: null }), NONE);
+  assert.deepEqual(storageFromTest({ match: S22, picked: null, variants: SIZES, caseModelId: null, caseVariant: null, measured: null }), NONE);
+});
+
+test("storage at Apply: a measured size that isn't on file is never replaced by a pick, a single size or a guess", () => {
+  const flag = "Storage: the phone measures 1TB, which isn't a size on file. Check Settings › About phone, and enter the Cashify quote on the full case if it's really 1TB.";
+  // The matcher dropped the size (variant null); the reading still travels with the phone.
+  assert.deepEqual(storageFromTest({ match: S22, picked: null, variants: SIZES, caseModelId: null, caseVariant: null, measured: "1TB" }), { variant: null, source: null, flag });
+  // The customer tapped 256GB on the confirm card (an older app still asks): not used — the phone measured otherwise.
+  assert.deepEqual(storageFromTest({ match: S22, picked: { modelId: "galaxy-s22", variant: "256GB" }, variants: SIZES, caseModelId: null, caseVariant: null, measured: "1TB" }), {
+    variant: null,
+    source: null,
+    flag: "Storage: the phone measures 1TB, which isn't a size on file (the customer said 256GB — not used). Check Settings › About phone, and enter the Cashify quote on the full case if it's really 1TB.",
+  });
+  // A model sold in one size, but the phone measured another: the catalogue's size is not this phone's.
+  assert.deepEqual(storageFromTest({ match: S22, picked: null, variants: ["128GB"], caseModelId: null, caseVariant: null, measured: "256GB" }).variant, null);
+  // A size already on the case stays (nothing is patched), and the advisor is still told.
+  const kept = storageFromTest({ match: S22, picked: null, variants: SIZES, caseModelId: "galaxy-s22", caseVariant: "256GB", measured: "1TB" });
+  assert.equal(kept.variant, null);
+  assert.equal(kept.flag, flag);
+});
+
+test("storage at Apply, re-test: a reading takes a size the customer TYPED off the case; staff's size stays", () => {
+  // First test in the browser: the customer typed 256GB. A native re-test measures 1TB (not on file).
+  const typed = storageFromTest({ match: S22, picked: null, variants: SIZES, caseModelId: "galaxy-s22", caseVariant: "256GB", measured: "1TB", caseSource: "customer" });
+  assert.equal(typed.variant, null);
+  assert.equal(typed.clear, true, "the claim comes off — it must not be priced as if true");
+  assert.match(typed.flag ?? "", /the customer said 256GB earlier — removed/);
+  // The same reading against a size STAFF saved: kept, flagged, never cleared.
+  const staff = storageFromTest({ match: S22, picked: null, variants: SIZES, caseModelId: "galaxy-s22", caseVariant: "256GB", measured: "1TB", caseSource: "advisor" });
+  assert.equal(staff.clear, undefined);
+  assert.equal(staff.variant, null);
+  // Reverse order: the first test measured 1TB; a browser re-test (no reading of its own) picks 512GB.
+  // Apply passes the case's earlier reading in as `measured`, so the pick is not used.
+  const again = storageFromTest({ match: S22, picked: { modelId: "galaxy-s22", variant: "128GB" }, variants: SIZES, caseModelId: "galaxy-s22", caseVariant: null, measured: "1TB", caseSource: null });
+  assert.equal(again.variant, null);
+  assert.equal(again.source, null);
+  assert.match(again.flag ?? "", /the customer said 128GB — not used/);
+});
+
+test("storage at Apply: the disk reading counts however the model was named — a pick never beats it", () => {
+  // No model code matched; the customer picked the S22. The disk read 256GB: that is measured, not claimed.
+  const unmatched = { modelId: null, variant: null };
+  assert.deepEqual(storageFromTest({ match: unmatched, picked: { modelId: "galaxy-s22", variant: "256GB" }, variants: SIZES, caseModelId: null, caseVariant: null, measured: "256GB" }), {
+    variant: "256GB",
+    source: "measured",
+    flag: null,
+  });
+  // They picked 128GB, the disk read 256GB: the reading is used and the claim flagged.
+  assert.deepEqual(storageFromTest({ match: unmatched, picked: { modelId: "galaxy-s22", variant: "128GB" }, variants: SIZES, caseModelId: null, caseVariant: null, measured: "256GB" }), {
+    variant: "256GB",
+    source: "measured",
+    flag: "Storage: the customer said 128GB, the phone measures 256GB. The measurement is used.",
+  });
+  // The reading given explicitly agrees with the match's own: one answer.
+  assert.equal(storageFromTest({ match: { ...S22, variant: "128GB" }, picked: null, variants: SIZES, caseModelId: null, caseVariant: null, measured: "128GB" }).source, "measured");
+});
+
+/* ─────────────────────────── storage on a save ─────────────────────────── */
+
+test("storage on a save: re-saving the size already there keeps where it came from (a claim stays a claim)", () => {
+  // The pressed chip tapped again on the desk: still the customer's typed size — the lock still asks for the Settings tick.
+  assert.deepEqual(storageOnSave({ next: "512GB", prev: "512GB", prevSource: "customer", modelChanged: false }), { source: "customer", changed: false });
+  assert.deepEqual(storageOnSave({ next: "256GB", prev: "256GB", prevSource: "measured", modelChanged: false }), { source: "measured", changed: false });
+  // An older case with no recorded source: the size is staff's.
+  assert.deepEqual(storageOnSave({ next: "256GB", prev: "256GB", prevSource: null, modelChanged: false }), { source: "advisor", changed: false });
+});
+
+test("storage on a save: a different size from staff is the advisor's; Apply's word wins, even on the same size", () => {
+  assert.deepEqual(storageOnSave({ next: "256GB", prev: "512GB", prevSource: "customer", modelChanged: false }), { source: "advisor", changed: true });
+  assert.deepEqual(storageOnSave({ next: "256GB", prev: null, prevSource: null, modelChanged: false }), { source: "advisor", changed: true });
+  // A measurement upgrades the customer's claim of the same size; nothing about the size changed.
+  assert.deepEqual(storageOnSave({ next: "512GB", prev: "512GB", prevSource: "customer", from: "measured", modelChanged: false }), { source: "measured", changed: false });
+  assert.deepEqual(storageOnSave({ next: "128GB", prev: null, prevSource: null, from: "catalogue", modelChanged: false }), { source: "catalogue", changed: true });
+  // The same words for another model are a new size.
+  assert.deepEqual(storageOnSave({ next: "256GB", prev: "256GB", prevSource: "customer", modelChanged: true }), { source: "advisor", changed: true });
+  // Clearing it: no size, no source.
+  assert.deepEqual(storageOnSave({ next: null, prev: "256GB", prevSource: "customer", modelChanged: false }), { source: null, changed: true });
+  assert.deepEqual(storageOnSave({ next: null, prev: null, prevSource: null, modelChanged: false }), { source: null, changed: false });
 });
 
 test("IMEI agreement: either order, no shared number = differs, nothing to compare = unknown", () => {

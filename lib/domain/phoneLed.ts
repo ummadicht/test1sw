@@ -12,6 +12,7 @@
  * Pure functions only — no database, no clock.
  */
 import { BATTERY_HEALTH_ID, type DeviceReport, type ModelMatch, type PlanItem, type TestResult } from "./diagnostics.ts";
+import type { VariantSource } from "./offer.ts";
 
 /* ─────────────────────────── which app is this ─────────────────────────── */
 
@@ -105,11 +106,139 @@ export function nextBatteryHealth(existing: TestResult | undefined, reading: Tes
 
 /* ─────────────────────────── identity ─────────────────────────── */
 
-/** What the join response tells the phone about itself — the model match, nothing priced. */
-export type JoinIdentity = { label: string | null; match: ModelMatch["match"]; reason: string; variant: string | null; modelId: string | null };
+/**
+ * What the join response tells the phone about itself — the model match, nothing priced.
+ * `variants` is the matched model's storage sizes, so the confirm card can ask "How much
+ * storage?" when the phone couldn't measure it. Empty when no model matched (an older
+ * server sends none at all — the app reads that as empty too) — and empty whenever the
+ * phone MEASURED its storage, even a size that isn't on the model's list (a 1TB Ultra on
+ * file as 256/512GB): the customer is never asked what the phone already answered, and
+ * never offered only sizes the phone has ruled out.
+ *
+ * `measured` = storageVariant(totalDiskBytes), the phone's own reading. Default null.
+ */
+export type JoinIdentity = { label: string | null; match: ModelMatch["match"]; reason: string; variant: string | null; modelId: string | null; variants: string[] };
 
-export function identityForJoin(m: ModelMatch): JoinIdentity {
-  return { label: m.label, match: m.match, reason: m.why, variant: m.variant, modelId: m.modelId };
+export function identityForJoin(m: ModelMatch, variants: string[] = [], measured: string | null = null): JoinIdentity {
+  return { label: m.label, match: m.match, reason: m.why, variant: m.variant, modelId: m.modelId, variants: m.modelId && !measured ? [...variants] : [] };
+}
+
+/* ─────────────────────────── storage, at Apply ─────────────────────────── */
+
+export type StorageFromTest = {
+  variant: string | null;
+  source: "measured" | "catalogue" | "customer" | null;
+  flag: string | null;
+  /** Present (true) only when the case's current size must be removed: a size the customer TYPED that the phone's reading contradicts. */
+  clear?: true;
+};
+
+/**
+ * The model whose storage Apply is settling: the phone's own match, else the
+ * customer's pick when the case has no model yet or already has that one. null =
+ * no model to put a size on (the pick would replace a model the case has).
+ */
+export function storageModelId(i: { match: { modelId: string | null }; picked: { modelId: string } | null; caseModelId: string | null }): string | null {
+  if (i.match.modelId) return i.match.modelId;
+  if (i.picked && (!i.caseModelId || i.caseModelId === i.picked.modelId)) return i.picked.modelId;
+  return null;
+}
+
+/**
+ * The storage Apply writes to the case, and where it came from. First match wins:
+ *
+ *   1. measured   the phone read its own disk, and that size is on the model's list
+ *                 — always used. A customer who picked the same model in another
+ *                 size is told the measurement stands.
+ *   1b. —         the phone read a size the model's list doesn't have (a 1TB Ultra
+ *                 on file as 256/512GB): nothing is patched, the advisor is told,
+ *                 and no claim, single size or pick is used against the reading.
+ *   2. —          the case already has a size for this model: nothing is patched;
+ *                 a claim never overwrites what the advisor recorded.
+ *   3. catalogue  the model is sold in one size only.
+ *   4. customer   the customer picked a size on their own phone (that model, a
+ *                 size on its list). A CLAIM: enough to show prices, and the
+ *                 advisor confirms it in Settings › About phone before the trade-in.
+ *   5. —          nothing: the answer screen asks with one row of chips.
+ *
+ * `variants` is the sizes of the model storageModelId() names. `measured` is the
+ * phone's own reading, storageVariant(totalDiskBytes) — it is a fact about the
+ * phone's disk whichever way the model was named. Without it, the match's own
+ * size is the reading (the matcher drops a size that isn't on the list).
+ */
+export function storageFromTest(i: {
+  match: { modelId: string | null; variant: string | null };
+  picked: { modelId: string; variant: string | null } | null;
+  variants: string[];
+  caseModelId: string | null;
+  caseVariant: string | null;
+  measured?: string | null;
+  /** Where the case's current size came from — a customer's claim gives way to a reading. */
+  caseSource?: VariantSource | null;
+}): StorageFromTest {
+  const none: StorageFromTest = { variant: null, source: null, flag: null };
+  const model = storageModelId(i);
+  if (!model) return none;
+  const reading = i.measured ?? (i.match.modelId === model ? i.match.variant : null);
+  // What the customer said about THIS model's storage on their phone, if anything.
+  const said = i.picked && i.picked.modelId === model && i.picked.variant ? i.picked.variant : null;
+  if (reading && i.variants.includes(reading)) {
+    return {
+      variant: reading,
+      source: "measured",
+      flag: said && said !== reading ? `Storage: the customer said ${said}, the phone measures ${reading}. The measurement is used.` : null,
+    };
+  }
+  if (reading) {
+    // A size the customer typed on an earlier test is contradicted by this reading: it
+    // comes off the case rather than being priced as if it were true. Staff's own size stays.
+    const typed = i.caseModelId === model && !!i.caseVariant && i.caseSource === "customer" && i.caseVariant !== reading;
+    return {
+      variant: null,
+      source: null,
+      flag: `Storage: the phone measures ${reading}, which isn't a size on file${said ? ` (the customer said ${said} — not used)` : typed ? ` (the customer said ${i.caseVariant} earlier — removed)` : ""}. Check Settings › About phone, and enter the Cashify quote on the full case if it's really ${reading}.`,
+      ...(typed ? { clear: true as const } : {}),
+    };
+  }
+  if (i.caseModelId === model && i.caseVariant) return none;
+  if (i.variants.length === 1) return { variant: i.variants[0], source: "catalogue", flag: null };
+  if (i.picked && i.picked.modelId === model && i.picked.variant && i.variants.includes(i.picked.variant)) {
+    return {
+      variant: i.picked.variant,
+      source: "customer",
+      flag: `Storage: the customer said ${i.picked.variant} — the phone couldn't measure it. Check Settings › About phone before the trade-in.`,
+    };
+  }
+  return none;
+}
+
+/* ─────────────────────────── storage, on a save ─────────────────────────── */
+
+/**
+ * Where the case's storage comes from after a save (updateCase), and whether the
+ * size itself changed.
+ *
+ *   from   Apply's word — "measured", "catalogue" or "customer". Undefined = the
+ *          public PATCH: staff, recorded as "advisor".
+ *
+ * Re-saving the size already on the case is not a new fact. From staff it keeps the
+ * source it has: tapping the chip that is already pressed must not turn a size the
+ * customer TYPED into the advisor's (that would drop the lock's "Settings › About
+ * phone" tick on a size nobody checked), nor re-ask the partner, nor clear a quote
+ * read off the partner's app. Apply's word still counts on the same size: a
+ * measurement upgrades a claim. A size of a model that just changed is always new.
+ */
+export function storageOnSave(i: {
+  next: string | null;
+  prev: string | null;
+  prevSource: VariantSource | null;
+  from?: "measured" | "catalogue" | "customer";
+  modelChanged: boolean;
+}): { source: VariantSource | null; changed: boolean } {
+  const changed = i.modelChanged || i.next !== i.prev;
+  if (!i.next) return { source: null, changed };
+  if (i.from) return { source: i.from, changed };
+  return { source: !changed && i.prevSource ? i.prevSource : "advisor", changed };
 }
 
 export type ImeiAgreement = "match" | "differs" | "unknown";

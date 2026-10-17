@@ -25,6 +25,16 @@ A step rail on every screen: **Identify · Scan · Test · Result**.
 2. **Identify**
    - "Let's check this phone." Card: "**Samsung Galaxy S23 Ultra · 256 GB**" + "Your phone calls itself SM-S918U"
      (from the join response's `identity`). Buttons "Yes, that's my phone" / "No — choose my phone".
+   - **Storage on the confirm card** (2026-10-17, the answer screen — owner: "Why asking questions when we
+     have all tested data ... just refurb quote vs bonus + trade in price."). When the phone couldn't
+     measure its storage (`identity.variant` null — every browser run, a failed disk read) and the model
+     comes in more than one size (`identity.variants`), the card asks under the hero: "How much storage?",
+     one option per size, "Settings › About phone shows it." "Yes, that's my phone" waits for a size; the
+     quiet link "Not sure — the advisor will check" goes on without one. The size is sent as
+     `picked: { modelId: identity.modelId, variant }` with `identityConfirmed: true`. A phone that MEASURED
+     its storage is never asked, even when the size it read isn't on the model's list (a 1TB S23 Ultra on file
+     as 256/512GB): the server then sends `identity.variants: []`, so the card never offers only sizes the
+     phone has ruled out (2026-10-17 review fix).
    - No match / "No" → picker: brand → model (search when > 12) → storage; answers as tappable crumbs;
      "Confirm phone". From `GET /api/device/models`. Recorded as a CLAIM ("customer picked").
    - IMEI: "Dial *#06# — your phone shows its IMEI." Buttons "Open dialler" (`tel:*%2306%23`), "Paste";
@@ -63,11 +73,32 @@ available), Battery (file input via expo-image-picker web), then today's interac
 - `GET /api/device/camera-link` (Ticket): `{ url: cameraUrl(gradeiq_id) }` when `gradeiq_state = ready`; 409
   "The camera check isn't ready yet" otherwise (the phone retries). The full pass, no `pass` param.
 - `POST /api/device/phase` (Ticket) `{ phase: "identify"|"scan"|"battery"|"test"|"done" }` → `{ok}`; staff view `phonePhase`.
-- Join response gains `identity: { label, match: "exact"|"family"|"none", reason, variant, modelId }` (matchModel; no prices).
+- Join response gains `identity: { label, match: "exact"|"family"|"none", reason, variant, modelId, variants }` (matchModel;
+  no prices). `variants` (2026-10-17) = the matched model's storage sizes from `trade_models`, `[]` when no model
+  matched — what the confirm card's "How much storage?" offers. Also `[]` whenever the phone reported its disk
+  size (`storageVariant(totalDiskBytes)` is not null), on the list or not: the phone already answered, and
+  `reason` says what it read ("Storage reads 1000.2 GB (1TB), which is not a storage option on file…").
 - `GET /api/device/models?brand=` (Ticket) → `{ brands: string[] } | { models: [{ id, brand, model, variants }] }` from trade_models.
 - `POST /api/device/declare` extended as above. Apply: fill `imei2`; a declared IMEI that differs from the
-  case's keeps the case IMEI and adds a note/flag; `picked` used only when the match is none and the case has
-  no model (labelled "customer picked"); customerName/customerPhone fill the case's customer only when empty.
+  case's keeps the case IMEI and adds a note/flag; `picked` sets the model only when the match is none and the
+  case has no model or already has that one (labelled "customer picked"); customerName/customerPhone fill the
+  case's customer only when empty.
+- **Storage at Apply** (2026-10-17, `storageFromTest` in `lib/domain/phoneLed.ts`): the phone's measurement
+  always wins (a different size the customer picked is only flagged) — it is the disk reading of the session's
+  device, so it counts however the model was named (code match or the customer's pick). A measured size that
+  isn't on the model's list fills nothing and is never replaced by a pick, the model's single size or a guess:
+  flagged "Storage: the phone measures 1TB, which isn't a size on file. Check Settings › About phone, and enter
+  the Cashify quote on the full case if it's really 1TB." and kept on the case (`measuredStorage`, migration 12),
+  so the answer says the same instead of "couldn't measure" (MOBILE-API §3c). A size the case already has is kept; a
+  model sold in one size takes it; otherwise the customer's pick of that model's size fills it as a CLAIM —
+  even when the model code matched — flagged "Storage: the customer said X — the phone couldn't measure it.
+  Check Settings › About phone before the trade-in." and recorded `variantSource: "customer"`, so locking the
+  trade-in needs the advisor's "Settings › About phone shows X" tick (`checks.storageSeen`). Nothing → the
+  answer screen asks with one row of priced chips. The case remembers where its storage came from
+  (`variantSource`: measured | catalogue | customer | advisor). "No — choose my phone" followed by the SAME
+  model is agreement, not an identity dispute: no "…isn't right" flag.
+- Apply also suggests the new phone (`lib/domain/upgrade.ts`) unless staff already chose one, so the case
+  comes back with the answer (`offer`, MOBILE-API §3c).
 - `POST /api/device/battery` (Ticket) `{ image: dataURL ≤ 3 MB }` → forwards to GradeIQ
   `POST /api/sessions/{id}/ocr { frames: [image] }` → reads `ocr.batteryHealth` → stores result
   `battery_health: { outcome: pct ≥ 80 ? "pass" : "fail" (pct > 0) | "skip" (unreadable), detail: { healthPct, method: "battery screenshot read by GradeIQ" } }`

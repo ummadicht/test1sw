@@ -14,9 +14,11 @@ import type { CampaignBand, ModelOption, PickupInfo } from "@/components/counter
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Case" };
 
-export default async function CasePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CasePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ view?: string | string[] }> }) {
   const { id } = await params;
-  const u = await requirePage(null, `/cases/${id}`);
+  // ?view=answer — the store app's hand-off: the answer first, the steps folded away.
+  const answerFirst = (await searchParams).view === "answer";
+  const u = await requirePage(null, `/cases/${id}${answerFirst ? "?view=answer" : ""}`);
 
   let view: CaseView;
   try {
@@ -68,7 +70,7 @@ export default async function CasePage({ params }: { params: Promise<{ id: strin
 
   return (
     <AppShell user={u} wide>
-      <CaseWorkspace initial={view} role={u.role} brands={tradeBrands()} initialModel={initialModel} bands={bands} pickup={pickup} />
+      <CaseWorkspace initial={view} role={u.role} brands={tradeBrands()} initialModel={initialModel} bands={bands} pickup={pickup} answerFirst={answerFirst} />
     </AppShell>
   );
 }

@@ -3,7 +3,7 @@ import { HttpError, orgSettings, type SessionUser } from "./auth";
 import { getOrg, getStore, ownStore, storeInScope, canSeeStore, orgPartnerId, type StoreRow } from "./scope";
 import { partnerQuote, partnerMode, type PartnerQuote, type PartnerMode } from "./buyback";
 import { storeEvents, storePolicy, postEvents } from "./credit";
-import { activeCampaigns } from "./catalog";
+import { activeCampaigns, newDevices } from "./catalog";
 import { caseMarketSell, type CaseMarketSell } from "./marketPrices";
 import {
   type ConditionAnswers,
@@ -21,6 +21,9 @@ import {
 import { estimateRepair, type Coverage, type ManualQuote, type RepairEstimate, type RepairBookEntry } from "../domain/repair";
 import { bestCampaign, type BonusResult, type Campaign } from "../domain/bonus";
 import { decide, type Decision } from "../domain/decision";
+import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
+import { buildOffer, expiredQuoteBlocker, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
+import { storageOnSave } from "../domain/phoneLed";
 import { canHold } from "../domain/credit";
 import { readImei } from "../domain/imei";
 import { indianMobile } from "../domain/phone";
@@ -60,11 +63,27 @@ export type Checks = {
   noFinanceLock: boolean;
   kym: { status: KymStatus; reference: string | null };
   imeiCheckAck?: boolean;
+  /** The storage was the customer's claim, and the advisor saw it in Settings › About phone. */
+  storageSeen?: boolean;
   at: string;
   by: string;
 };
 
-export type UpgradeChoice = { deviceId: string; label: string; model: string; series: string; variant: string; price: number; supportEndYear: number | null };
+export type UpgradeChoice = {
+  deviceId: string;
+  label: string;
+  model: string;
+  series: string;
+  variant: string;
+  price: number;
+  supportEndYear: number | null;
+  /** true = SwapUp suggested it (lib/domain/upgrade.ts); false/absent = staff chose it, and it stands. */
+  suggested?: boolean;
+  /** The suggestion's one-sentence reason, e.g. "Newest Galaxy S Ultra, same storage (256GB)." */
+  why?: string;
+  /** UPGRADE_RULE_VERSION when suggested. */
+  rule?: string;
+};
 
 export type BonusApplied = BonusResult & {
   campaignName: string;
@@ -128,6 +147,9 @@ type CaseRow = {
   camera_check: string | null;
   data_clear: string | null;
   refurb_cost: string | null;
+  variant_source: string | null;
+  storage_quotes: string | null;
+  measured_storage: string | null;
 };
 
 /** The store's own cost to put the phone right (BUY vs SELL). Not the customer's repair price. */
@@ -202,6 +224,16 @@ export type CaseView = {
   /** The customer's factory reset after acceptance, as the store saw it. */
   dataClear: DataClearRecord | null;
   dataClearState: DataClearState;
+  /** Where the storage came from: the phone's measurement, the catalogue's only size, the customer's claim, or staff. */
+  variantSource: VariantSource | null;
+  /**
+   * The size the phone read off its own disk at Apply, whatever the model's list says (null = it
+   * didn't measure). When it isn't on the list (a 1TB Ultra on file as 256/512GB) the storage stays
+   * empty, and a Cashify quote entered for the phone settles it at this size (updateCase).
+   */
+  measuredStorage: string | null;
+  /** THE ANSWER — refurb quote vs trade-in + bonus, and the one thing still missing (lib/domain/offer.ts). null for the partner. */
+  offer: Offer | null;
 };
 
 /* ─────────────────────────── reads ─────────────────────────── */
@@ -237,6 +269,9 @@ function withoutGradeiqId(c: CaseCameraCheck): Omit<CaseCameraCheck, "gradeiqId"
   const { gradeiqId: _gradeiqId, ...rest } = c;
   return rest;
 }
+
+const VARIANT_SOURCES = new Set<string>(["measured", "catalogue", "customer", "advisor"]);
+const readVariantSource = (s: string | null): VariantSource | null => (s && VARIANT_SOURCES.has(s) ? (s as VariantSource) : null);
 
 function toView(c: CaseRow, store: StoreRow): CaseView {
   const tm = getTradeModel(c.model_id);
@@ -312,6 +347,9 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
     lockBlockers: [],
     dataClear: parseJson<DataClearRecord | null>(c.data_clear, null),
     dataClearState: "not_applicable",
+    variantSource: c.variant ? readVariantSource(c.variant_source) : null,
+    measuredStorage: c.measured_storage ?? null,
+    offer: null,
   };
   const legacyChecks = parseJson<Checks | null>(c.checks, null);
   view.dataClearState = dataClearState(c.status, view.dataClear, legacyChecks?.factoryReset === true);
@@ -327,6 +365,35 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
       if (!view.creditCheck.ok) view.lockBlockers.push(view.creditCheck.reason);
     }
   }
+  // The answer is worked out for every status; `open` says whether it can still be acted on.
+  // With no new phone on an open case, ask the suggestion rule whether the catalogue HAS one,
+  // so the ask never says "nothing matches" after staff cleared it or on a desk-only case.
+  const newPhoneMatch =
+    tm && !view.upgrade && EDITABLE.includes(c.status)
+      ? suggestUpgrade({ brand: tm.brand, model: tm.model, series: tm.series, variant: c.variant }, newDevices(store.org_id)) !== null
+      : false;
+  view.offer = buildOffer({
+    status: c.status,
+    device: tm ? { label: `${tm.brand} ${tm.model}`, variant: c.variant, variants: parseJson<string[]>(tm.variants, []) } : null,
+    variantSource: view.variantSource,
+    measuredStorage: view.measuredStorage,
+    storageQuotes: parseJson<StorageQuote[] | null>(c.storage_quotes, null),
+    faultCount: faults.length,
+    coverage: c.coverage,
+    repair: view.repair,
+    manualRepair: view.manualRepair,
+    repairNotServiced: view.repairNotServiced,
+    quote: view.quote,
+    quoteExpired,
+    quoteBlocked: view.quoteBlocked,
+    conditionProblems: view.conditionProblems,
+    hasCondition: !!condition,
+    upgrade: view.upgrade,
+    bonus: view.bonus,
+    decision: view.decision,
+    tested: !!camera,
+    newPhoneMatch,
+  });
   return view;
 }
 
@@ -337,7 +404,8 @@ function lockBlockers(v: CaseView, orgIsDemo: boolean): string[] {
   if (!v.condition) out.push("Answer the condition questions.");
   if (v.conditionProblems.length) out.push("The condition is recorded better than the faults allow.");
   if (!v.quote || v.quote.status !== "priced" || !v.quote.amount) out.push("No trade-in price from the partner.");
-  else if (v.quoteExpired) out.push("The partner's quote has expired — re-quote.");
+  // Re-quote fixes a rate-card or live quote; one read off the Cashify app needs today's from the app.
+  else if (v.quoteExpired) out.push(expiredQuoteBlocker(v.quote));
   else if (v.quote.source.kind === "sample" && !orgIsDemo)
     out.push("This price comes from a SAMPLE rate card. Load the partner's rate card before taking a real trade-in.");
   if (!v.upgrade) out.push("Choose the new phone.");
@@ -566,10 +634,21 @@ export type CasePatch = {
 const EDITABLE: CaseStatus[] = ["draft", "quoted"];
 
 /**
+ * What only the server's own callers may say about a change — never the public
+ * PATCH route, so staff can't record their own storage as "measured".
+ *   variantSource    where patch.variant came from (Apply: the phone measured it,
+ *                    the model has one size, or the customer typed it). Default "advisor".
+ *   autoUpgrade      suggest the new phone (Apply), unless staff already chose one.
+ *   measuredStorage  the size the phone read off its own disk (Apply), or null when
+ *                    it didn't measure. Left out = unchanged.
+ */
+export type UpdateInternal = { variantSource?: "measured" | "catalogue" | "customer"; autoUpgrade?: boolean; measuredStorage?: string | null };
+
+/**
  * Save what the advisor has learned about the device, then re-price.
  * Partner calls happen OUTSIDE any transaction.
  */
-export async function updateCase(u: SessionUser, id: string, patch: CasePatch): Promise<CaseView> {
+export async function updateCase(u: SessionUser, id: string, patch: CasePatch, internal: UpdateInternal = {}): Promise<CaseView> {
   requireCounter(u);
   const { c, store } = caseInScope(u, id);
   if (!EDITABLE.includes(c.status)) throw new HttpError(409, "This case is past the counter and can no longer be edited.");
@@ -581,16 +660,31 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch): 
     const tm = patch.modelId ? getTradeModel(patch.modelId) : null;
     if (patch.modelId && !tm) throw new HttpError(400, "Unknown model.");
     sets.model_id = tm?.id ?? null;
-    if (tm?.id !== c.model_id) sets.variant = null;
+    if (tm?.id !== c.model_id) {
+      sets.variant = null;
+      sets.variant_source = null;
+    }
     pricingChanged = true;
   }
+  const modelChanged = "model_id" in sets && sets.model_id !== c.model_id;
+  let variantChanged = false;
   if (patch.variant !== undefined) {
     const tm = getTradeModel((sets.model_id as string | undefined) ?? c.model_id);
     const variants = tm ? parseJson<string[]>(tm.variants, []) : [];
     if (patch.variant && !variants.includes(patch.variant)) throw new HttpError(400, "That storage variant does not exist for this model.");
-    sets.variant = patch.variant || null;
-    pricingChanged = true;
+    // Re-saving the size already there (the pressed chip tapped again) is no news: it keeps
+    // the size's source and its quote. Only Apply's word may change the source of the same
+    // size — a measurement upgrades the customer's claim (lib/domain/phoneLed.ts storageOnSave).
+    const next = patch.variant || null;
+    const s = storageOnSave({ next, prev: c.variant, prevSource: readVariantSource(c.variant_source), from: internal.variantSource, modelChanged });
+    if (s.changed || internal.variantSource) {
+      sets.variant = next;
+      sets.variant_source = s.source;
+      pricingChanged = true;
+      variantChanged = s.changed;
+    }
   }
+  if (internal.measuredStorage !== undefined) sets.measured_storage = internal.measuredStorage;
   if (patch.imei !== undefined) {
     if (!patch.imei) {
       sets.imei = null;
@@ -626,8 +720,9 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch): 
   }
   if (patch.coverage !== undefined) {
     if (!["none", "warranty", "care_plus"].includes(patch.coverage)) throw new HttpError(400, "Unknown cover.");
+    // Cover moves only the repair price. The partner's quote reads model, storage,
+    // condition and IMEI — re-asking would silently extend (or re-call) the trade-in.
     sets.coverage = patch.coverage;
-    pricingChanged = true;
   }
   if (patch.condition !== undefined) {
     sets.condition = patch.condition === null ? null : JSON.stringify(cleanCondition(patch.condition));
@@ -689,7 +784,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch): 
       if (reason.length < 8) throw new HttpError(400, "Say where the repair quote comes from (e.g. the job-sheet number).");
       sets.manual_repair = JSON.stringify({ amount, reason, by: u.name } satisfies ManualQuote);
     }
-    pricingChanged = true;
+    // The repair quote is the customer's, not the partner's: no re-quote (see cover above).
   }
   if (patch.refurbCost !== undefined) {
     if (patch.refurbCost === null) sets.refurb_cost = null;
@@ -702,7 +797,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch): 
   }
   // A partner quote read off its app describes ONE device in ONE condition. If
   // the description changes, that quote no longer belongs to this phone.
-  const describes = patch.modelId !== undefined || patch.variant !== undefined || patch.faults !== undefined || patch.condition !== undefined || patch.conditionFromFaults;
+  const describes = patch.modelId !== undefined || variantChanged || patch.faults !== undefined || patch.condition !== undefined || patch.conditionFromFaults;
   if (describes && c.partner_manual) sets.partner_manual = null;
   if (patch.partnerQuote !== undefined) {
     if (patch.partnerQuote === null) sets.partner_manual = null;
@@ -725,6 +820,18 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch): 
         by: u.name,
         at: nowIso(),
       } satisfies PartnerManual);
+      // The phone measured a size the model's list doesn't have (a 1TB Ultra on file as
+      // 256/512GB), so no chip could be right and the answer said: check Settings, and enter
+      // the Cashify quote if it's really that size. The quote entered for it settles the
+      // storage at the size the phone measured — the partner's app priced that phone.
+      const size = "variant" in sets ? (sets.variant as string | null) : c.variant;
+      const measured = "measured_storage" in sets ? (sets.measured_storage as string | null) : c.measured_storage;
+      const tmNow = !size && measured ? getTradeModel("model_id" in sets ? (sets.model_id as string | null) : c.model_id) : null;
+      if (tmNow && measured && !parseJson<string[]>(tmNow.variants, []).includes(measured)) {
+        sets.variant = measured;
+        sets.variant_source = "measured";
+        variantChanged = true;
+      }
     }
     pricingChanged = true;
   }
@@ -745,8 +852,47 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch): 
         variant: d.variant,
         price: d.price,
         supportEndYear: d.support_end_year,
+        // Staff chose it: it stands across later storage and model changes.
+        suggested: false,
       } satisfies UpgradeChoice);
     }
+  }
+
+  // The new phone SwapUp suggests (lib/domain/upgrade.ts) — at Apply, and again
+  // whenever the phone's model or storage really changes on a case whose new
+  // phone is still SwapUp's suggestion, or that has none yet (a desk-only case
+  // given its model, a tested one that had no model at Apply): with no new phone
+  // the swap can't be locked, so an empty case is never left waiting for one.
+  // Staff's own choice always stands; their Clear stands until the phone itself
+  // changes. A suggestion for another phone is cleared, never kept: no
+  // suggestion is better than a wrong one.
+  const prevUpgrade = parseJson<UpgradeChoice | null>(c.upgrade, null);
+  const phoneChanged = modelChanged || variantChanged;
+  const autoUpgrade = patch.upgradeDeviceId === undefined && (internal.autoUpgrade || phoneChanged) && (!prevUpgrade || prevUpgrade.suggested === true);
+  if (autoUpgrade) {
+    const tm = getTradeModel("model_id" in sets ? (sets.model_id as string | null) : c.model_id);
+    // With no size on the case, the phone's own reading still says how big it is (a 1TB
+    // Ultra is suggested against 1TB, not "storage unknown").
+    const measured = "measured_storage" in sets ? (sets.measured_storage as string | null) : c.measured_storage;
+    const variant = ("variant" in sets ? (sets.variant as string | null) : c.variant) ?? measured;
+    const catalogue = newDevices(store.org_id);
+    const s = tm ? suggestUpgrade({ brand: tm.brand, model: tm.model, series: tm.series, variant }, catalogue) : null;
+    const d = s ? catalogue.find((x) => x.id === s.deviceId) : undefined;
+    sets.upgrade =
+      s && d
+        ? JSON.stringify({
+            deviceId: d.id,
+            label: `${d.brand} ${d.model} ${d.variant}`,
+            model: d.model,
+            series: d.series,
+            variant: d.variant,
+            price: d.price,
+            supportEndYear: d.supportEndYear,
+            suggested: true,
+            why: s.why,
+            rule: UPGRADE_RULE_VERSION,
+          } satisfies UpgradeChoice)
+        : null;
   }
 
   if (Object.keys(sets).length) {
@@ -846,6 +992,27 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
         : quote;
   }
 
+  // 2b. Storage unknown: the partner's what-if price for EACH size, so the answer
+  //     asks with one row of priced chips instead of a form — never a guessed
+  //     size. Kept only while the storage is unknown; asked again only when the
+  //     description changed (requote) or there are none yet. Never for a phone that
+  //     measured a size off the model's list: every size on it is one the phone has
+  //     ruled out, so there is nothing to offer and nothing to ask the partner.
+  let storageQuotes = parseJson<StorageQuote[] | null>(c.storage_quotes, null);
+  const sizes = tm ? parseJson<string[]>(tm.variants, []) : [];
+  const measuredOffList = !!c.measured_storage && !sizes.includes(c.measured_storage);
+  if (tm && !c.variant && condition && consistent && !blocked && !measuredOffList) {
+    if (opts.requote || !storageQuotes) {
+      const out: StorageQuote[] = [];
+      for (const v of sizes) {
+        const w = await partnerQuote({ partnerId, modelId: tm.id, variant: v, answers: condition, whatIf: true });
+        const priced = w.status === "priced" && w.amount !== null;
+        out.push({ variant: v, amount: priced ? w.amount : null, reason: priced ? null : (w.reason ?? null), sample: w.source.kind === "sample" });
+      }
+      storageQuotes = out.length ? out : null;
+    }
+  } else storageQuotes = null;
+
   // 3. Bonus — from the best active campaign for this upgrade.
   const upgrade = parseJson<UpgradeChoice | null>(c.upgrade, null);
   const asIs = quote?.status === "priced" ? quote.amount : null;
@@ -901,13 +1068,14 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
   const status: CaseStatus = asIs !== null || repairPays !== null ? "quoted" : "draft";
   db()
     .prepare(
-      `UPDATE cases SET repair = ?, quote = ?, repaired_quote = ?, bonus = ?, decision = ?, status = ?, updated_at = ?
+      `UPDATE cases SET repair = ?, quote = ?, repaired_quote = ?, storage_quotes = ?, bonus = ?, decision = ?, status = ?, updated_at = ?
        WHERE id = ? AND status IN ('draft','quoted')`
     )
     .run(
       repair ? JSON.stringify(repair) : null,
       quote ? JSON.stringify(quote) : null,
       repairedQuote ? JSON.stringify(repairedQuote) : null,
+      storageQuotes ? JSON.stringify(storageQuotes) : null,
       bonus ? JSON.stringify(bonus) : null,
       JSON.stringify(decision),
       status,
@@ -981,6 +1149,8 @@ export type LockInput = {
     noFinanceLock: boolean;
     kym: { status: KymStatus; reference?: string | null };
     imeiCheckAck?: boolean;
+    /** Required when the storage is the customer's claim (variantSource "customer"): the advisor saw it in Settings › About phone. */
+    storageSeen?: boolean;
   };
 };
 
@@ -1020,6 +1190,10 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
     const { c, store } = caseInScope(u, id);
     const view = toView(c, store);
     assertTransition(c.status, "locked");
+    // A claimed storage is enough to SHOW a price; moving money needs it seen —
+    // the same rule as the IMEI, one tick, and only when the phone couldn't measure it.
+    if (c.variant_source === "customer" && ch.storageSeen !== true)
+      throw new HttpError(400, `Confirm before taking the phone: Settings › About phone shows ${c.variant} (the customer typed it — the phone couldn't measure it).`);
     if ((view.imeiCheck === "invalid" || view.imei2Check === "invalid") && !ch.imeiCheckAck)
       throw new HttpError(400, "An IMEI fails its check digit. Re-read it from *#06#, or confirm it is correct.");
     const blockers = view.lockBlockers;
@@ -1053,6 +1227,7 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
       noFinanceLock: true,
       kym: { status: "clear", reference: kymRef },
       imeiCheckAck: !!ch.imeiCheckAck,
+      ...(ch.storageSeen === true ? { storageSeen: true } : {}),
       at: now,
       by: u.name,
     };
@@ -1065,7 +1240,7 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
       .run(JSON.stringify(customer), JSON.stringify(checks), T, B, payable, now, now, id);
     if (upd.changes !== 1) throw new HttpError(409, "This case changed while you were working on it — reload.");
     postEvents(store.id, [{ kind: "hold", caseId: id, amount: T, at: now, note: `Trade-in ${c.ref}` }], u.id);
-    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.lock", entity: "case", entityId: id, detail: { tradeValue: T, bonus: B, payable, source: view.quote!.source.kind, kym: checks.kym } });
+    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.lock", entity: "case", entityId: id, detail: { tradeValue: T, bonus: B, payable, source: view.quote!.source.kind, kym: checks.kym, storage: { variant: c.variant, source: c.variant_source, seen: checks.storageSeen === true } } });
     return getCase(u, id);
   });
 }

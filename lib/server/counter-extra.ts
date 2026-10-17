@@ -35,6 +35,7 @@ export function quoteSourceKinds(u: SessionUser, caseIds: string[]): Record<stri
  */
 export function getCaseForViewer(u: SessionUser, id: string): CaseView {
   const view = getCase(u, id);
-  // The store's own refurb cost is its business, not the buyback partner's.
-  return u.role === "partner" ? { ...view, refurbCost: null } : view;
+  // The store's own refurb cost is its business, not the buyback partner's —
+  // nor is the answer the store gave its customer (refurb quote vs trade-in + bonus).
+  return u.role === "partner" ? { ...view, refurbCost: null, offer: null } : view;
 }

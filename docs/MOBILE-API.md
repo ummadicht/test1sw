@@ -38,9 +38,14 @@ other roles get `403 "The store app is for store staff."`.
 `position.utilisation`, `position.state`, `advice`, `held[]`) — already exists.
 
 ### Web hand-off (continue pricing in an in-app WebView)
-`POST /api/auth/handoff` (Bearer) `{ next: "/cases/<id>" }` → `{ url }` — a one-time URL
+`POST /api/auth/handoff` (Bearer) `{ next: "/cases/<id>?view=answer" }` → `{ url }` — a one-time URL
 `/api/auth/handoff/<nonce>` valid 60 s that sets the web session cookie and redirects to
 `next`. Load that URL in the WebView.
+
+Since 2026-10-17 the store app hands off with **`?view=answer`**: the desk's case page then opens on
+the same answer the app shows (§3c) — refurb quote vs trade-in + bonus — with steps 1–6 folded
+under it. A `#step-…` anchor is optional (`#step-phone`, `#step-repair`, `#step-tradein`,
+`#step-upgrade`, `#step-lock`); `/cases/<id>` alone still works and lays the page out as before.
 
 ## 1b. Store tablet (signed in for the store, advisor by name + PIN)
 
@@ -145,7 +150,9 @@ poll also drives the camera-grading pulls from GradeIQ (§8) — throttled on th
 `POST /api/test-sessions/<id>/apply` (Bearer) → applies the mapped model, storage, the tested
 faults **and the camera-confirmed faults** (§8), and a condition no better than the advisor's,
 the faults' or the camera's, to the case (through the normal case service, so it re-prices) →
-`{ session: TestSessionView, caseId }`.
+`{ session: TestSessionView, caseId }`. Since 2026-10-17 Apply also settles the storage without
+asking (§4, "At Apply") and **suggests the new phone** (§3c) unless staff already chose one, so the
+case comes back with an answer: `GET /api/cases/<id>` → `offer`.
 `POST /api/test-sessions/<id>/cancel` (Bearer) → status `cancelled`, ticket revoked; its GradeIQ
 session is abandoned.
 `POST /api/test-sessions/<id>/reissue` (Bearer) → new code + QR for the SAME case when the
@@ -199,12 +206,18 @@ joining.
 
 After the test is applied, the advisor enters the refurb cost and the trade-in is shown as
 buy vs sell — the same four lines on the desk's case page (step 5) and in the store app
-(`lib/domain/buySell.ts` is the reference implementation):
+(`lib/domain/buySell.ts` is the reference implementation).
+
+**Since 2026-10-17 this is the store's margin, staff only.** In the store app the card sits in a
+collapsed "Store margin · staff only" row at the bottom of the answer screen (§3c), closed by
+default; its box is relabelled **"Store's refurb cost"** (it was "Refurb cost · your quote" in the
+app and "Refurb cost (quote)" on the desk), so it can't be confused with the answer's **Refurb
+quote** — the CUSTOMER's repair price. The figures and the logic below are unchanged.
 
 | Line | From the case (`GET /api/cases/<id>`) |
 | --- | --- |
 | Buy — pay the customer | `quote.amount` when `quote.status === "priced"` |
-| Refurb cost (quote) | `refurbCost.amount`, else `repair.listTotal ?? repair.customerPays` when `repair.status === "quoted"`, else ₹0 when `faults` is empty |
+| Store's refurb cost | `refurbCost.amount`, else `repair.listTotal ?? repair.customerPays` when `repair.status === "quoted"`, else ₹0 when `faults` is empty |
 | Sell — after refurb | `marketSell.amount` (PriceIQ's Cashify refurbished listing less 2–5%), else `repairedQuote.amount` when `repairedQuote.status === "priced"` |
 | Margin | Sell − Buy − Refurb, only when all three are known (negative = a loss) |
 
@@ -227,6 +240,216 @@ advice, bonus and decision never read it (`manualRepair` is the customer's repai
 does). A partner viewing the case sees `refurbCost: null`. Errors: `400` bad amount, `401` session
 over, `403` not a counter role, `404` case not in your store, `409` the case is past the counter.
 
+## 3c. The answer (`offer`) — refurb quote vs trade-in + bonus
+
+Owner, 2026-10-17: "Why asking questions when we have all tested data ... just refurb quote vs bonus
++ trade in price." After Apply the case carries **one answer**, worked out on the server
+(`lib/domain/offer.ts` `buildOffer`, called from `toView`) and shown the same way by the store app's
+answer screen and the desk's `?view=answer` card. The app never invents a reason: it shows these
+strings and owns only its labels.
+
+| Label | Figure |
+| --- | --- |
+| **Refurb quote** | What the CUSTOMER pays to fix it: `repair.customerPays` from the price book, or the bench / service-centre quote (`manualRepair`), or ₹0 when covered. The figure `decide()` compares and the bonus's repair-ratio rule reads. **Never** the store's `refurbCost` (§3b). |
+| **Trade-in + bonus** | The partner's as-is price + the upgrade bonus for the new phone. |
+
+The verdict is `decision.headline`, unchanged (`decide()`, its thresholds and `RULESET_VERSION` did
+not move); the bonus is shown and never a reason.
+
+### CaseView additions (`GET`/`PATCH /api/cases/<id>` and every `/action` response)
+
+```ts
+type UpgradeChoice = {
+  deviceId: string; label: string; model: string; series: string; variant: string;
+  price: number; supportEndYear: number | null;
+  suggested?: boolean;   // true = SwapUp picked it; false/absent = staff picked it (it then stands)
+  why?: string;          // the suggestion's reason, e.g. "Newest Galaxy S Ultra, same storage (256GB)."
+  rule?: string;         // UPGRADE_RULE_VERSION ("2026-10-17.1") when suggested
+};
+CaseView += {
+  variantSource: "measured" | "catalogue" | "customer" | "advisor" | null;  // null when there is no storage
+  measuredStorage: string | null;  // the size the phone read off its own disk at Apply, whatever the model's
+                                   // list says ("1TB" on an Ultra on file as 256/512GB); null = it didn't measure
+  offer: Offer | null;   // null for a partner viewer
+};
+
+type VariantSource = "measured" | "catalogue" | "customer" | "advisor";
+type OfferAsk =
+  | { kind: "blocked";       title: string; text: string }
+  | { kind: "model";         title: string; text: string }
+  | { kind: "storage";       title: string; text: string;
+      options: { variant: string; tradeIn: number | null; sample: boolean }[];   // [] = no chip can be right (below)
+      note: string | null }                                                      // "Sample price — not a real quote." | null
+  | { kind: "partner_quote"; title: string; text: string }
+  | { kind: "repair_quote";  title: string; text: string }
+  | { kind: "new_phone";     title: string; text: string };
+
+type Offer = {
+  open: boolean;                          // status is draft or quoted
+  headline: string;
+  reason: string | null;                  // one sentence under the headline
+  recommendation: Recommendation | null;  // decision.recommendation (null when no decision)
+  recommended: "repair" | "swap" | null;  // repair→"repair"; upgrade|no_repair→"swap"; either|cannot_say→null
+  asks: OfferAsk[];                       // ordered: blocked, model, storage, partner_quote, repair_quote, new_phone
+  storage: { variant: string | null; source: VariantSource | null; note: string | null };
+  repair: {                               // THE refurb quote
+    amount: number | null; covered: boolean; basis: "book" | "manual" | null;
+    detail: string | null; why: string | null; nothingToRepair: boolean;
+    coverage: "none" | "warranty" | "care_plus";
+  };
+  swap: {
+    tradeIn: number | null; tradeInNote: string | null;
+    bonus: number | null; bonusBp: number | null; bonusWhy: string | null;
+    total: number | null;                 // tradeIn + (bonus ?? 0); null when tradeIn is null
+    why: string | null;                   // why tradeIn is null
+    newPhone: { deviceId: string; label: string; price: number; suggested: boolean; why: string | null } | null;
+                                          // label = model + storage, no brand ("Galaxy S26 Ultra 256GB");
+                                          // the CaseView's upgrade.label keeps the brand
+    customerPays: number | null;          // decision.upgrade.pays
+    vsRepair: number | null;              // decision.upgrade.extraVsRepair (+ = the swap costs more today)
+  };
+  actions: { repair: string | null; swap: string | null; walkAway: string | null }; // null = allowed, string = why not
+  signals: { text: string; points: "repair" | "upgrade"; strength: "strong" | "soft" }[];
+  caveats: string[];
+};
+```
+
+The offer is worked out for every status; `open` says whether it can still be acted on. Once the
+case is closed (`repair_chosen`, `walked_away`, `locked` and later) `asks` is `[]` and every action
+is "This case is closed.". A partner viewing a case gets `offer: null` (and `refurbCost: null`).
+
+### The strings, word for word
+
+`asks` (each appears only while the case is open):
+
+| Kind | Title | Text | When |
+| --- | --- | --- | --- |
+| `blocked` | "Check this is the right phone" | `quoteBlocked` | the camera says this may not be the phone on the case |
+| `model` | "Which phone is it?" | "The test couldn't tell the model. Choose it on the full case." (no test was applied to the case: "No model on the case yet. Choose it on the full case.") | no model on the case |
+| `storage` | "Which storage is it?" | "The phone couldn't measure its storage. Settings › About phone › Storage shows it." — only when a test ran and the phone read nothing. No test applied (a desk-only case), or the phone measured a size on the list that is no longer on the case: "No storage on the case yet. Settings › About phone › Storage shows it." The phone measured a size that ISN'T on the model's list (`measuredStorage`, e.g. a 1TB Ultra on file as 256/512GB): "The phone measures 1TB, which isn't a size on file. Check Settings › About phone, and enter the Cashify quote on the full case if it's really 1TB." | a model, no storage. `options`: the what-if trade-in for each size, smallest size first (`tradeIn: null` when the partner has no price for that size, or none could be asked yet — e.g. the condition is incomplete). `sample: true` on a chip whose price comes from the SAMPLE rate card (a chip with no price is `false`; so are the model's bare sizes); `note` is "Sample price — not a real quote." while any chip is a sample, else null — show it under the chips. **`options: []` when the phone measured an off-list size:** every listed size is one the phone has ruled out, so none is offered (and no what-if prices are asked) — show the text and the way to the full case. |
+| `partner_quote` | "Enter the Cashify quote" | `quote.reason` ?? "The partner has no price for this phone." A quote typed in from the Cashify app that has lapsed: "Cashify quote (ref CF-88421) expired — enter today's quote." | model + storage, not blocked, the partner's quote is unpriced or errored — or it is a lapsed Cashify-app quote (`partner_manual` + `quoteExpired`, open case): SwapUp never re-quotes those, so only today's quote from the app (`PATCH {partnerQuote}`) replaces it |
+| `repair_quote` | "The repair needs a quote" | the first `repair.notes` entry, or `repairNotServiced` (fallback "The price book can't price this repair — enter the service centre's quote.") | a model, something to repair, and the book can't price it (`needs_inspection` / `unpriced` / brand not serviced) |
+| `new_phone` | "Choose the new phone" | "No new phone in the catalogue matches this one — choose it to see the bonus." (the catalogue does have one — staff cleared the suggestion, or none ran on a desk-only case: "Choose the new phone to see the bonus.") | a model and no new phone (the suggestion found none: e.g. an iPhone at a Samsung centre) |
+
+- **`headline`:** the title of the first ask that isn't `new_phone`; else `decision.headline`; else
+  "Not enough to compare yet".
+- **`reason`:** the first that applies — that ask's text; the first strong signal pointing the way of
+  the recommendation; the first signal; for `no_repair` with no signals "The test found nothing wrong
+  with the phone." (no test applied to the case: "No faults are recorded on the case."); `cannot_say` with nothing to ask → the first `decision.missing` entry (e.g. "No buyback value for this phone once repaired."); else null.
+- **`storage`:** `source` and `note` are null whenever `variant` is null. `note`, when the source is
+  `customer`: "The customer typed this — the phone couldn't measure it. Check Settings › About phone
+  before the trade-in."
+- **`repair.detail`:** covered → "Covered by warranty" / "Covered by Care+"; a manual quote →
+  `Quote: ${reason}`; a book estimate → every line label joined with " + ", then "+ labour" if
+  labour > 0, "+ GST" if GST > 0, "+ Care+ fee" if that fee > 0 (e.g. "Display assembly + labour + GST").
+- **`repair.why`** (only when `amount` is null): "Nothing to repair."; "Choose the phone first.";
+  otherwise the repair note, or `repairNotServiced`, else "The price book can't price this repair —
+  enter the service centre's quote."
+- **`swap.tradeIn`** is null whenever the trade-in can't be trusted — the camera blocks it, there is
+  no model, or no storage — even if an older priced quote is still stored.
+- **`swap.tradeInNote`:** sample → "Sample price — not a real quote."; read off the partner's app
+  (`partner_manual`) and lapsed, on an open case → "Cashify quote (ref ${partnerRef}) expired — enter today's
+  quote." (the figure stays on screen for reference, marked; the same sentence is the `partner_quote` ask and
+  `actions.swap`); read off the partner's app → `Cashify ref ${partnerRef}` (SwapUp never re-quotes those, so
+  it is never "re-quoting"); expired on an open case → "Quote expired — re-quoting." (a closed case's quote
+  running out after the lock is no news: no note).
+- **`swap.why`**, in order: `quoteBlocked`; "Choose the phone first."; "Tap the storage to see the
+  trade-in." (the phone measured an off-list size: the storage ask's text — there is nothing to tap); `quote.reason` (fallback "The partner has no price for this phone."); the first
+  `conditionProblems` entry; "Answer the condition questions." (no condition); "No trade-in price
+  from the partner yet."
+- **`bonusWhy`:** no new phone → "Choose the new phone to see the bonus."; a new phone but no bonus →
+  "No upgrade-bonus campaign applies to this phone today." `bonus` / `bonusBp` are a manager's
+  override when there is one (`override.amount` / `override.bp`).
+- **`actions.repair`:** closed → "This case is closed."; nothing to repair → "Nothing to repair.";
+  no refurb quote → `repair.why`; draft → "Not priced yet."; else null.
+- **`actions.swap`:** closed → "This case is closed."; no trade-in → `swap.why`; a lapsed Cashify-app quote →
+  "Cashify quote (ref …) expired — enter today's quote."; no new phone → "Choose the new phone." (the lock
+  blocker's own words); not quoted → "Not priced yet."; else null. A swap the Lock screen is certain to refuse
+  for a reason it can't fix there is refused here, with that reason. The IMEI, sample-card, credit and
+  rate-card/live expiry blockers stay on the Lock screen (`lockBlockers`) — an expired rate-card or live quote
+  IS re-quoted by `reprice`. The lock's expired-quote blocker is "The partner's quote has expired — re-quote."
+  for those, and the same "Cashify quote (ref …) expired — enter today's quote." for a Cashify-app quote
+  (`expiredQuoteBlocker`), so the Lock screen never asks for a re-quote that can't happen.
+- **`actions.walkAway`:** closed → "This case is closed."; else null.
+
+### Filled without asking
+
+- **Storage** — at Apply (§4): the phone's measurement; else the model's only size (`catalogue`);
+  else the size the customer picked on their own phone (`customer` — a claim, see the lock below). A
+  measured size that isn't on the model's list fills nothing and is kept as `measuredStorage`; the answer
+  says so and offers no chip. **Entering the Cashify quote for that phone (`PATCH {partnerQuote}` while the
+  case has no storage) settles the storage at the measured size** (`variant: "1TB"`, `variantSource:
+  "measured"`): the partner's app priced that phone. `PATCH {variant: "1TB"}` stays refused (not on file).
+  Still unknown → the `storage` ask: one row of chips, each with that size's trade-in. Those are
+  partner **what-if** quotes (`whatIf: true`, never binding), asked by the re-price for each of the
+  model's sizes while the storage is unknown and the condition is complete, consistent and not
+  camera-blocked — again only when the description changed or there are none yet — and dropped the
+  moment a size is set. One tap: `PATCH {variant}`. Never a guessed size.
+- **New phone** — SwapUp suggests one at Apply (`lib/domain/upgrade.ts`, rule `2026-10-17.1`): the
+  newest phone in the same line as the old one (S23 Ultra → the newest S Ultra) at the same storage,
+  widening to the same family, the nearest A/M/F tier, then the series only when the catalogue has
+  nothing closer. It never reads the bonus, the margin or a campaign. It is suggested again whenever the
+  model or storage really changes (re-saving the same value is no change) while the new phone is still
+  SwapUp's suggestion **or there is none yet** — a desk-only case gets one when its model is set, and a
+  case whose suggestion staff cleared gets a new one when the phone's description changes. With no storage
+  on the case, the phone's own reading (`measuredStorage`) is the size it is suggested against (S23 Ultra
+  1TB → S26 Ultra 512GB). A suggestion for another phone is cleared, never kept. Staff's own choice
+  (`PATCH {upgradeDeviceId}` → `suggested: false`) stands across later changes; their Clear stands until
+  the phone itself changes.
+- **Cover** — `none` unless changed; the refurb tile has a quiet "Cover: None · change".
+- **The trade-in is not re-asked** for `manualRepair` or `coverage` (since 2026-10-17): the partner's
+  quote reads only model, storage, condition and IMEI, and each edit on the answer screen would
+  otherwise extend a rate-card quote's validity or call a live partner again. `reprice` still
+  recomputes the repair, bonus and decision on every call, and still re-quotes a missing or expired
+  quote. `faults`, `condition`, `modelId`, `variant`, `partnerQuote` and the camera identity override
+  still re-quote.
+- **IMEI** — not needed for the answer; asked on the Lock screen only if missing.
+
+### The calls
+
+All exist and accept Bearer:
+- `GET /api/cases/<id>`
+- `PATCH /api/cases/<id>` with one of `{variant}`, `{upgradeDeviceId}`, `{coverage}`,
+  `{manualRepair: {amount, reason} | null}`, `{partnerQuote: {amount, reference, validDays?, repairedAmount?}}`,
+  `{imei}` → the whole `CaseView`. A staff `variant` is recorded as `variantSource: "advisor"`; only
+  Apply can record `measured` / `catalogue` / `customer` (the public PATCH can't say where a size came from).
+  **Re-saving the size already on the case changes nothing** (since the 2026-10-17 review): it keeps its
+  `variantSource` — a size the customer typed stays `customer`, so the lock still asks for `storageSeen` —
+  and the partner is not re-asked and a Cashify-app quote is not cleared. Only a different size is the
+  advisor's word (re-quoted, Cashify-app quote cleared). Apply's own word still counts on the same size: a
+  measurement turns the customer's claim into `measured`.
+- `POST /api/cases/<id>/action` with `{action: "reprice"}`, `{action: "choose_repair"}`,
+  `{action: "walk_away", reason?}` or `{action: "lock", customer, checks}` (below).
+- `GET /api/catalog/new-devices` → `{ devices: [{ id, brand, model, series, variant, price, supportEndYear }] }`.
+- `GET /api/cases?status=draft,quoted&limit=10` — the cases still waiting on the customer.
+- `POST /api/auth/handoff` `{ next: "/cases/<id>?view=answer" }` (§1).
+
+### Taking the trade-in — `{action: "lock"}`
+
+`{ action: "lock", customer: { name, phone, idType, idLast4 }, checks: { ownership, simRemoved,
+imeiMatches, noFinanceLock, kym: { status, reference? }, imeiCheckAck?, storageSeen? } }`
+
+**`checks.storageSeen: boolean`** (since 2026-10-17) — required when `variantSource === "customer"`:
+the advisor saw the storage in Settings › About phone. Without it →
+`400 "Confirm before taking the phone: Settings › About phone shows 512GB (the customer typed it — the phone couldn't measure it)."`
+A claimed size is enough to SHOW a price; moving money needs it seen — the same rule as the IMEI, one
+tick, only when the phone couldn't measure it. It is stored with the checks (`checks.storageSeen: true`)
+and in the `case.lock` audit (`storage: {variant, source, seen}`). It is checked right after the
+status (only a `quoted` case locks) and before the IMEI check digit and the lock blockers.
+
+### Worked example (local seed: `org_samsung_svc`, sample card, S23 Ultra, `screen_cracked`)
+
+Storage unknown after Apply: status `quoted` (the repair is priced); `asks[0]` storage with 256GB →
+₹18,800 and 512GB → ₹20,300; `swap.tradeIn` null, why "Tap the storage to see the trade-in.";
+`repair.amount` 34096 (display 28,470 + labour 425 + GST 5,201); new phone S26 Ultra 256GB, suggested.
+
+After `PATCH {variant: "256GB"}`: Refurb quote ₹34,096 · new phone Galaxy S26 Ultra 256GB ₹1,54,999
+(suggested, "Newest Galaxy S Ultra, same storage (256GB).") · trade-in ₹18,800 · bonus 400 bp = ₹6,199
+(base 200 + S series 100 + repair ≥ 50% of the repaired value ₹34,800 100) · **trade-in + bonus
+₹24,999** · customer pays ₹1,30,000 · vsRepair +95,904 · `either`, "Either is reasonable — it's the
+customer's choice", three soft signals · `tradeInNote` "Sample price — not a real quote." (Checked
+end to end on the local server, 2026-10-17.)
+
 ## 4. Customer test app (device side)
 
 The code is 6 characters from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`.
@@ -247,9 +470,16 @@ can open.
 `POST /api/device/join` `{ code, device: DeviceInfo, appVersion, installId }` →
 `200 { ticket, session: { id, caseRef, storeName, plan, server, status, results, declared, identity, customerStarted } }`
 - `code` may be a session's code, the demo code, or a store's counter code (§2c).
-- `session.identity` (since 2026-10-17): `{ label, match: "exact"|"family"|"none", reason, variant, modelId }`
+- `session.identity` (since 2026-10-17): `{ label, match: "exact"|"family"|"none", reason, variant, modelId, variants }`
   — SwapUp's `matchModel` on the phone's own model code ("Samsung Galaxy S22", "128GB"), for the
   Identify card. `reason` is the matcher's explanation. Never a price. `match: "none"` → the picker.
+  `variants` (since 2026-10-17, the answer screen): the matched model's storage sizes, e.g.
+  `["256GB","512GB"]` — always present, `[]` when no model matched (an older server sends none: read
+  that as `[]`), and `[]` whenever the phone reported its disk size — even a size that isn't on the
+  model's list (a 1TB Ultra on file as 256/512GB): the phone already answered, so the customer is never
+  asked, and never offered only sizes the phone has ruled out. When `variant` is null and there is more
+  than one size, the confirm card asks "How much storage?" and sends the size as
+  `picked: { modelId, variant }` with `identityConfirmed: true`.
 - `session.customerStarted`: true for a counter-code session — the app also asks for the customer's
   mobile number and name (both optional) and sends them with `declare`.
 - `session.plan` depends on the app: SwapUp Check ≥ 0.6.0 (native, or `web-0.6.0`+) gets
@@ -283,9 +513,26 @@ At **Apply** (`POST /api/test-sessions/<id>/apply`):
 - `imei` fills an empty case IMEI, and the phone's other number fills an empty `imei2`. When the
   phone's IMEIs share no number with the case's, the case keeps its own and gets the flag
   "IMEI differs: …" in `camera.flags`.
-- `picked` sets the model (and storage) only when the phone's code matched nothing AND the case has
-  no model — flagged "Model: customer picked … Check the model before pricing." (audit
-  `modelSource: "customer picked"`).
+- `picked` sets the model only when the phone's code matched nothing AND the case has no model, or
+  already has that model — flagged "Model: customer picked … Check the model before pricing." (when
+  it filled an empty case; audit `modelSource: "customer picked"`). The identity flag "…the customer
+  said that isn't right…" is raised only when the customer picked a DIFFERENT model than the phone's
+  code, or said "No" and picked nothing — "No" then the same model is agreement.
+- **Storage** (`lib/domain/phoneLed.ts` `storageFromTest`; first match wins; audit `storage: {variant, source, measured}`):
+  1. **measured** — the phone read its own disk, a size on the model's list: always used, however the
+     model was named (code match or the customer's pick). A customer who picked the same model in another
+     size gets the flag "Storage: the customer said X, the phone measures Y. The measurement is used."
+  1b. the phone read a size that ISN'T on the model's list → nothing is patched, and no pick, single
+     size or guess is used against the reading. Flag: "Storage: the phone measures 1TB, which isn't a size
+     on file (the customer said 512GB — not used). Check Settings › About phone, and enter the Cashify quote
+     on the full case if it's really 1TB." The reading is kept as `measuredStorage` (§3c).
+  2. the case already has a size for that model → nothing is patched (a claim never overwrites).
+  3. **catalogue** — the model comes in one size only.
+  4. **customer** — the customer picked that model and a size on its list (on the confirm card, or in
+     the picker) → used as a CLAIM, flagged "Storage: the customer said X — the phone couldn't measure
+     it. Check Settings › About phone before the trade-in." Locking then needs `checks.storageSeen` (§3c).
+  5. nothing → the answer screen asks with one row of priced chips (§3c).
+- The new phone is suggested (§3c) unless staff already chose one (audit `upgrade: <deviceId> | null`).
 - `customerName` / `customerPhone` fill the case's customer only where it is empty.
 
 `POST /api/device/results` `{ results: [{ testId, outcome, detail?, at }] }` — batch;
