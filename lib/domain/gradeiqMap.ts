@@ -700,10 +700,17 @@ export function resultsWithCameraDisplay(results: TestResults, lcd: LcdCheck, at
  * merge:true). unsupported → skip: GradeIQ would store any string as-is and its
  * passport would render a state its type does not allow. `detail` stays in
  * SwapUp. Keys are sorted so the same results always hash the same.
+ *
+ * SwapUp-only ids are not sent: `battery_health` is GradeIQ's own /ocr reading
+ * of a screenshot — it already holds that % in its session's `ocr`, and it has
+ * no functional test of that name.
  */
+const NOT_GRADEIQ_TESTS = new Set(["battery_health"]);
+
 export function gradeiqFunctionalMap(results: TestResults, cameraDisplay: "pass" | "fail" | "unknown" | null = null): Record<string, "pass" | "fail" | "skip"> {
   const out: Record<string, "pass" | "fail" | "skip"> = {};
   for (const id of Object.keys(results).sort()) {
+    if (NOT_GRADEIQ_TESTS.has(id)) continue;
     const o = results[id].outcome;
     out[id] = o === "unsupported" ? "skip" : o;
   }

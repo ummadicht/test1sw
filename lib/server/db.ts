@@ -360,6 +360,17 @@ const MIGRATIONS: string[] = [
          try failed, so failures older than a day stop counting. */ `
   ALTER TABLE pin_attempts ADD COLUMN last_failure_at TEXT;
   `,
+  /* 9 — the phone-led flow (docs/PHONE-LED-FLOW.md): where SwapUp Check ≥ 0.6.0
+         says it is (identify / scan / battery / test / done), and each store's
+         permanent counter code, so a customer can start a trade-in alone
+         (started_via 'counter' marks those sessions; 'demo' the standing test
+         code's; NULL = a member of staff started it). Additive only. */ `
+  ALTER TABLE test_sessions ADD COLUMN phone_phase TEXT;
+  ALTER TABLE test_sessions ADD COLUMN phone_phase_at TEXT;
+  ALTER TABLE test_sessions ADD COLUMN started_via TEXT;
+  ALTER TABLE stores ADD COLUMN counter_code TEXT;
+  CREATE UNIQUE INDEX stores_counter_code ON stores (counter_code) WHERE counter_code IS NOT NULL;
+  `,
 ];
 
 function migrate(conn: Database.Database): void {

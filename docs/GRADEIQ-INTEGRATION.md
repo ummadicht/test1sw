@@ -60,6 +60,7 @@ Path prefixes used below:
 | 4 | `GET` / `POST /api/sessions/{id}/screen` | Proxied for the customer's phone during the photo check | POST `{"shown":"<pattern>"}` | `{pattern, shown, cosmeticDone, handoffDone, capture, connectedAt}` (`giq/app/api/sessions/[id]/screen/route.ts:113-130`). An unknown id returns `idle`, not 404 (`:100`). |
 | 5 | `GET /api/sessions/{id}` | After `cosmeticDone`, until the grade is final | — | `cosmetic_grade`, `cosmetic.*`, `functional_grade`, `overall_grade`, `screen.capture`, `screen.displayCheck`, `identity`, `photos`. **Ignore `offer`, and drop `staged`**: it holds base64 copies of every photo (`cosmetic/route.ts:146-153`), so each response can be megabytes. |
 | 6 | `GET /api/report/{id}/export` | At "Apply to case" | — | DeviceFax JSON with its signature. It contains no price and no `staged`. Its photo URLs are built from the request's own origin (`export/route.ts:32-35`), so rewrite them to `GRADEIQ_PUBLIC_URL`. |
+| 7 | `POST /api/sessions/{id}/ocr` (since 2026-10-17) | SwapUp Check ≥ 0.6.0 uploads a battery-health screenshot (`POST /api/device/battery`) | `{"frames":["data:image/…;base64,…"],"kind":"battery"}` — one frame | `ocr.batteryHealth` (1–100, else nothing legible). Timeout `GRADEIQ_OCR_TIMEOUT_MS`, default 30 s: one vision call, and the route answers with the **whole session** (`staged` photos included) beside `ocr`. See §7 for what GradeIQ does with the screenshot. |
 
 **Calls SwapUp must never make:**
 
@@ -81,7 +82,7 @@ Path prefixes used below:
 |---|---|---|
 | **Customer's phone** (the phone being traded) | SwapUp Check: Android app, or `/app/check/` in a browser | Joins, answers the damage questions, **shows the screen patterns the camera asks for**, then runs the 18 functional tests. |
 | **Store device** | SwapUp Store: app, or `/app/store/` | Creates the session, shows the join QR, **opens GradeIQ's camera page `/v2/cam/{id}` and photographs the customer's phone**, watches results, applies them to the case. |
-| **SwapUp server** | `su/` | The only thing that calls GradeIQ's API. The GradeIQ UUID never reaches the customer's phone. |
+| **SwapUp server** | `su/` | The only thing that calls GradeIQ's API. The GradeIQ UUID never reaches the customer's phone — **except** that SwapUp Check ≥ 0.6.0 shows the camera link as its scan code (§7, owner's decision 2026-10-17). |
 
 **Steps**
 
@@ -144,8 +145,9 @@ Path prefixes used below:
   - `WebScreen` opens any other site outside the app (`sum/src/store/screens/Web.tsx:39-46`) and sets no camera grant (`:94-100`).
   - Use `Linking.openURL`. The page needs HTTPS. The torch works only in Chrome on Android, and iOS never gets torch photos (`V2Cam.tsx:562-640`).
 - **Prefer a button on the staff device over a QR code.** The camera URL carries the GradeIQ UUID, which is the only key to that session, so it should not be shown where the customer can photograph it.
+  - **Overruled for SwapUp Check ≥ 0.6.0 (owner, 2026-10-17, §7):** the customer's phone now shows exactly that URL as a QR, as GradeIQ v2 does. The risk below is accepted, not removed.
 - **The pattern-echo screen is new work in SwapUp Check**, in both the native and the web build. GradeIQ assumes its own `/v2` page plays that role.
-- **Unclear:** the Settings-screen photo step needs the customer's phone to leave Check and open Settings. I could not confirm whether a journey config can switch this step off. The Check app should at least offer an "Open Settings › About phone" button during it.
+- **Unclear:** the Settings-screen photo step needs the customer's phone to leave Check and open Settings. I could not confirm whether a journey config can switch this step off. The Check app should at least offer an "Open Settings › About phone" button during it. (SwapUp Check ≥ 0.6.0 does — `docs/PHONE-LED-FLOW.md` step 3.)
 
 ## 3. How results flow
 
@@ -183,6 +185,7 @@ Path prefixes used below:
 | vibration | Vibration motor | Android only (`tests.ts:121`) | no | Fine for the Android app. A browser Check on iPhone would be hidden. |
 | buttons | Hardware buttons | same | no | — |
 | battery, charging, connectivity, sensors, bluetooth, nfc | as named | as named; native only (`tests.ts:145-153`) | charging: yes | **Counted in GradeIQ's verdict but never listed on DeviceFax** (`passport.ts:225-231`) or in the Pandas payload (`pandasResult.ts:83-91`). |
+| battery_health | Battery health (≥ 0.6.0) | — (GradeIQ has no such test) | no | **SwapUp-only, never forwarded** (`gradeiqFunctionalMap` skips it). It is GradeIQ's own `/ocr` reading of a screenshot (call 7), which GradeIQ already keeps in its session's `ocr`. So the "18 ids" above stay 18 on the GradeIQ side. |
 
 Two comments wrongly claim the names are identical: `sum/src/diagnostics/catalog.ts:1-5` and the gradeiq-mobile catalog.
 
@@ -288,6 +291,7 @@ Each item says whether it needs a GradeIQ code change, a SwapUp code change, or 
    - The middleware leaves `/api/sessions/*` open by design (`giq/middleware.ts:4-8, 53-55`).
    - An `api_keys` table exists (`giq/lib/db.ts:76-93`), but no code issues or checks keys.
    - SwapUp's mitigation keeps the UUID on the server and the staff device only. That does not stop anyone who has seen the camera URL.
+   - **Since 2026-10-17 that mitigation is gone for SwapUp Check ≥ 0.6.0 sessions**: the customer's phone shows the camera URL as its scan code (§7). The owner accepted this.
 2. **The functional verdict says `Working` when critical tests were never run (GradeIQ change).**
    - One pass plus all-critical-unsupported still grades `Working` (`giq/lib/grading.ts:51`).
    - Until GradeIQ adds "critical without pass/fail means incomplete", SwapUp's `summarise` stays the authority (`su/lib/domain/diagnostics.ts:336-340`).
@@ -361,3 +365,52 @@ Implementation choices worth knowing (each stricter than or clarifying §3):
 - **Local dev:** GradeIQ's dev server has no `NEXT_PUBLIC_BASE_PATH`, so it serves at the root: `GRADEIQ_BASE_URL=http://127.0.0.1:3700`, `GRADEIQ_PUBLIC_URL=http://localhost:3700` in `su/.env.local` (gitignored).
 
 Still open: the SwapUp Check pattern-echo screen (native + web) and the Store app's camera button / grading card (`sum/`); a UI for override reasons on the web desk (today the 409 explains, but the desk has no reason field); everything in §5 that needs a GradeIQ change.
+
+## 7. The phone-led flow (2026-10-17, `su/docs/PHONE-LED-FLOW.md`)
+
+Owner, after reviewing GradeIQ v2: "the phone app controls everything, then the vision model, then
+functional". SwapUp Check ≥ 0.6.0 runs **Identify › Scan › Test › Result**. **GradeIQ is not changed.**
+
+**The camera link now reaches the customer's phone — said plainly.**
+- `GET /api/device/camera-link` (Ticket) returns `cameraUrl(gradeiqId)` — `/v2/cam/<uuid>`, the full
+  single pass, no `pass` — and the phone shows it as a QR on its Scan screen. Any camera app opens it;
+  the store tablet normally does. This is GradeIQ v2's own await2nd handoff (`giq/app/components/V2Flow.tsx`),
+  so the single pass (photos → dark front glass → screen sweep → Settings photo → `handoffDone`) needs
+  nothing new in GradeIQ.
+- Consequence, accepted by the owner, not mitigated: **whoever holds that link** — the customer, or
+  anyone who photographs their screen — can write to the GradeIQ session (`/screen`, `/cosmetic`,
+  `/display`, `/functional`, an anonymous `/grade-manual` with `conclusive:true`) and open GradeIQ's
+  `/report/<uuid>`, which shows **GradeIQ's own price and an Accept button** (§1 "never" table, §5 #1, #6).
+  The seller is the person holding the phone, and the seller gains from a better result.
+- What still limits the damage: SwapUp only takes camera damage that makes the phone **worse**
+  (confirmed, final, §3.4), an identity mismatch still blocks the quote, the LCD lock still fails
+  closed, and SwapUp never reads GradeIQ's price. A grade the seller overwrote through
+  `/grade-manual` would, however, be read by SwapUp's pulls like any other grade.
+- No other device response carries the id; SwapUp Check < 0.6.0 never calls the route. Each
+  session's first issue is audited (`test_session.camera_link`).
+- For those sessions the store gets no `photosUrl` (no photos before the phone joins); the pull window
+  and `cameraGradePending` are unchanged — the single pass posts `handoffDone` (with `cosmeticDone`)
+  only after the sweep and the Settings photo (`V2Cam.tsx`, end of the pass), and the window runs
+  from the later of the two, so it opens then, while the phone tests itself.
+
+**Battery health (call 7, GradeIQ's `/ocr`).** The phone uploads a screenshot of its battery-health
+screen to SwapUp (`POST /api/device/battery`); SwapUp forwards it to `/ocr` and records
+`battery_health` itself: ≥ 80 % pass, below 80 % fail → the `battery_drain` fault, which the buyback
+partner prices; nothing legible → skip (untested). GradeIQ's own price reads only Phonecheck's battery
+figure, never this OCR % (`giq/lib/offer.ts:218`, `giq/lib/pricing/session.ts:25`); in SwapUp it
+does reach the price, through the fault. What `/ocr` does on GradeIQ's side, by its
+design (`giq/app/api/sessions/[id]/ocr/route.ts`):
+- it keeps the screenshot in its **public** uploads (`/api/uploads/<id>-ocr-…jpg`) and in `ocr.shots`;
+- it is one vision call; with no vision key it returns nothing legible (`source: "stub"`), which
+  SwapUp records as skip — never a pass;
+- if an **IMEI is legible in the screenshot**, it replaces the session's IMEI (recording
+  `identity.imei_mismatch` first) and runs `lookupImei` — a **paid Phonecheck ESN check**. The
+  battery screens the app points at (Samsung Battery information / Samsung Members, Pixel Battery
+  health, Android Battery) don't show an IMEI; a screenshot of About phone would.
+- SwapUp keeps no copy of the screenshot.
+
+**Identity** stays SwapUp's: the model is matched on the phone's own model code (`matchModel`); a
+customer's manual pick is a claim used only when nothing matched and the case has no model; a
+typed IMEI never replaces the case's — a disagreement is a flag (SwapUp's copy of GradeIQ's
+`identity.imei_mismatch`). SwapUp still sends no IMEI at create.
+

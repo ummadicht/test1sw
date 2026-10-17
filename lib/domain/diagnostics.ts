@@ -19,6 +19,7 @@
  */
 import { type FaultId, type ConditionAnswers, type IssueId, FAULTS, ISSUE_LABEL, SCREEN_ORDER, BODY_ORDER, conditionFromFaults } from "./condition.ts";
 import { readImei } from "./imei.ts";
+import { indianMobile } from "./phone.ts";
 
 /* ─────────────────────────── types ─────────────────────────── */
 
@@ -30,8 +31,35 @@ export type TestDetail = Record<string, unknown>;
 export type TestResult = { outcome: TestOutcome; detail: TestDetail | null; at: string };
 export type TestResults = Record<string, TestResult>;
 
-/** What the customer says about things a phone cannot test on itself. null = not answered. */
-export type Declared = { screenCracked: boolean | null; backCracked: boolean | null; liquid: boolean | null; imei: string | null };
+/** The model a customer chose on their own phone when SwapUp couldn't recognise it — a CLAIM, never a match. */
+export type PickedModel = {
+  modelId: string;
+  variant: string | null;
+  /** "Samsung Galaxy A54" — filled in by the server from its own model list, so staff can read the pick. */
+  label?: string | null;
+};
+
+/**
+ * What the customer says about things a phone cannot test on itself. null = not answered.
+ *
+ * The optional fields come from SwapUp Check ≥ 0.6.0's Identify step
+ * (docs/PHONE-LED-FLOW.md). They are present only when the app sent them, so an
+ * older app's declaration is stored exactly as it always was.
+ */
+export type Declared = {
+  screenCracked: boolean | null;
+  backCracked: boolean | null;
+  liquid: boolean | null;
+  imei: string | null;
+  /** The second IMEI on a two-SIM phone (*#06# shows both). */
+  imei2?: string | null;
+  /** "Yes, that's my phone" (true) / "No — choose my phone" (false) on the identity card. */
+  identityConfirmed?: boolean | null;
+  picked?: PickedModel | null;
+  /** A customer who started the trade-in alone (the store's counter code) gives their own name and number. */
+  customerName?: string | null;
+  customerPhone?: string | null;
+};
 
 /** The phone's own description of itself, as stored on the session. */
 export type DeviceReport = {
@@ -89,6 +117,10 @@ export const DEFAULT_PLAN: readonly PlanItem[] = [
   { id: "vibration", name: "Vibration motor", critical: false },
   { id: "buttons", name: "Hardware buttons", critical: false },
   { id: "battery", name: "Battery", critical: false },
+  // Not a test the phone runs: GradeIQ reads the % off a screenshot of the
+  // phone's own battery-health screen (POST /api/device/battery). SwapUp Check
+  // ≥ 0.6.0 only — an older app's plan has it taken out at join (planForApp).
+  { id: "battery_health", name: "Battery health", critical: false },
   { id: "charging", name: "Charging port", critical: true },
   { id: "connectivity", name: "Wi-Fi / cellular / GPS", critical: false },
   { id: "sensors", name: "Compass / light / barometer", critical: false },
@@ -109,7 +141,26 @@ const FAIL_FAULT: Record<string, FaultId> = {
   buttons: "buttons",
   charging: "charging_issue",
   battery: "battery_drain",
+  battery_health: "battery_drain",
 };
+
+/* ─────────────────────────── battery health (a screenshot, read by GradeIQ) ─────────────────────────── */
+
+export const BATTERY_HEALTH_ID = "battery_health";
+/** Below this the battery is worn enough to price as "drains fast" (the owner's line, 2026-10-17). */
+export const BATTERY_HEALTH_PASS_PCT = 80;
+export const BATTERY_HEALTH_METHOD = "battery screenshot read by GradeIQ";
+
+/**
+ * GradeIQ's reading of a battery-health screenshot → the battery_health result.
+ * Nothing legible (null, 0, out of range) is a SKIP — untested, never a pass:
+ * a blurry screenshot must not read as a healthy battery.
+ */
+export function batteryHealthResult(pct: number | null | undefined, at: string): TestResult {
+  const p = typeof pct === "number" && Number.isFinite(pct) && pct > 0 && pct <= 100 ? Math.round(pct) : null;
+  if (p === null) return { outcome: "skip", detail: { healthPct: null, method: BATTERY_HEALTH_METHOD, reason: "the screenshot could not be read" }, at };
+  return { outcome: p >= BATTERY_HEALTH_PASS_PCT ? "pass" : "fail", detail: { healthPct: p, method: BATTERY_HEALTH_METHOD }, at };
+}
 
 /**
  * A failed test that is NOT a SwapUp fault — only a note. Where the trade-in
@@ -297,7 +348,11 @@ export function summarise(
       continue;
     }
     const what = `${name(id)} test failed on the phone`;
-    if (id === "camera") {
+    if (id === BATTERY_HEALTH_ID) {
+      // Not a test the phone ran — the % its own battery screen showed.
+      const pct = typeof d?.healthPct === "number" ? d.healthPct : null;
+      add("battery_drain", pct === null ? `Battery health under ${BATTERY_HEALTH_PASS_PCT} % (screenshot)` : `Battery health ${pct} % (screenshot)`);
+    } else if (id === "camera") {
       const side = cameraSide(r.detail);
       if (side === "rear" || side === "both") add("rear_camera", `${what} (rear camera)`);
       if (side === "front" || side === "both") add("front_camera", `${what} (front camera)`);
@@ -316,8 +371,11 @@ export function summarise(
     }
   }
 
-  // What the customer says about damage a phone cannot see on itself.
-  if (!declared && opts.declaredExpected === false) {
+  // What the customer says about damage a phone cannot see on itself. SwapUp
+  // Check ≥ 0.6.0 declares its IMEI and identity answers with the damage answers
+  // left empty — that is "not asked", not three unanswered questions.
+  const damageSaid = !!declared && [declared.screenCracked, declared.backCracked, declared.liquid].some((v) => v === true || v === false);
+  if (!damageSaid && opts.declaredExpected === false) {
     notes.push("The app doesn't ask the customer about damage: cracks and scratches come from the store camera check. Liquid damage can't be tested — check the liquid indicators by eye.");
   } else if (!declared) {
     notes.push("The customer has not answered the damage questions (cracked screen, cracked back, liquid). Check the phone by eye.");
@@ -470,7 +528,17 @@ export function mergeResults(existing: TestResults, items: ResultItem[]): TestRe
   return out;
 }
 
-/** The damage answers → Declared, or an error a customer can act on. */
+const blank = (v: unknown) => v === undefined || v === null || String(v).trim() === "";
+const TRADE_MODEL_ID = /^[A-Za-z0-9._-]{1,80}$/;
+
+/**
+ * The declaration → Declared, or an error a customer can act on.
+ *
+ * The 0.6.0 fields (imei2, identityConfirmed, picked, customerName,
+ * customerPhone) appear in the result only when the body has the key, so an
+ * older app's declaration is stored exactly as before. `picked` is checked for
+ * shape here; the server checks the model is really on its list.
+ */
 export function readDeclared(raw: unknown): { ok: true; declared: Declared } | { ok: false; reason: string } {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const tri = (v: unknown): boolean | null | "bad" => (v === true || v === false ? v : v === null || v === undefined ? null : "bad");
@@ -479,12 +547,51 @@ export function readDeclared(raw: unknown): { ok: true; declared: Declared } | {
   const liquid = tri(o.liquid);
   if (screenCracked === "bad" || backCracked === "bad" || liquid === "bad") return { ok: false, reason: "Answer each question with yes or no." };
   let imei: string | null = null;
-  if (o.imei !== undefined && o.imei !== null && String(o.imei).trim() !== "") {
+  if (!blank(o.imei)) {
     const r = readImei(String(o.imei));
     if (!r.ok) return { ok: false, reason: "That IMEI does not look right. Dial *#06# and type the 15 digits shown under IMEI." };
     imei = r.imei;
   }
-  return { ok: true, declared: { screenCracked, backCracked, liquid, imei } };
+  const declared: Declared = { screenCracked, backCracked, liquid, imei };
+
+  if ("imei2" in o) {
+    declared.imei2 = null;
+    if (!blank(o.imei2)) {
+      const r = readImei(String(o.imei2));
+      if (!r.ok) return { ok: false, reason: "That second IMEI does not look right. Dial *#06# and type the 15 digits shown under IMEI 2." };
+      if (r.imei === imei) return { ok: false, reason: "The second IMEI is the same as the first — a two-SIM phone shows two different numbers." };
+      declared.imei2 = r.imei;
+    }
+  }
+  if ("identityConfirmed" in o) {
+    const v = tri(o.identityConfirmed);
+    if (v === "bad") return { ok: false, reason: "Say whether this is your phone." };
+    declared.identityConfirmed = v;
+  }
+  if ("picked" in o) {
+    const p = o.picked;
+    if (p === null || p === undefined) declared.picked = null;
+    else {
+      const q = (typeof p === "object" ? p : {}) as Record<string, unknown>;
+      const variant = q.variant === null || q.variant === undefined ? null : q.variant;
+      if (typeof q.modelId !== "string" || !TRADE_MODEL_ID.test(q.modelId) || (variant !== null && (typeof variant !== "string" || !variant.trim() || variant.length > 20)))
+        return { ok: false, reason: "Choose your phone from the list." };
+      declared.picked = { modelId: q.modelId, variant: variant === null ? null : (variant as string).trim() };
+    }
+  }
+  if ("customerName" in o) {
+    if (!blank(o.customerName) && typeof o.customerName !== "string") return { ok: false, reason: "Type your name, or leave it empty." };
+    declared.customerName = blank(o.customerName) ? null : String(o.customerName).trim().replace(/\s+/g, " ").slice(0, 80);
+  }
+  if ("customerPhone" in o) {
+    declared.customerPhone = null;
+    if (!blank(o.customerPhone)) {
+      const m = indianMobile(typeof o.customerPhone === "string" ? o.customerPhone : String(o.customerPhone));
+      if (!m) return { ok: false, reason: "Type a 10-digit mobile number, or leave it empty." };
+      declared.customerPhone = m;
+    }
+  }
+  return { ok: true, declared };
 }
 
 /* ─────────────────────────── store Wi-Fi ─────────────────────────── */

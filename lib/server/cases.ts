@@ -452,7 +452,7 @@ function requireCounter(u: SessionUser): void {
   if (!(COUNTER_ROLES as readonly string[]).includes(u.role)) throw new HttpError(403, "Only store staff work cases at the counter.");
 }
 
-export function createCase(u: SessionUser, input: { customerName?: string; customerPhone?: string; demo?: boolean } = {}): CaseView {
+export function createCase(u: SessionUser, input: { customerName?: string; customerPhone?: string; demo?: boolean; via?: "demo" | "counter" } = {}): CaseView {
   requireCounter(u);
   const store = ownStore(u);
   const id = newId("case");
@@ -468,7 +468,8 @@ export function createCase(u: SessionUser, input: { customerName?: string; custo
        VALUES (?,?,?,?,?,'draft',?,'[]','none',?,?,?)`
     )
     .run(id, ref, store.org_id, store.id, u.id, customer, input.demo ? 1 : 0, now, now);
-  audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "case.create", entity: "case", entityId: id });
+  // A counter-QR case is opened by the customer, under a staff member's name: say so.
+  audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "case.create", entity: "case", entityId: id, ...(input.via ? { detail: { via: input.via === "counter" ? "counter code (customer-started)" : "standing demo code" } } : {}) });
   return getCase(u, id);
 }
 

@@ -14,6 +14,10 @@ export const metadata = { title: "Test your phone", robots: { index: false } };
  * preview cannot bind the session; only a join (the app's, or the browser
  * test's when the customer presses Start) does.
  *
+ * The code may also be a store's permanent COUNTER code (the QR on the
+ * counter, docs/PHONE-LED-FLOW.md): the customer starts a trade-in alone. It
+ * shows the store; there is no case yet — the phone's join makes one.
+ *
  * Three ways to test, in this order:
  *   1. In this browser — no install (/app/check/?code=…). The only way on an
  *      iPhone; SwapUp Check the app is Android-only.
@@ -147,7 +151,7 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
           </details>
           <p className="text-white/60 text-[14px]">
             Your code <span className="font-mono text-[22px] tracking-[0.2em] font-bold text-white align-middle mx-1">{s.code}</span> — the same as on the
-            advisor&apos;s screen.
+            {s.kind === "counter" ? " store's counter QR." : " advisor's screen."}
           </p>
         </div>
       ) : (
@@ -158,7 +162,9 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
         </ol>
       )}
 
-      <p className="mt-6 text-white/50 text-[13px]">Trade-in {s.caseRef}. Show the final screen to the advisor when you are done.</p>
+      <p className="mt-6 text-white/50 text-[13px]">
+        {s.caseRef ? `Trade-in ${s.caseRef}. ` : ""}Show the final screen to the advisor when you are done.
+      </p>
     </Shell>
   );
 }

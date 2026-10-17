@@ -1,5 +1,10 @@
 # Two camera passes — photos first, screen check last
 
+> **Superseded for SwapUp Check ≥ 0.6.0** by [`PHONE-LED-FLOW.md`](PHONE-LED-FLOW.md) (2026-10-17):
+> the phone identifies itself, then shows GradeIQ's camera link as its scan code and the tablet runs
+> the single pass before the tests. Everything below still holds for older Check apps, and
+> `?pass=photos|screen` stays for SwapUp Store's own "Take photos" fallback on those flows.
+
 Owner, 2026-10-17: the store flow is **customer (found by mobile) → photos → Wi‑Fi + QR → the
 customer's phone downloads/opens SwapUp Check → it tests itself → the tablet's camera checks the
 screen colours → continue.** Chosen: "Second camera pass" (AI screen check after the tests) and

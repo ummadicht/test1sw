@@ -95,6 +95,33 @@ The counter starts with the customer's mobile number (since 2026-10-17, `docs/TW
 - `partner`, `org_admin`, `platform` → `403` (no counter). Then create as before
   (`POST /api/test-sessions` with `customerName` + `customerPhone`).
 
+## 2c. The store's counter code (a customer starts a trade-in alone)
+
+Since 2026-10-17 (`docs/PHONE-LED-FLOW.md`) every store has a permanent 6-character **counter
+code** (same alphabet as session codes; never the demo code), printed as a QR on the counter. A
+customer scans it, their phone joins, and a new session **and case** appear on the store's Home
+like any other (`TestSessionView.customerStarted: true`).
+
+`GET /api/stores/counter-code` (Bearer, `advisor` / `store_manager` of their own store) →
+`{ code: "K7M2QX", joinUrl: "https://swapup…/j/K7M2QX" }` — made the first time anyone asks.
+Other roles → `403`.
+
+`POST /api/stores/counter-code/regenerate` (Bearer, `store_manager`) → `{ code, joinUrl }` — a new
+code at once; the old one stops starting new checks (phones already mid-check on it carry on).
+Advisors → `403 "Only the store manager can make a new counter code."`
+
+Joining with a counter code works like the standing demo code, generalised (`testSessions.ts`
+`standingSessionFor`): this phone's own open session at that store, else an unclaimed one, else a
+new session + case opened under a store manager of that store (an advisor when it has no manager),
+audited `test_session.create` `{ via: "counter code" }`. Guards, because the QR is on show:
+- at most 20 NEW sessions per store per 10 minutes → `429 "Too many new checks at this store…"`;
+- the same phone re-joining within 12 h of the store **applying** its results →
+  `409 "This phone's check at <store> is finished — the store has its results…"` — so a re-opened
+  app doesn't quietly open a second trade-in; its old ticket still reads `GET /api/device/status`
+  → `applied`.
+A closed (rejected / inactive) store's counter code, or one with no staff, is `404` like any
+dead code. `/j/<counter code>` shows the store's name and no case (there is none until a phone joins).
+
 ## 3. Test sessions (store side)
 
 `POST /api/test-sessions` (Bearer, advisor/store_manager)
@@ -138,10 +165,20 @@ type TestSessionView = {
   device: { brand, manufacturer, modelName, modelCode, osVersion, totalDiskBytes, totalMemoryBytes, batteryLevelPct, isPhysicalDevice, appVersion } | null;
   plan: { id: string; name: string; critical: boolean }[];    // tests the app will run
   results: Record<string, { outcome: "pass"|"fail"|"skip"|"unsupported"; detail: object|null; at: string }>;
-  declared: { screenCracked: boolean|null; backCracked: boolean|null; liquid: boolean|null; imei: string|null } | null;
+  declared: { screenCracked: boolean|null; backCracked: boolean|null; liquid: boolean|null; imei: string|null;
+              // only when a ≥ 0.6.0 app sent them:
+              imei2?: string|null; identityConfirmed?: boolean|null;
+              picked?: { modelId: string; variant: string|null; label: string } | null;   // the customer's own pick — a claim
+              customerName?: string|null; customerPhone?: string|null } | null;
   progress: { done: number; total: number };
   summary: DiagnosticSummary | null;   // computed whenever results change
   grading: GradingView | null;         // camera grading (§8) — staff responses only
+  // Phone-led flow (SwapUp Check ≥ 0.6.0, docs/PHONE-LED-FLOW.md):
+  scanFirst: boolean;                  // the joined phone is ≥ 0.6.0 (native or web-0.6.0+): Identify › Scan › Test › Result
+  phonePhase: "identify"|"scan"|"battery"|"test"|"done" | null;   // what the phone last said (POST /api/device/phase)
+  phonePhaseAt: string | null;
+  customerStarted: boolean;            // started from the store's counter code (§2c)
+  imeiAgreement: "match"|"differs"|"unknown" | null;   // the phone's IMEI(s) vs the case's (no shared number = differs); staff only
 };
 type DiagnosticSummary = {
   model: { modelId: string|null; label: string|null; variant: string|null; match: "exact"|"family"|"none"; why: string };
@@ -176,7 +213,16 @@ so a dev server reached through the web-app proxy (:4620) or a LAN IP hands out 
 can open.
 
 `POST /api/device/join` `{ code, device: DeviceInfo, appVersion, installId }` →
-`200 { ticket, session: { id, caseRef, storeName, plan, server } }`
+`200 { ticket, session: { id, caseRef, storeName, plan, server, status, results, declared, identity, customerStarted } }`
+- `code` may be a session's code, the demo code, or a store's counter code (§2c).
+- `session.identity` (since 2026-10-17): `{ label, match: "exact"|"family"|"none", reason, variant, modelId }`
+  — SwapUp's `matchModel` on the phone's own model code ("Samsung Galaxy S22", "128GB"), for the
+  Identify card. `reason` is the matcher's explanation. Never a price. `match: "none"` → the picker.
+- `session.customerStarted`: true for a counter-code session — the app also asks for the customer's
+  mobile number and name (both optional) and sends them with `declare`.
+- `session.plan` depends on the app: SwapUp Check ≥ 0.6.0 (native, or `web-0.6.0`+) gets
+  `battery_health` (after `battery`; not critical); an older app's plan has it taken out, so it sees
+  exactly the 18 tests it always had.
 - `installId`: a random id the app generates once and keeps; the session binds to the first
   installId that joins. A different installId on the same code → `409 "This code is already
   being used on another phone."` The same installId re-joining (app restarted) gets a fresh
@@ -193,6 +239,22 @@ All calls below send `Authorization: Ticket <ticket>`:
 
 `POST /api/device/declare` `{ screenCracked, backCracked, liquid, imei? }` — what the customer
 says about things a phone cannot test on itself. `imei` optional (15 digits from *#06#).
+SwapUp Check ≥ 0.6.0's Identify step adds, each optional:
+`imei2` (the second IMEI; must differ from `imei`), `identityConfirmed` (`true` "Yes, that's my
+phone" / `false`), `picked: { modelId, variant } | null` (from `GET /api/device/models`; must be a
+model and storage on SwapUp's list → else `400 "Choose your phone from the list."`; stored with its
+`label` and kept a **claim**), `customerName` (≤ 80 chars), `customerPhone` (a 10-digit Indian mobile
+→ else `400`). Damage answers may be null. Each POST **replaces** the whole declaration. A field
+the body doesn't carry is not stored, so an older app's declaration is unchanged. On a native app a
+declaration with no damage answers reads "the app doesn't ask about damage", not "unanswered".
+At **Apply** (`POST /api/test-sessions/<id>/apply`):
+- `imei` fills an empty case IMEI, and the phone's other number fills an empty `imei2`. When the
+  phone's IMEIs share no number with the case's, the case keeps its own and gets the flag
+  "IMEI differs: …" in `camera.flags`.
+- `picked` sets the model (and storage) only when the phone's code matched nothing AND the case has
+  no model — flagged "Model: customer picked … Check the model before pricing." (audit
+  `modelSource: "customer picked"`).
+- `customerName` / `customerPhone` fill the case's customer only where it is empty.
 
 `POST /api/device/results` `{ results: [{ testId, outcome, detail?, at }] }` — batch;
 idempotent per `testId` (the latest `at` wins). The app sends after every test and retries
@@ -203,9 +265,49 @@ its queue until acknowledged → `{ ok: true, received: n, progress }`.
 `GET /api/device/status` → `{ status, progress, storeName, caseRef }` (lets the app show
 "The store has your results").
 
+### Phone-led flow (SwapUp Check ≥ 0.6.0 — `docs/PHONE-LED-FLOW.md`)
+
+Identify › Scan › Test › Result, the phone moving itself. All Ticket-authenticated.
+
+`POST /api/device/phase` `{ phase: "identify" | "scan" | "battery" | "test" | "done" }` → `{ ok: true }`
+on each step change. Only the store's screen reads it (`TestSessionView.phonePhase`, the camera
+card's line); anything else → `400`.
+
+`GET /api/device/models` → `{ brands: string[] }` (most models first); `?brand=Samsung` (any case) →
+`{ models: [{ id, brand, model, variants }] }`, newest first. SwapUp's own model list, no prices.
+
+`GET /api/device/camera-link` → `{ url }` — **GradeIQ's own camera link** for this check
+(`<GRADEIQ_PUBLIC_URL>/v2/cam/<gradeiq id>`, the full single pass, no `pass`), which the Scan
+screen shows as a QR, exactly as GradeIQ v2 does. `409 "The camera check isn't ready yet."` while
+the GradeIQ session is being made (ask again); `409 "…isn't running for this check…"` when camera
+grading is off or failed. **This is the one device response that carries a GradeIQ id** — owner's
+decision 2026-10-17: whoever holds the link can write to that GradeIQ session (photos, results,
+grade) and open GradeIQ's `/report`, which shows GradeIQ's own price. Audited once per session
+(`test_session.camera_link`). Older apps never call it.
+
+`POST /api/device/battery` `{ image: "data:image/png|jpeg|webp|heic;base64,…" }` (≤ 3 MB as a data
+URL, else `413`) → `{ healthPct: number | null, outcome: "pass" | "fail" | "skip" }`. The server
+forwards it to GradeIQ's `/ocr` (call 7, `GRADEIQ-INTEGRATION.md`), reads `ocr.batteryHealth`, and
+records the `battery_health` result itself: **≥ 80 % pass, below 80 % fail** (the `battery_drain`
+fault — "Battery health 72 % (screenshot)" — which prices), nothing legible → `skip` (untested,
+`healthPct: null`): show "Couldn't read it — try a clearer screenshot" and offer Skip. Up to
+`GRADEIQ_OCR_TIMEOUT_MS` (30 s) — give this call a long client timeout. `409` while GradeIQ's
+session is still being made ("still starting" — try again) or when camera grading is off/failed for
+the session (skip the step); `503` when GradeIQ can't be reached (try again or skip); `400` not an
+image data URL. The response is what THIS screenshot said. What is stored: a screenshot that couldn't be read
+never wipes an earlier reading, and a new reading replaces the old one with the earlier figures kept
+in `detail.earlier` (so the store sees a seller who tried several). Through `/api/device/results` the
+phone may report `battery_health` only as `skip`/`unsupported`, and only while there is no reading —
+a `pass`/`fail` from the phone, or a skip over a reading, comes back in `ignored`.
+
+For a scan-first session the store's `grading` changes (§8): no `photosUrl`, and `message` follows
+`phonePhase`.
+
 **Photo check** (native app: the LAST step, after the tests — §8; changed 2026-10-16 so the
 customer never waits for the store's camera). "Lay it on the counter, screen up": poll about
-every 700 ms, show `pattern` full-screen, echo what is on screen.
+every 700 ms, show `pattern` full-screen, echo what is on screen. SwapUp Check ≥ 0.6.0 runs the same
+screen FIRST, as its Scan step (after Identify), showing the camera-link QR while the pattern is
+`idle` — same two endpoints, same escapes.
 
 `GET /api/device/screen` →
 `{ state, pattern, shown, cosmeticDone, handoffDone, capture: { verdict, code, reasons[], attempt } | null }`
@@ -225,7 +327,8 @@ every 700 ms, show `pattern` full-screen, echo what is on screen.
   grade or LCD verdict is still being worked out (≤ 180 s from the later of the photos and the screen
   check); `grading.gradePending` says so.
 - `503 { error }` → the server can't reach GradeIQ just now: keep the screen, keep polling.
-- Never carries the GradeIQ session id or the camera URL.
+- Never carries the GradeIQ session id or the camera URL (a ≥ 0.6.0 app gets the link from
+  `GET /api/device/camera-link` instead).
 
 `POST /api/device/screen` `{ shown: "<pattern actually on screen>" }` → `{ ok: true }`. The first
 echo is what unlocks the store's camera button.
@@ -261,6 +364,7 @@ them). `GET /downloads` — a small page listing both with version and size.
 | buttons | side keys faulty | `buttons` |
 | charging | not charging | `charging_issue` |
 | battery | (fail only if the app measured a defect) | `battery_drain` |
+| battery_health | health under 80 % on the battery screen's screenshot, read by GradeIQ (≥ 0.6.0; `POST /api/device/battery`) | `battery_drain` |
 | flash, faceid, vibration, sensors, motion, connectivity, bluetooth, nfc | — | note only |
 | declared screenCracked / backCracked / liquid | customer says so | `screen_cracked` / `back_cracked` / `water_damage` |
 
@@ -316,6 +420,23 @@ Android, the torch). `grading.message` speaks to the two-pass states once the ph
 accepted — next, connect the customer's phone. The screen check comes after its tests."); before
 that it explains the screen-check lock, so the photos card should carry its own copy.
 
+**Phone-led flow (SwapUp Check ≥ 0.6.0, `docs/PHONE-LED-FLOW.md`; supersedes the two passes for
+those phones).** The phone identifies itself, then its Scan screen shows **GradeIQ's camera link as a
+QR** (`GET /api/device/camera-link`, §4) — the tablet's camera app scans it and runs the **single
+pass** (photos, dark front glass, screen sweep, Settings photo → `handoffDone`), GradeIQ v2's own
+await2nd handoff, with no GradeIQ change. The camera grade is worked out while the phone then tests
+itself. For such a session (`TestSessionView.scanFirst`):
+- `grading.photosUrl` is **null** — no photos before the phone joins. `cameraUrl` is the "Take photos"
+  fallback on the tablet, behind the same fail-closed lock (the phone echoes `idle` while it shows
+  its QR, so it unlocks then).
+- `grading.message` follows `phonePhase`: "The customer's phone is identifying itself…", "…is showing
+  its scan code — scan it with your camera, or Take photos.", "…is testing itself — the camera grade
+  is being worked out." (or the grade, once settled). `cameraLocked` says why in the same terms.
+- Before the phone has joined nothing is known about it, so the view is today's (`photosUrl` may be
+  offered). A SwapUp Store ≤ 0.5 tablet with a ≥ 0.6.0 phone gets no `photosUrl` after the join and
+  must use `cameraUrl` / `screenUrl`.
+Older Check apps: unchanged.
+
 SwapUp Store ≤ 0.4.x (single pass): wait for `grading.deviceReady` → **Take photos** opens
 `grading.cameraUrl` (photos, sweep and Settings photo in one go) → Apply. Unchanged; an app that gets
 no `photosUrl` from the server (an older server) falls back to it.
@@ -328,8 +449,8 @@ type GradingView = {
   canRetry: boolean;               // show Retry → POST …/grading-retry
   deviceReady: boolean;            // the customer's phone is echoing patterns
   cameraConnected: boolean;
-  cameraUrl: string | null;        // GradeIQ /v2/cam/<id>, the single pass — ONLY when deviceReady (or overridden); never in a QR
-  photosUrl: string | null;        // /v2/cam/<id>?pass=photos — as soon as state is ready and the session is waiting…complete; no device gate; never in a QR
+  cameraUrl: string | null;        // GradeIQ /v2/cam/<id>, the single pass — ONLY when deviceReady (or overridden). SwapUp prints it in no QR; a ≥ 0.6.0 phone shows the same link as its own scan code (§4)
+  photosUrl: string | null;        // /v2/cam/<id>?pass=photos — as soon as state is ready and the session is waiting…complete; no device gate; never in a QR; null once a scan-first phone has joined
   screenUrl: string | null;        // /v2/cam/<id>?pass=screen — same gate as cameraUrl; never in a QR
   cameraLocked: string | null;     // why cameraUrl / screenUrl are locked
   canOverride: boolean;            // offer "Start without the customer's phone" → …/camera-override {reason}

@@ -3,9 +3,13 @@ import { readScreen, readSnapshot, publicPhotoUrl, type GiqScreen, type GradeiqS
 /**
  * GRADEIQ — the grading engine underneath SwapUp Check (server to server).
  *
- * SwapUp's server is the ONLY thing that calls GradeIQ's API; the customer's
- * phone never learns the GradeIQ session id, and only the staff device opens
- * GradeIQ's camera page. Contract: docs/GRADEIQ-INTEGRATION.md.
+ * SwapUp's server is the ONLY thing that calls GradeIQ's API. The camera page
+ * (`cameraUrl`) is opened by the store device. Since SwapUp Check 0.6.0 the
+ * customer's phone also SHOWS that link as its scan code, the way GradeIQ v2
+ * does (owner's decision, 2026-10-17, docs/PHONE-LED-FLOW.md) — so for those
+ * sessions the GradeIQ id is on the customer's phone, and whoever holds the
+ * link can write to the GradeIQ session and open its /report. Older apps never
+ * see it. Contract: docs/GRADEIQ-INTEGRATION.md.
  *
  *   GRADEIQ_BASE_URL    where this server reaches GradeIQ (same VM in production,
  *                       so no public proxy hops). The basePath is compiled into
@@ -36,6 +40,8 @@ export type GradeiqConfig = {
   channel: string;
   createTimeoutMs: number;
   timeoutMs: number;
+  /** Call 7 (/ocr) is one vision-model read of a screenshot, and answers with the whole session. */
+  ocrTimeoutMs: number;
 };
 
 export function gradeiqConfig(): GradeiqConfig {
@@ -49,6 +55,7 @@ export function gradeiqConfig(): GradeiqConfig {
     channel: (e.GRADEIQ_CHANNEL || "retail").trim(),
     createTimeoutMs: ms(e.GRADEIQ_CREATE_TIMEOUT_MS, 20_000),
     timeoutMs: ms(e.GRADEIQ_TIMEOUT_MS, 5_000),
+    ocrTimeoutMs: ms(e.GRADEIQ_OCR_TIMEOUT_MS, 30_000),
   };
 }
 
@@ -212,6 +219,26 @@ export async function exportDeviceFax(id: string): Promise<Record<string, unknow
 }
 
 /**
+ * Call 7 — GradeIQ reads a battery-health screenshot (SwapUp Check ≥ 0.6.0,
+ * docs/PHONE-LED-FLOW.md). GradeIQ's /ocr is its Settings-screen reader: one
+ * vision call over the frames, then it answers with `ocr` AND the whole session
+ * (photos and all), so it gets its own, longer timeout. → the % read, or null
+ * when nothing legible came back (no vision key, a blurry shot, the wrong
+ * screen). Side effects on GradeIQ's side, by its design: the screenshot is kept
+ * in its public uploads, and an IMEI legible in the shot replaces the session's
+ * IMEI and runs GradeIQ's IMEI lookup (a paid Phonecheck check) — the battery
+ * screens the app points the customer at don't show one.
+ */
+export async function readBatteryHealth(id: string, image: string): Promise<number | null> {
+  const cfg = gradeiqConfig();
+  const r = (await call(sessionPath(id, "/ocr"), { method: "POST", body: { frames: [image], kind: "battery" }, timeoutMs: cfg.ocrTimeoutMs })) as {
+    ocr?: { batteryHealth?: unknown } | null;
+  } | null;
+  const pct = Number(r?.ocr?.batteryHealth);
+  return Number.isFinite(pct) && pct > 0 && pct <= 100 ? Math.round(pct) : null;
+}
+
+/**
  * One of the two camera passes (docs/TWO-PASS-CAMERA.md):
  *   photos  the exterior photos and the cosmetic grade — needs nothing on the
  *           customer's phone, so it can run before the phone has joined.
@@ -221,9 +248,10 @@ export async function exportDeviceFax(id: string): Promise<Record<string, unknow
 export type CameraPass = "photos" | "screen";
 
 /**
- * The camera page the STORE device opens. Staff-only: the id is the only key to
- * the session. No `pass` = GradeIQ's original single pass (photos, sweep and
- * Settings photo in one go), which SwapUp Store ≤ 0.4.x still opens.
+ * The camera page the STORE device opens. The id is the only key to the
+ * session. No `pass` = GradeIQ's original single pass (photos, sweep and
+ * Settings photo in one go): what SwapUp Store ≤ 0.4.x opens, and what SwapUp
+ * Check ≥ 0.6.0 shows as its scan code (GET /api/device/camera-link).
  */
 export function cameraUrl(id: string, pass?: CameraPass): string {
   return `${gradeiqConfig().publicUrl}/v2/cam/${id}${pass ? `?pass=${pass}` : ""}`;

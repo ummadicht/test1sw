@@ -3,6 +3,7 @@ import { db, nowIso, parseJson, audit } from "./db";
 import * as giq from "./gradeiq";
 import { GradeiqError } from "./gradeiq";
 import { matchModel, type DeviceReport, type Declared, type TestResults, type TradeModelRef } from "../domain/diagnostics";
+import { scanFirstApp, scanFirstLock, scanFirstMessage, readPhase } from "../domain/phoneLed";
 import {
   finality,
   mapCamera,
@@ -78,6 +79,8 @@ export type GiqRow = {
   gradeiq_sync_error: string | null;
   gradeiq_override: string | null;
   gradeiq_devicefax: string | null;
+  /** Where SwapUp Check ≥ 0.6.0 says it is (POST /api/device/phase). */
+  phone_phase?: string | null;
 };
 
 /** What the last /screen read and the last session pull said (gradeiq_screen). */
@@ -262,7 +265,9 @@ function functionalNow(r: Pick<GiqRow, "results" | "gradeiq_snapshot">): Record<
   const results = parseJson<TestResults>(r.results, {});
   if (!Object.keys(results).length) return null;
   const snap = parseJson<GradeiqSnapshot | null>(r.gradeiq_snapshot, null);
-  return gradeiqFunctionalMap(results, snap?.displayCheck?.verdict ?? null);
+  const map = gradeiqFunctionalMap(results, snap?.displayCheck?.verdict ?? null);
+  // Only SwapUp-only results so far (battery_health): nothing for GradeIQ yet.
+  return Object.keys(map).length ? map : null;
 }
 
 /** Queue a forward for this session. Coalesces: a request already running is followed by exactly one more. */
@@ -516,6 +521,23 @@ export async function deviceScreen(r: GiqRow): Promise<DeviceScreen> {
   };
 }
 
+/**
+ * GET /api/device/camera-link — GradeIQ's own camera link, which SwapUp Check ≥
+ * 0.6.0 shows as a QR on its Scan screen (docs/PHONE-LED-FLOW.md). It is the
+ * full single pass, no `pass`: photos, the dark front glass, the screen sweep and
+ * the Settings photo, ending with handoffDone — exactly GradeIQ v2's await2nd
+ * handoff, so GradeIQ needs no change. The owner accepted that this puts the
+ * GradeIQ id on the customer's phone; no other device route ever carries it.
+ */
+export function deviceCameraLink(r: GiqRow): { ok: true; url: string } | { ok: false; why: "pending" | "off" } {
+  if (!giq.gradeiqConfig().enabled) return { ok: false, why: "off" };
+  // A create lost to a restart is picked up here too, as the /screen poll does.
+  if (r.gradeiq_state === "pending" && !mem.creating.has(r.id) && !mem.createTimers.has(r.id)) void ensureCreated(r.id);
+  if (r.gradeiq_state === "pending") return { ok: false, why: "pending" };
+  if (r.gradeiq_state !== "ready" || !r.gradeiq_id) return { ok: false, why: "off" };
+  return { ok: true, url: giq.cameraUrl(r.gradeiq_id) };
+}
+
 /** POST /api/device/screen {shown} — the pattern the customer's phone is actually showing. */
 export async function deviceScreenShown(r: GiqRow, shown: string): Promise<void> {
   if (!giq.gradeiqConfig().enabled || r.gradeiq_state !== "ready" || !r.gradeiq_id) throw new GradeiqError("disabled", "The photo check is not running for this session.");
@@ -547,7 +569,9 @@ export type GradingView = {
   /**
    * Pass 1 — the exterior photos only (`?pass=photos`). Staff-only. Offered as soon
    * as camera grading is ready and the session is open or still waiting: it needs
-   * nothing on the customer's phone, so it is NOT gated on deviceReady.
+   * nothing on the customer's phone, so it is NOT gated on deviceReady. Always
+   * null once a scan-first phone (SwapUp Check ≥ 0.6.0) has joined: the tablet
+   * then runs the single pass (`cameraUrl`), from the phone's scan code or Take photos.
    */
   photosUrl: string | null;
   /** Pass 2 — the screen check only (`?pass=screen`). Same gate as cameraUrl: the phone must be showing its photo screen. */
@@ -662,6 +686,12 @@ export function gradingView(r: GiqRow): GradingView {
   // customer's phone has even joined, and the screen check comes after its tests.
   const photosDone = !!r.gradeiq_cosmetic_done_at || !!screen?.cosmeticDone;
   const screenDone = !!snap?.displayCheck || !!l.handoffAt;
+  // SwapUp Check ≥ 0.6.0 leads (docs/PHONE-LED-FLOW.md): it identifies itself,
+  // shows GradeIQ's camera link as its scan code BEFORE its tests, and the tablet
+  // runs the single pass from that. No photos before it joins. Only known once
+  // the phone has joined (its appVersion); until then this is today's view.
+  const scanFirst = scanFirstApp(parseJson<DeviceReport | null>(r.device, null));
+  const phase = readPhase(r.phone_phase);
 
   let cameraLocked: string | null = null;
   let canOverride = false;
@@ -675,8 +705,9 @@ export function gradingView(r: GiqRow): GradingView {
     // Once the photos are in (pass 1), only the screen check is left behind this
     // lock — say that, not "photos". The single pass never gets here with photos
     // done: it takes them with the phone already echoing.
-    cameraLocked =
-      r.status === "complete" || photosEnded
+    cameraLocked = scanFirst
+      ? scanFirstLock(phase, photosEnded, r.status === "complete")
+      : r.status === "complete" || photosEnded
         ? photosDone
           ? "The customer's phone finished without showing the photo screen. The screen check now needs an override with your name and a reason (the LCD is then not camera-checked)."
           : "The customer's phone finished without showing the photo screen. Photos now need an override with your name and a reason (the LCD is then not camera-checked)."
@@ -696,7 +727,9 @@ export function gradingView(r: GiqRow): GradingView {
   }
   // Pass 1 needs nothing on the customer's phone, so it is offered the moment the
   // GradeIQ session exists — before the phone joins, which is the point of it.
-  const photosOpen = state === "ready" && !!r.gradeiq_id && ["waiting", "opened", ...SYNC_STATUSES].includes(r.status);
+  // Not for a scan-first phone: the tablet scans the phone's code instead, and
+  // the single pass takes the photos with the phone already in the app.
+  const photosOpen = !scanFirst && state === "ready" && !!r.gradeiq_id && ["waiting", "opened", ...SYNC_STATUSES].includes(r.status);
 
   // What the grade itself says, once it says anything.
   const gradeLine = fin.final
@@ -725,6 +758,18 @@ export function gradingView(r: GiqRow): GradingView {
   else if (state === "disabled") msg = "This session started without camera grading. Press Retry to add it, or check the condition by eye.";
   else if (state === "pending") msg = r.gradeiq_error ? `Setting up camera grading… ${r.gradeiq_error}` : "Setting up camera grading…";
   else if (state === "failed") msg = `Camera grading unavailable. Check the condition by eye. ${r.gradeiq_error ?? ""}`.trim();
+  else if (scanFirst && open)
+    msg = scanFirstMessage({
+      phase,
+      unlocked,
+      locked: cameraLocked,
+      cameraAtWork: !!screen?.connectedAt || (!!screen?.pattern && screen.pattern !== "idle"),
+      photosDone,
+      screenDone,
+      gradeLine: gradeLine ?? null,
+      // Waiting changes nothing once it is final, failed, or provisional with nothing refining it (cameraGradePending's rule).
+      gradeSettled: fin.final || fin.status === "failed" || (fin.status === "provisional" && !snap?.refining),
+    });
   else if (gradeLine) msg = next ? `${gradeLine} ${next}` : gradeLine;
   else if (next) msg = `Photos accepted — ${next.charAt(0).toLowerCase()}${next.slice(1)}`;
   else if (photosDone) msg = screenDone ? "Photos and screen checked — the camera grade is being worked out." : "Photos accepted — the camera grade is being worked out.";
@@ -743,7 +788,10 @@ export function gradingView(r: GiqRow): GradingView {
     cameraConnected: !!screen?.connectedAt,
     cameraUrl: unlocked ? giq.cameraUrl(r.gradeiq_id!) : null,
     photosUrl: photosOpen ? giq.cameraUrl(r.gradeiq_id!, "photos") : null,
-    screenUrl: unlocked ? giq.cameraUrl(r.gradeiq_id!, "screen") : null,
+    // A phone-led (≥ 0.6.0) phone is photographed in ONE pass from its Scan screen, so an
+    // older SwapUp Store's "Check the screen" must open the full pass too — pass=screen
+    // would run only the sweep and skip the photos and Settings entirely.
+    screenUrl: unlocked ? (scanFirst ? giq.cameraUrl(r.gradeiq_id!) : giq.cameraUrl(r.gradeiq_id!, "screen")) : null,
     cameraLocked,
     canOverride,
     override,

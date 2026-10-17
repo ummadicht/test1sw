@@ -21,12 +21,14 @@ import {
   type DeviceScreen,
   cameraEvidence,
   cameraGradePending,
+  deviceCameraLink,
 } from "./gradeiqBridge";
-import { GradeiqError } from "./gradeiq";
+import { GradeiqError, gradeiqConfig, readBatteryHealth } from "./gradeiq";
 import { applyCameraFloor, addFaultSources, blankCameraCheck, resultsWithCameraDisplay, type CaseCameraCheck } from "../domain/gradeiqMap";
 import {
   DEFAULT_PLAN,
   CODE_ALPHABET,
+  BATTERY_HEALTH_ID,
   normaliseCode,
   readDevice,
   readResults,
@@ -38,6 +40,8 @@ import {
   unionFaults,
   readWifi,
   wifiQr,
+  matchModel,
+  batteryHealthResult,
   type PlanItem,
   type TestResults,
   type Declared,
@@ -46,6 +50,7 @@ import {
   type TradeModelRef,
   type StoreWifi,
 } from "../domain/diagnostics";
+import { scanFirstApp, planForApp, readPhase, identityForJoin, imeiAgreement, phoneMayPost, nextBatteryHealth, type PhonePhase, type ImeiAgreement } from "../domain/phoneLed";
 
 /**
  * SWAPUP CHECK SESSIONS — the customer tests their own phone; the store watches.
@@ -69,7 +74,15 @@ import {
  * session gets a GradeIQ session in the background; the customer's phone shows
  * the screen patterns through /api/device/screen while the STORE device
  * photographs it with GradeIQ's camera page. The GradeIQ id and the camera URL
- * reach staff only — never the customer's phone, the QR or a public page.
+ * reach staff — and, for SwapUp Check ≥ 0.6.0 only, the customer's own phone
+ * through GET /api/device/camera-link, which it shows as its scan code the way
+ * GradeIQ v2 does (owner's decision, docs/PHONE-LED-FLOW.md). Never a QR SwapUp
+ * prints, a public page, or an older app.
+ *
+ * Two kinds of code join a phone: a session's own code (made by the store
+ * tablet, one session), and a STANDING code — the demo programme's test code
+ * and each store's permanent counter code — where every new phone gets a new
+ * session (and case) at that store.
  */
 
 export type SessionStatus = "waiting" | "opened" | "joined" | "testing" | "complete" | "applied" | "expired" | "cancelled";
@@ -99,6 +112,10 @@ type Row = GiqRow & {
   completed_at: string | null;
   applied_at: string | null;
   updated_at: string;
+  phone_phase: string | null;
+  phone_phase_at: string | null;
+  /** 'counter' (the customer started it from the store's counter code), 'demo' (the standing test code), NULL (staff). */
+  started_via: string | null;
 };
 
 export type TestSessionView = {
@@ -122,6 +139,15 @@ export type TestSessionView = {
   summary: DiagnosticSummary | null;
   /** Camera grading (GradeIQ). Staff responses only — null anywhere the customer's phone could read it. */
   grading: GradingView | null;
+  /** SwapUp Check ≥ 0.6.0: Identify › Scan › Test › Result, the phone leading (docs/PHONE-LED-FLOW.md). */
+  scanFirst: boolean;
+  /** Where the customer's phone says it is (POST /api/device/phase); null until it says. */
+  phonePhase: PhonePhase | null;
+  phonePhaseAt: string | null;
+  /** The customer started this trade-in alone, from the store's counter code. */
+  customerStarted: boolean;
+  /** The IMEI(s) the phone gave against the case's. Staff responses only (null elsewhere). */
+  imeiAgreement: ImeiAgreement | null;
 };
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -175,7 +201,7 @@ function view(r: Row, opts: { staff?: boolean } = {}): TestSessionView {
   const results = parseJson<TestResults>(r.results, {});
   const device = parseJson<DeviceReport | null>(r.device, null);
   const declared = parseJson<Declared | null>(r.declared, null);
-  const c = db().prepare(`SELECT ref FROM cases WHERE id = ?`).get(r.case_id) as { ref: string } | undefined;
+  const c = db().prepare(`SELECT ref, imei, imei2 FROM cases WHERE id = ?`).get(r.case_id) as { ref: string; imei: string | null; imei2: string | null } | undefined;
   const store = getStore(r.store_id);
   const hasAnything = !!device || Object.keys(results).length > 0 || !!declared;
   // The store camera's LCD sweep is the native run's display test — fold it in
@@ -202,6 +228,11 @@ function view(r: Row, opts: { staff?: boolean } = {}): TestSessionView {
     progress: progressOf(plan, effective),
     summary: hasAnything ? summarise(plan, effective, declared, device, tradeModelRefs(), { declaredExpected: !nativeApp }) : null,
     grading: opts.staff ? gradingView(r) : null,
+    scanFirst: scanFirstApp(device),
+    phonePhase: readPhase(r.phone_phase),
+    phonePhaseAt: r.phone_phase_at ?? null,
+    customerStarted: r.started_via === "counter",
+    imeiAgreement: opts.staff && c ? imeiAgreement(declared, { imei: c.imei, imei2: c.imei2 }) : null,
   };
 }
 
@@ -218,19 +249,39 @@ function requireCounter(u: SessionUser): void {
 }
 
 /**
- * THE STANDING TEST CODE — demo programmes only. Owner, 2026-10-17: "make a
- * standard code for test, AAAAAA". Every NEW phone that joins it gets its own
- * fresh test session (and case) at the demo store, so anyone can try SwapUp
- * Check without a store tablet making a code; a phone that re-joins gets its
- * own session back. It is refused outright when no demo programme exists, and
- * a real programme's store never receives these sessions.
+ * STANDING CODES — codes that never expire, so a phone can join without a store
+ * tablet first making a code. Every NEW phone (installId) that joins one gets
+ * its own fresh test session and case at that store; a phone that re-joins gets
+ * its own open session back.
+ *
+ *   demo     DEMO_CODE — demo programmes only. Owner, 2026-10-17: "make a
+ *            standard code for test, AAAAAA", so anyone can try SwapUp Check.
+ *            Refused outright when no demo programme exists; a real
+ *            programme's store never receives these sessions.
+ *   counter  each store's permanent counter code (docs/PHONE-LED-FLOW.md): the
+ *            customer starts a trade-in alone from the QR on the counter, and
+ *            it lands on the store's Home like any other session.
  */
 export const DEMO_CODE = normaliseCode(process.env.SWAPUP_DEMO_CODE || "AAAAAA") ?? "AAAAAA";
 
-type DemoTarget = { store: StoreRow; staff: SessionUser };
+type StandingTarget = { kind: "demo" | "counter"; code: string; store: StoreRow; staff: SessionUser };
+
+const OPEN_SQL = `status IN ('waiting','opened','joined','testing','complete') AND expires_at > ?`;
+
+/** The staff member a standing code's sessions are opened under (the case's advisor). */
+function standingStaff(store: StoreRow, prefer: "advisor" | "store_manager"): SessionUser | null {
+  const u = db()
+    .prepare(
+      `SELECT id, username, name, role, org_id, store_id FROM users
+       WHERE store_id = ? AND active = 1 AND role IN ('advisor','store_manager')
+       ORDER BY CASE role WHEN ? THEN 0 ELSE 1 END, created_at LIMIT 1`
+    )
+    .get(store.id, prefer) as { id: string; username: string; name: string; role: SessionUser["role"]; org_id: string; store_id: string | null } | undefined;
+  return u ? { id: u.id, username: u.username, name: u.name, role: u.role, orgId: u.org_id, storeId: u.store_id, exp: Date.now() + 60_000 } : null;
+}
 
 /** The demo programme's counter (Andheri when it exists) and the staff member its test sessions are opened under. */
-function demoTarget(): DemoTarget | null {
+function demoTarget(): StandingTarget | null {
   const store = db()
     .prepare(
       `SELECT s.* FROM stores s JOIN orgs o ON o.id = s.org_id
@@ -239,39 +290,100 @@ function demoTarget(): DemoTarget | null {
     )
     .get() as StoreRow | undefined;
   if (!store) return null;
-  const u = db()
-    .prepare(
-      `SELECT id, username, name, role, org_id, store_id FROM users
-       WHERE store_id = ? AND active = 1 AND role IN ('advisor','store_manager')
-       ORDER BY CASE role WHEN 'advisor' THEN 0 ELSE 1 END, created_at LIMIT 1`
-    )
-    .get(store.id) as { id: string; username: string; name: string; role: SessionUser["role"]; org_id: string; store_id: string | null } | undefined;
-  if (!u) return null;
-  return { store, staff: { id: u.id, username: u.username, name: u.name, role: u.role, orgId: u.org_id, storeId: u.store_id, exp: Date.now() + 60_000 } };
+  const staff = standingStaff(store, "advisor");
+  return staff ? { kind: "demo", code: DEMO_CODE, store, staff } : null;
 }
 
-/** The demo-code session this install should join: its own open one, else an unclaimed one, else a new one. */
-function demoSessionFor(installId: string, origin?: string | null): string | null {
-  const open = `status IN ('waiting','opened','joined','testing','complete') AND expires_at > ?`;
+/**
+ * Is this a standing code, and where do its sessions go? `standing` is true for
+ * the demo code and for any store's counter code even when it can't be used
+ * now (no demo programme, a closed store, nobody on its staff) — such a code
+ * must never fall through to an ordinary session that happens to share it.
+ * Counter sessions are opened under a store manager (an advisor when the store
+ * has no manager yet). A store waiting for approval may run tests, as its cases may.
+ */
+function standingFor(code: string): { standing: boolean; target: StandingTarget | null } {
+  if (code === DEMO_CODE) return { standing: true, target: demoTarget() };
+  const store = db().prepare(`SELECT * FROM stores WHERE counter_code = ?`).get(code) as StoreRow | undefined;
+  if (!store) return { standing: false, target: null };
+  if (!store.active || store.status === "rejected") return { standing: true, target: null };
+  const staff = standingStaff(store, "store_manager");
+  return { standing: true, target: staff ? { kind: "counter", code, store, staff } : null };
+}
+
+/**
+ * A phone that re-opens SwapUp Check re-joins with the code it stored. After the
+ * store has applied its results that session is closed, so a counter code would
+ * quietly open a SECOND trade-in (a new case at the store) for the same phone.
+ * For this long after an Apply, the same phone is told its check is finished;
+ * the app then reads its old ticket's status and shows "the store has your results".
+ */
+const COUNTER_REJOIN_AFTER_APPLY_MS = 12 * 60 * 60_000;
+
+/** New sessions a counter code may open per store in 10 minutes: the QR is on show to anyone at the counter. */
+const COUNTER_NEW_PER_10_MIN = 20;
+/**
+ * …and per network address. Customers in a store share its Wi‑Fi's one public IP,
+ * so this can't be tiny — but one person can no longer use up the whole store's
+ * budget (or fill its case list) on their own.
+ */
+const COUNTER_NEW_PER_IP_PER_10_MIN = 6;
+const counterCreates = new Map<string, number[]>();
+
+function noteCounterCreate(storeId: string, ip: string): void {
+  const now = Date.now();
+  const fresh = (k: string) => (counterCreates.get(k) ?? []).filter((t) => now - t < 10 * 60_000);
+  const byStore = fresh(`store:${storeId}`);
+  const byIp = fresh(`ip:${ip}`);
+  if (byIp.length >= COUNTER_NEW_PER_IP_PER_10_MIN) throw new HttpError(429, "Too many new checks from this network in the last few minutes. Ask the advisor for a code.");
+  if (byStore.length >= COUNTER_NEW_PER_10_MIN) throw new HttpError(429, "Too many new checks at this store in the last few minutes. Ask the advisor for a code.");
+  counterCreates.set(`store:${storeId}`, [...byStore, now]);
+  counterCreates.set(`ip:${ip}`, [...byIp, now]);
+}
+
+/** The standing-code session this install should join: its own open one, else an unclaimed one, else a new one. */
+function standingSessionFor(t: StandingTarget, installId: string, ip: string, resume: boolean, origin?: string | null): string {
   const now = nowIso();
-  const mine = db().prepare(`SELECT id FROM test_sessions WHERE code = ? AND install_id = ? AND ${open} ORDER BY created_at DESC LIMIT 1`).get(DEMO_CODE, installId, now) as { id: string } | undefined;
+  const mine = db()
+    .prepare(`SELECT id FROM test_sessions WHERE code = ? AND store_id = ? AND install_id = ? AND ${OPEN_SQL} ORDER BY created_at DESC LIMIT 1`)
+    .get(t.code, t.store.id, installId, now) as { id: string } | undefined;
   if (mine) return mine.id;
-  const free = db().prepare(`SELECT id FROM test_sessions WHERE code = ? AND install_id IS NULL AND ${open} ORDER BY created_at DESC LIMIT 1`).get(DEMO_CODE, now) as { id: string } | undefined;
+  // The app re-joining by itself (on resume, or after a 401) may only get its OWN
+  // open check back — never a new trade-in. A cancelled, expired or finished check
+  // ends here; starting another takes a deliberate scan of the counter QR.
+  if (resume) throw new HttpError(410, "This check has ended. To check a phone again, scan the store's QR code.");
+  if (t.kind === "counter") {
+    const last = db()
+      .prepare(`SELECT status, applied_at FROM test_sessions WHERE code = ? AND store_id = ? AND install_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(t.code, t.store.id, installId) as { status: string; applied_at: string | null } | undefined;
+    if (last?.status === "applied" && last.applied_at && Date.now() - Date.parse(last.applied_at) < COUNTER_REJOIN_AFTER_APPLY_MS)
+      throw new HttpError(409, `This phone's check at ${t.store.name} is finished — the store has its results. To check another phone, ask the advisor.`);
+  }
+  const free = db()
+    .prepare(`SELECT id FROM test_sessions WHERE code = ? AND store_id = ? AND install_id IS NULL AND ${OPEN_SQL} ORDER BY created_at DESC LIMIT 1`)
+    .get(t.code, t.store.id, now) as { id: string } | undefined;
   if (free) return free.id;
-  const d = demoTarget();
-  if (!d) return null;
-  return createTestSession(d.staff, { customerName: `Test phone (code ${DEMO_CODE})` }, origin, { fixedCode: DEMO_CODE }).session.id;
+  if (t.kind === "counter") noteCounterCreate(t.store.id, ip);
+  return createTestSession(t.staff, t.kind === "demo" ? { customerName: `Test phone (code ${DEMO_CODE})` } : {}, origin, { fixedCode: t.code, via: t.kind }).session.id;
+}
+
+function randomCode(): string {
+  let code = "";
+  for (let k = 0; k < 6; k++) code += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
+  return code;
+}
+
+/** Taken: the demo code, any store's counter code, or the code of a session still open. */
+function codeTaken(code: string): boolean {
+  if (code === DEMO_CODE) return true;
+  if (db().prepare(`SELECT 1 FROM stores WHERE counter_code = ?`).get(code)) return true;
+  return !!db().prepare(`SELECT 1 FROM test_sessions WHERE code = ? AND ${OPEN_SQL}`).get(code, nowIso());
 }
 
 function freshCode(): string {
   for (let i = 0; i < 20; i++) {
-    let code = "";
-    for (let k = 0; k < 6; k++) code += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
-    if (code === DEMO_CODE) continue;
-    const clash = db()
-      .prepare(`SELECT 1 FROM test_sessions WHERE code = ? AND status IN ('waiting','opened','joined','testing','complete') AND expires_at > ?`)
-      .get(code, nowIso());
-    if (!clash) return code;
+    const code = randomCode();
+    if (!codeTaken(code)) return code;
   }
   throw new HttpError(503, "Could not make a fresh code — try again.");
 }
@@ -282,7 +394,7 @@ export function createTestSession(
   u: SessionUser,
   input: { caseId?: string | null; customerName?: string; customerPhone?: string },
   origin?: string | null,
-  internal: { fixedCode?: string } = {}
+  internal: { fixedCode?: string; via?: "demo" | "counter" } = {}
 ) {
   requireCounter(u);
   const store = ownStore(u);
@@ -291,18 +403,19 @@ export function createTestSession(
     const c = getCase(u, caseId); // scope check
     if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "That case is past the counter — start a new one for this customer.");
   } else {
-    caseId = createCase(u, { customerName: input.customerName, customerPhone: input.customerPhone }).id;
+    caseId = createCase(u, { customerName: input.customerName, customerPhone: input.customerPhone, via: internal.via }).id;
   }
   const now = nowIso();
   const id = newId("ts");
   const code = internal.fixedCode ?? freshCode();
   db()
     .prepare(
-      `INSERT INTO test_sessions (id, code, case_id, store_id, org_id, created_by, status, plan, results, created_at, expires_at, updated_at, gradeiq_state)
-       VALUES (?,?,?,?,?,?,'waiting',?,'{}',?,?,?,?)`
+      `INSERT INTO test_sessions (id, code, case_id, store_id, org_id, created_by, status, plan, results, created_at, expires_at, updated_at, gradeiq_state, started_via)
+       VALUES (?,?,?,?,?,?,'waiting',?,'{}',?,?,?,?,?)`
     )
-    .run(id, code, caseId, store.id, store.org_id, u.id, JSON.stringify(DEFAULT_PLAN), now, new Date(Date.now() + UNJOINED_TTL_MS).toISOString(), now, initialGradeiqState());
-  audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "test_session.create", entity: "test_session", entityId: id, detail: { caseId, ...(internal.fixedCode ? { via: "standing demo code" } : {}) } });
+    .run(id, code, caseId, store.id, store.org_id, u.id, JSON.stringify(DEFAULT_PLAN), now, new Date(Date.now() + UNJOINED_TTL_MS).toISOString(), now, initialGradeiqState(), internal.via ?? null);
+  const via = internal.via === "counter" ? "counter code" : internal.via === "demo" ? "standing demo code" : null;
+  audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "test_session.create", entity: "test_session", entityId: id, detail: { caseId, ...(via ? { via } : {}) } });
   // The GradeIQ session is created in the background once this commits — a
   // slow GradeIQ never holds up the counter.
   kickCreate(id);
@@ -366,16 +479,60 @@ export async function applyTestSession(u: SessionUser, id: string) {
   if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "The case is past the counter, so the results can't change it any more.");
 
   const patch: Parameters<typeof updateCase>[2] = {};
+  // What the advisor reads at the top of the case's camera record: things the
+  // customer's phone SAID that the case does not simply take.
+  const identityFlags: string[] = [];
   if (s.model.modelId) {
     patch.modelId = s.model.modelId;
     if (s.model.variant) patch.variant = s.model.variant;
+    // The phone's code matched, but the customer said it isn't their phone (or picked
+    // another): record it — the match stands, the advisor checks.
+    const picked = v.declared?.picked ? tradeModelRefs().find((m) => m.id === v.declared!.picked!.modelId) : null;
+    if (v.declared?.identityConfirmed === false || (picked && picked.id !== s.model.modelId)) {
+      identityFlags.push(
+        `Model: the phone reports ${s.model.label ?? "a known model"}, but the customer said that isn't right${picked ? ` and picked ${picked.brand} ${picked.model}` : ""}. Check Settings › About phone before pricing.`
+      );
+    }
+  } else if (!c.device && v.declared?.picked) {
+    // The phone's model code isn't one SwapUp knows and the case has no model:
+    // the customer's own pick fills it — as a CLAIM the advisor checks, never a match.
+    const tm = tradeModelRefs().find((m) => m.id === v.declared!.picked!.modelId);
+    if (tm) {
+      patch.modelId = tm.id;
+      const variant = v.declared.picked.variant && tm.variants.includes(v.declared.picked.variant) ? v.declared.picked.variant : null;
+      if (variant) patch.variant = variant;
+      identityFlags.push(
+        `Model: customer picked ${[`${tm.brand} ${tm.model}`, variant].filter(Boolean).join(" · ")} on their phone — the phone didn't report a model code SwapUp knows. Check the model${variant ? " and storage" : ""} before pricing.`
+      );
+    }
   }
   const testedFaults = s.faults.map((f) => f.id);
   const cameraFaults = cam.mapping.faults.map((f) => f.id);
   patch.faults = unionFaults(unionFaults(c.faults, testedFaults), cameraFaults);
   // Never better than what the advisor recorded, the faults allow, or the camera confirmed.
   patch.condition = applyCameraFloor(mergeCondition(c.condition, patch.faults as typeof c.faults), cam.mapping.floor);
-  if (v.declared?.imei && !c.imei) patch.imei = v.declared.imei;
+  // The IMEI(s) the customer's phone gave (*#06#). An IMEI the case already has
+  // is never replaced by one typed on the customer's phone: when they share no
+  // number, the case keeps its own and the advisor is told — the copy of
+  // GradeIQ's identity.imei_mismatch (record, don't reconcile).
+  const said = v.declared;
+  const agreement = imeiAgreement(said, { imei: c.imei, imei2: c.imei2 });
+  if (agreement === "differs") {
+    identityFlags.push(
+      `IMEI differs: the customer's phone gave ${[said?.imei, said?.imei2].filter(Boolean).join(" / ")}, the case has ${[c.imei, c.imei2].filter(Boolean).join(" / ")}. The case keeps its own — dial *#06# on the phone and check before the trade-in.`
+    );
+  } else {
+    if (said?.imei && !c.imei) patch.imei = said.imei;
+    const first = patch.imei ?? c.imei;
+    // The phone's other number fills the second IMEI, whichever order it was typed in.
+    const other = [said?.imei, said?.imei2].find((x) => !!x && x !== first) ?? null;
+    if (other && !c.imei2 && first) patch.imei2 = other;
+  }
+  // A customer who started the trade-in alone typed their own name and number.
+  // They fill the case only where it is empty — never over what the advisor has.
+  const name = !c.customer?.name?.trim() ? said?.customerName || null : null;
+  const phone = !c.customer?.phone ? said?.customerPhone || null : null;
+  if (name || phone) patch.customer = { ...(name ? { name } : {}), ...(phone ? { phone } : {}) };
 
   // Where each fault came from, and the camera's word on the case — written
   // BEFORE updateCase so its re-price already knows about an identity mismatch.
@@ -401,6 +558,7 @@ export async function applyTestSession(u: SessionUser, id: string) {
     faults: cam.mapping.faults.map((f) => ({ id: f.id, because: f.because, photoIndex: f.photoIndex, confidence: f.confidence })),
     suggested: cam.mapping.suggested.map((f) => ({ id: f.id, because: f.because, photoIndex: f.photoIndex, confidence: f.confidence })),
     flags: [
+      ...identityFlags,
       ...(cam.state !== "ready"
         ? ["Not camera-graded — the condition is the advisor's."]
         : cam.fin.final
@@ -433,7 +591,13 @@ export async function applyTestSession(u: SessionUser, id: string) {
     action: "test_session.apply",
     entity: "test_session",
     entityId: r.id,
-    detail: { faults: patch.faults, model: s.model, camera: { state: cam.state, grade: check.grade, final: check.final, faults: cameraFaults, identity: check.identity.verdict, lcdChecked: check.lcd.cameraChecked } },
+    detail: {
+      faults: patch.faults,
+      model: s.model,
+      ...(patch.modelId && !s.model.modelId ? { modelSource: "customer picked" } : {}),
+      imei: agreement,
+      camera: { state: cam.state, grade: check.grade, final: check.final, faults: cameraFaults, identity: check.identity.verdict, lcdChecked: check.lcd.cameraChecked },
+    },
   });
   return { session: view(rowById(r.id)!, { staff: true }), caseId: r.case_id };
 }
@@ -525,16 +689,80 @@ export function setStoreWifi(u: SessionUser, storeId: string, raw: unknown) {
   return { wifi: r.wifi, qr: r.wifi ? wifiQr(r.wifi) : null };
 }
 
+/* ─────────────────────────── the store's counter code ─────────────────────────── */
+
+/**
+ * Each store's permanent counter code (docs/PHONE-LED-FLOW.md): printed as a QR
+ * on the counter, so a customer can start a trade-in alone — their phone opens
+ * /j/<code>, joins, and the session (with a new case) lands on the store's Home.
+ * Made the first time anyone at the store asks for it. A new one replaces it at
+ * once; phones already mid-check on the old one carry on.
+ */
+function storeCounterCode(storeId: string): string | null {
+  return (db().prepare(`SELECT counter_code FROM stores WHERE id = ?`).get(storeId) as { counter_code: string | null } | undefined)?.counter_code ?? null;
+}
+
+/** Give the store a fresh code — only if its code is still `prev` (two first reads race to one code). */
+function issueCounterCode(store: StoreRow, prev: string | null): string {
+  for (let i = 0; i < 20; i++) {
+    const code = randomCode();
+    if (code === prev || codeTaken(code)) continue;
+    try {
+      db().prepare(`UPDATE stores SET counter_code = ? WHERE id = ? AND counter_code IS ?`).run(code, store.id, prev);
+    } catch (e) {
+      if (String((e as Error)?.message).includes("UNIQUE")) continue; // another store took it meanwhile
+      throw e;
+    }
+    break;
+  }
+  const now = storeCounterCode(store.id);
+  if (!now || now === prev) throw new HttpError(503, "Could not make a counter code — try again.");
+  return now;
+}
+
+function counterReply(code: string, origin?: string | null) {
+  return { code, joinUrl: linksFor(code, publicBase(origin)).joinUrl };
+}
+
+/** GET /api/stores/counter-code — the caller's own store's code (made on first read). Advisor or store manager. */
+export function getCounterCode(u: SessionUser, origin?: string | null) {
+  if (u.role !== "advisor" && u.role !== "store_manager") throw new HttpError(403, "Only a store's own staff can show its counter code.");
+  const store = ownStore(u);
+  const existing = storeCounterCode(store.id);
+  if (existing) return counterReply(existing, origin);
+  const code = issueCounterCode(store, null);
+  audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "store.counter_code", entity: "store", entityId: store.id, detail: { code, first: true } });
+  return counterReply(code, origin);
+}
+
+/** POST /api/stores/counter-code/regenerate — a new code; the old one stops starting new checks at once. Store manager only. */
+export function regenerateCounterCode(u: SessionUser, origin?: string | null) {
+  if (u.role !== "store_manager") throw new HttpError(403, "Only the store manager can make a new counter code.");
+  const store = ownStore(u);
+  const prev = storeCounterCode(store.id);
+  const code = issueCounterCode(store, prev);
+  audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "store.counter_code", entity: "store", entityId: store.id, detail: { code, replaced: prev } });
+  return counterReply(code, origin);
+}
+
 /* ─────────────────────────── the public page ─────────────────────────── */
 
-/** What /j/<code> may show. Marks the session opened; never binds or consumes it. */
-export function openByCode(raw: string): { ok: true; code: string; storeName: string; caseRef: string; status: SessionStatus } | { ok: false } {
+/**
+ * What /j/<code> may show. Marks the session opened; never binds or consumes it.
+ * A standing code (the demo code, a store's counter code) has no session until a
+ * phone joins, so it shows the store and no case: `caseRef` is null.
+ */
+export function openByCode(
+  raw: string
+): { ok: true; code: string; kind: "session" | "demo" | "counter"; storeName: string; caseRef: string | null; status: SessionStatus } | { ok: false } {
   const code = normaliseCode(raw);
   if (!code) return { ok: false };
-  if (code === DEMO_CODE) {
+  const st = standingFor(code);
+  if (st.standing) {
     // Nothing is created by opening the link — only by a phone joining.
-    const d = demoTarget();
-    return d ? { ok: true, code, storeName: d.store.name, caseRef: `${DEMO_CODE} (test)`, status: "opened" } : { ok: false };
+    const t = st.target;
+    if (!t) return { ok: false };
+    return { ok: true, code, kind: t.kind, storeName: t.store.name, caseRef: t.kind === "demo" ? `${DEMO_CODE} (test)` : null, status: "opened" };
   }
   const r0 = db()
     .prepare(`SELECT * FROM test_sessions WHERE code = ? ORDER BY created_at DESC LIMIT 1`)
@@ -547,7 +775,7 @@ export function openByCode(raw: string): { ok: true; code: string; storeName: st
     db().prepare(`UPDATE test_sessions SET status = 'opened', opened_at = COALESCE(opened_at, ?), updated_at = ? WHERE id = ? AND status = 'waiting'`).run(now, now, r.id);
   }
   const v = view(r);
-  return { ok: true, code, storeName: v.storeName, caseRef: v.caseRef, status: r.status === "waiting" ? "opened" : r.status };
+  return { ok: true, code, kind: "session", storeName: v.storeName, caseRef: v.caseRef, status: r.status === "waiting" ? "opened" : r.status };
 }
 
 /* ─────────────────────────── device side ─────────────────────────── */
@@ -578,7 +806,8 @@ export function joinByCode(input: { code?: unknown; device?: unknown; appVersion
   try {
     return joinByCodeChecked(input, ip, origin);
   } catch (e) {
-    if (e instanceof HttpError && e.status < 500) noteRefusedJoin(ip);
+    // Not a guess: a resume finding its check ended (410), or a busy store (429).
+    if (e instanceof HttpError && e.status < 500 && e.status !== 410 && e.status !== 429) noteRefusedJoin(ip);
     throw e;
   }
 }
@@ -596,13 +825,19 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
   if (!installId) throw new HttpError(400, "The app did not send its install id — update SwapUp Check.");
   const invalid = new HttpError(404, "That code is not valid any more. Ask the store for a new one.");
   if (!code) throw invalid;
-  const demoId = code === DEMO_CODE ? demoSessionFor(installId, origin) : null;
-  if (code === DEMO_CODE && !demoId) throw invalid;
+  const st = standingFor(code);
+  if (st.standing && !st.target) throw invalid;
+  const resume = (input as { resume?: unknown }).resume === true;
+  const standingId = st.target ? standingSessionFor(st.target, installId, ip, resume, origin) : null;
   return tx(() => {
+    // A session code: this phone's own open session first — after a store
+    // regenerates its counter code, the phones mid-check on the old one still
+    // re-join their own sessions, which share that code.
     const r0 = (
-      demoId
-        ? db().prepare(`SELECT * FROM test_sessions WHERE id = ?`).get(demoId)
-        : db().prepare(`SELECT * FROM test_sessions WHERE code = ? ORDER BY created_at DESC LIMIT 1`).get(code)
+      standingId
+        ? db().prepare(`SELECT * FROM test_sessions WHERE id = ?`).get(standingId)
+        : (db().prepare(`SELECT * FROM test_sessions WHERE code = ? AND install_id = ? AND ${OPEN_SQL} ORDER BY created_at DESC LIMIT 1`).get(code, installId, nowIso()) ??
+          db().prepare(`SELECT * FROM test_sessions WHERE code = ? ORDER BY created_at DESC LIMIT 1`).get(code))
     ) as Row | undefined;
     if (!r0) throw invalid;
     const r = expireIfDue(r0);
@@ -612,17 +847,32 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
     const now = nowIso();
     const device = readDevice(input.device, input.appVersion);
     const firstJoin = !r.install_id;
+    // The plan this app can run: battery_health only for SwapUp Check ≥ 0.6.0.
+    const plan = planForApp(parseJson<PlanItem[]>(r.plan, [...DEFAULT_PLAN]), scanFirstApp(device));
     db()
       .prepare(
-        `UPDATE test_sessions SET install_id = ?, ticket_hash = ?, device = ?, status = CASE WHEN status IN ('waiting','opened') THEN 'joined' ELSE status END,
+        `UPDATE test_sessions SET install_id = ?, ticket_hash = ?, device = ?, plan = ?, status = CASE WHEN status IN ('waiting','opened') THEN 'joined' ELSE status END,
            joined_at = COALESCE(joined_at, ?), opened_at = COALESCE(opened_at, ?), expires_at = ?, updated_at = ? WHERE id = ?`
       )
-      .run(installId, sha(ticket), JSON.stringify(device), now, now, firstJoin ? new Date(Date.now() + JOINED_TTL_MS).toISOString() : r.expires_at, now, r.id);
+      .run(installId, sha(ticket), JSON.stringify(device), JSON.stringify(plan), now, now, firstJoin ? new Date(Date.now() + JOINED_TTL_MS).toISOString() : r.expires_at, now, r.id);
     audit({ orgId: r.org_id, storeId: r.store_id, action: firstJoin ? "test_session.join" : "test_session.rejoin", entity: "test_session", entityId: r.id, detail: { model: device.modelName, ip } });
     const v = view(rowById(r.id)!);
     return {
       ticket,
-      session: { id: v.id, caseRef: v.caseRef, storeName: v.storeName, plan: v.plan, server: publicBase(origin), status: v.status, results: v.results, declared: v.declared },
+      session: {
+        id: v.id,
+        caseRef: v.caseRef,
+        storeName: v.storeName,
+        plan: v.plan,
+        server: publicBase(origin),
+        status: v.status,
+        results: v.results,
+        declared: v.declared,
+        // The Identify card: SwapUp's model match on the phone's own model code — never a price.
+        identity: identityForJoin(v.summary?.model ?? matchModel(device, tradeModelRefs())),
+        // Started from the store's counter code: the phone also asks for the customer's name and number.
+        customerStarted: v.customerStarted,
+      },
     };
   });
 }
@@ -638,13 +888,138 @@ function byTicket(authorization: string | null): Row {
   return r;
 }
 
+/**
+ * POST /api/device/declare — the damage answers (browser), and since 0.6.0 the
+ * Identify step: IMEI 1 + 2, "that's my phone" or the customer's own pick, and
+ * a counter-code customer's name and number. Each POST replaces the whole
+ * declaration. A pick must be a model (and storage) on SwapUp's own list; it is
+ * stored with its name so the store can read it, and stays a claim.
+ */
 export function deviceDeclare(authorization: string | null, raw: unknown) {
   const r = byTicket(authorization);
   const d = readDeclared(raw);
   if (!d.ok) throw new HttpError(400, d.reason);
+  const picked = d.declared.picked;
+  if (picked) {
+    const tm = tradeModelRefs().find((m) => m.id === picked.modelId);
+    if (!tm) throw new HttpError(400, "Choose your phone from the list.");
+    if (picked.variant && !tm.variants.includes(picked.variant)) throw new HttpError(400, "Choose your phone's storage from the list.");
+    d.declared.picked = { ...picked, label: `${tm.brand} ${tm.model}` };
+  }
   db().prepare(`UPDATE test_sessions SET declared = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(d.declared), nowIso(), r.id);
   scheduleSync(r.id); // a declared IMEI rides along with the device report
   return { ok: true as const };
+}
+
+/** POST /api/device/phase { phase } — where SwapUp Check ≥ 0.6.0 is: identify, scan, battery, test, done. For the store's screen only. */
+export function devicePhase(authorization: string | null, raw: { phase?: unknown }) {
+  const r = byTicket(authorization);
+  const phase = readPhase(raw?.phase);
+  if (!phase) throw new HttpError(400, "Say which step the phone is on: identify, scan, battery, test or done.");
+  const now = nowIso();
+  db().prepare(`UPDATE test_sessions SET phone_phase = ?, phone_phase_at = ?, updated_at = ? WHERE id = ?`).run(phase, now, now, r.id);
+  return { ok: true as const };
+}
+
+/** Sessions whose camera link has gone to the customer's phone since this server started (audited once each). */
+const linkAudited = new Set<string>();
+
+/**
+ * GET /api/device/camera-link → { url } — GradeIQ's camera link for the Scan
+ * screen's QR (SwapUp Check ≥ 0.6.0, GradeIQ v2's way). 409 until GradeIQ has a
+ * session for this check; the phone asks again. Audited, because it is the one
+ * place a GradeIQ id leaves for the customer's phone.
+ */
+export function deviceCameraLinkGet(authorization: string | null): { url: string } {
+  const r = byTicket(authorization);
+  const out = deviceCameraLink(r);
+  if (!out.ok)
+    throw new HttpError(409, out.why === "pending" ? "The camera check isn't ready yet." : "The camera check isn't running for this check — carry on with the tests.");
+  if (!linkAudited.has(r.id)) {
+    linkAudited.add(r.id);
+    audit({ orgId: r.org_id, storeId: r.store_id, action: "test_session.camera_link", entity: "test_session", entityId: r.id, detail: { to: "customer's phone" } });
+  }
+  return { url: out.url };
+}
+
+/**
+ * GET /api/device/models[?brand=] — the picker on the customer's phone, for a
+ * model SwapUp could not recognise from its code: the brands, then that brand's
+ * models (newest first) and storage sizes. SwapUp's own model list, no prices.
+ */
+export function deviceModels(authorization: string | null, brand: string | null): { brands: string[] } | { models: { id: string; brand: string; model: string; variants: string[] }[] } {
+  byTicket(authorization);
+  const b = (brand ?? "").trim();
+  if (!b) {
+    const rows = db().prepare(`SELECT brand, COUNT(*) AS n FROM trade_models GROUP BY brand ORDER BY n DESC, brand`).all() as { brand: string }[];
+    return { brands: rows.map((x) => x.brand) };
+  }
+  const rows = db()
+    .prepare(`SELECT id, brand, model, variants FROM trade_models WHERE brand = ? COLLATE NOCASE ORDER BY COALESCE(release_year, 0) DESC, model`)
+    .all(b.slice(0, 40)) as { id: string; brand: string; model: string; variants: string }[];
+  return { models: rows.map((x) => ({ id: x.id, brand: x.brand, model: x.model, variants: parseJson<string[]>(x.variants, []) })) };
+}
+
+/** A screenshot as a data URL, at most this long (≈ 2.2 MB of image). */
+const MAX_SCREENSHOT_CHARS = 3 * 1024 * 1024;
+const SCREENSHOT_RE = /^data:image\/(png|jpe?g|webp|heic|heif);base64,[A-Za-z0-9+/]+={0,2}$/i;
+
+/**
+ * POST /api/device/battery { image } — the customer's screenshot of their
+ * battery-health screen. GradeIQ reads the % (call 7, its /ocr); the server
+ * records battery_health itself: pass at 80 % and up, fail below (the
+ * battery_drain fault, which prices), skip when nothing legible came back. The
+ * phone never chooses the outcome. → { healthPct | null, outcome }.
+ */
+/**
+ * Each read is a paid vision call and a screenshot kept by GradeIQ — so a few per
+ * check, not a stream: at most BATTERY_READS_PER_SESSION, BATTERY_READ_GAP_MS apart.
+ */
+const BATTERY_READS_PER_SESSION = 5;
+const BATTERY_READ_GAP_MS = 8_000;
+const batteryReads = new Map<string, number[]>();
+
+export async function deviceBattery(
+  authorization: string | null,
+  raw: { image?: unknown }
+): Promise<{ healthPct: number | null; outcome: "pass" | "fail" | "skip"; recorded: { healthPct: number | null; outcome: string } | null }> {
+  const r = byTicket(authorization);
+  const reads = batteryReads.get(r.id) ?? [];
+  if (reads.length >= BATTERY_READS_PER_SESSION) throw new HttpError(429, "That's enough tries for the battery screenshot. Skip this step — the advisor can check the battery.");
+  if (reads.length && Date.now() - reads[reads.length - 1] < BATTERY_READ_GAP_MS) throw new HttpError(429, "One moment — the last screenshot is still being read.");
+  const image = typeof raw?.image === "string" ? raw.image.trim() : "";
+  if (image.length > MAX_SCREENSHOT_CHARS) throw new HttpError(413, "That screenshot is too big. Crop it to the battery screen, or take a fresh one.");
+  if (!SCREENSHOT_RE.test(image)) throw new HttpError(400, "Choose a screenshot of the battery health screen.");
+  if (gradeiqConfig().enabled && r.gradeiq_state === "pending") throw new HttpError(409, "The battery reader is still starting. Try again in a moment, or skip this step.");
+  if (!gradeiqConfig().enabled || r.gradeiq_state !== "ready" || !r.gradeiq_id)
+    throw new HttpError(409, "The battery reader isn't available for this check. Skip this step — the advisor can check the battery.");
+  batteryReads.set(r.id, [...reads, Date.now()]);
+  let pct: number | null;
+  try {
+    // Outside any transaction: one vision call, up to GRADEIQ_OCR_TIMEOUT_MS.
+    pct = await readBatteryHealth(r.gradeiq_id, image);
+  } catch (e) {
+    if (e instanceof GradeiqError) throw new HttpError(503, "Couldn't read the screenshot just now. Try again in a moment, or skip this step.");
+    throw e;
+  }
+  const result = batteryHealthResult(pct, nowIso());
+  let recorded: { healthPct: number | null; outcome: string } | null = null;
+  tx(() => {
+    // The ticket may have ended during the read (cancelled, applied): writes stop with it.
+    const fresh = byTicket(authorization);
+    const results = parseJson<TestResults>(fresh.results, {});
+    // An unreadable screenshot never wipes an earlier reading; a new reading keeps the old figures.
+    const next = nextBatteryHealth(results[BATTERY_HEALTH_ID], result);
+    const kept = next ?? results[BATTERY_HEALTH_ID] ?? null;
+    if (kept) recorded = { healthPct: typeof kept.detail?.healthPct === "number" ? (kept.detail.healthPct as number) : null, outcome: kept.outcome };
+    if (!next) return;
+    const merged = mergeResults(results, [{ testId: BATTERY_HEALTH_ID, outcome: next.outcome, detail: next.detail, at: next.at }]);
+    const status: SessionStatus = fresh.status === "joined" ? "testing" : fresh.status;
+    db().prepare(`UPDATE test_sessions SET results = ?, status = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(merged), status, result.at, fresh.id);
+  });
+  // What THIS screenshot said, and what is RECORDED for the check (an unreadable
+  // screenshot keeps an earlier reading) — the app shows the recorded one.
+  return { healthPct: result.outcome === "skip" ? null : (result.detail?.healthPct as number), outcome: result.outcome as "pass" | "fail" | "skip", recorded };
 }
 
 export function deviceResults(authorization: string | null, raw: { results?: unknown }) {
@@ -660,8 +1035,12 @@ function resultsTx(authorization: string | null, raw: { results?: unknown }) {
     const r = byTicket(authorization);
     const plan = parseJson<PlanItem[]>(r.plan, [...DEFAULT_PLAN]);
     const now = nowIso();
-    const { items, ignored } = readResults(raw?.results, plan, now);
-    const merged = mergeResults(parseJson<TestResults>(r.results, {}), items);
+    const read = readResults(raw?.results, plan, now);
+    const existing = parseJson<TestResults>(r.results, {});
+    // battery_health is the server's reading; the phone may only report a skip (phoneMayPost).
+    const items = read.items.filter((it) => phoneMayPost(it.testId, it.outcome, existing));
+    const ignored = [...read.ignored, ...read.items.filter((it) => !items.includes(it)).map((it) => it.testId)];
+    const merged = mergeResults(existing, items);
     const status: SessionStatus = r.status === "joined" && items.length ? "testing" : r.status;
     db().prepare(`UPDATE test_sessions SET results = ?, status = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(merged), status, now, r.id);
     return { ok: true as const, received: items.length, ignored, progress: progressOf(plan, merged), sessionId: r.id };
