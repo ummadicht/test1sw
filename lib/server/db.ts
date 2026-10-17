@@ -19,14 +19,27 @@ const DB_PATH = process.env.SWAPUP_DB || join(process.cwd(), "data", "swapup.db"
 type G = typeof globalThis & { __swapup_db?: Database.Database };
 const g = globalThis as G;
 
+// The connection outlives a dev hot-reload (it sits on globalThis), but this
+// module is re-evaluated — so once per evaluation, run any migration added
+// since the connection was opened, instead of failing on a missing table until
+// someone restarts the dev server. In production it runs once, at first use.
+let migratedHere = false;
+
 export function db(): Database.Database {
-  if (g.__swapup_db) return g.__swapup_db;
+  if (g.__swapup_db) {
+    if (!migratedHere) {
+      migrate(g.__swapup_db);
+      migratedHere = true;
+    }
+    return g.__swapup_db;
+  }
   mkdirSync(dirname(DB_PATH), { recursive: true });
   const conn = new Database(DB_PATH);
   conn.pragma("journal_mode = WAL");
   conn.pragma("foreign_keys = ON");
   conn.pragma("busy_timeout = 5000");
   migrate(conn);
+  migratedHere = true;
   g.__swapup_db = conn;
   return conn;
 }
@@ -315,6 +328,37 @@ const MIGRATIONS: string[] = [
   /* 6 — data clearing after an accepted trade-in: the store's record that the
          customer reset the phone (not a certified erasure). */ `
   ALTER TABLE cases ADD COLUMN data_clear TEXT;
+  `,
+  /* 7 — the store tablet (docs/STORE-TABLET.md): a counter tablet enrolled by a
+         manager stays signed in for the store with a revocable device token;
+         advisors unlock it by name + a 4-digit PIN. Only the token's sha256 is
+         kept. Additive only. */ `
+  CREATE TABLE store_devices (
+    id TEXT PRIMARY KEY,
+    store_id TEXT NOT NULL REFERENCES stores(id),
+    org_id TEXT NOT NULL REFERENCES orgs(id),
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_by TEXT NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT,
+    revoked_at TEXT,
+    revoked_by TEXT
+  );
+  CREATE INDEX store_devices_store ON store_devices(store_id);
+  CREATE TABLE pin_attempts (
+    device_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    failures INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT,
+    PRIMARY KEY (device_id, user_id)
+  );
+  ALTER TABLE users ADD COLUMN pin_hash TEXT;
+  ALTER TABLE users ADD COLUMN pin_set_at TEXT;
+  `,
+  /* 8 — the store tablet's per-person PIN budget across ALL tablets: when each
+         try failed, so failures older than a day stop counting. */ `
+  ALTER TABLE pin_attempts ADD COLUMN last_failure_at TEXT;
   `,
 ];
 

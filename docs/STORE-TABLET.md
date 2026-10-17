@@ -124,3 +124,30 @@ is unknown), like `authenticate()`.
   tablet" (revokes this one, clears it, back to sign-in). Everyone: "Change my PIN" (password + PIN →
   `/api/me/pin`).
 - iPad (browser build `/app/store/`): the same, via `keystore.web.ts` (localStorage).
+
+## Added after review (2026-10-17) — as built
+
+- **Sessions remember their tablet.** A token from `/api/tablet/unlock` or `/set-pin` carries
+  `dev: <store_devices id>`; `getSession()` refuses it the moment that tablet is removed, so Remove
+  ends a session already unlocked on it. Such a session **cannot enrol another tablet** (403 "Sign in
+  with your username and password to set up a store tablet.").
+- **At most 10 enrolled tablets per store** (409 beyond that).
+- **Per-person PIN budget across all tablets:** 10 wrong PINs within 24 h (removed tablets'
+  failures included — removing a tablet no longer clears its count; migration 8 adds
+  `pin_attempts.last_failure_at`) stops PIN unlock on every tablet: 429 "Too many wrong PINs for
+  <first name> on this store's tablets. Set a new PIN with your password." `set-pin` (password) is the
+  way out and clears all of that person's counts.
+- **Locks answer before any secret is checked** (unlock and set-pin), so a locked person's guesses
+  learn nothing, not even from timing. The new PIN is hashed only after the password is accepted.
+- **A password reset, a password change or deactivating a user drops their PIN** (`admin.ts`).
+- **The desk session ends whenever the tablet locks** (Switch, idle, 401, restart, removal): the app
+  POSTs `/api/auth/logout`, which clears the hand-off cookie (browser: same origin; Android: React
+  Native's fetch shares the WebView's cookie jar).
+- **Browser tablets:** enrolling is refused when the browser can't keep the key past a reload
+  (private browsing / Safari "Block All Cookies").
+
+Verified 2026-10-17 against the dev server: enrol → names → set PIN → 5 wrong (403 ×4, 429) → right PIN
+still 429 → second tablet 5 wrong → third tablet refused by the budget → set-pin with password escapes →
+unlock → `/api/me` 200 → remove that tablet → `/api/me` 401; a PIN-unlocked manager can't enrol (403);
+browser build on a 768×1024 and a 375×812 viewport: enrol, names, PIN pad (one request per 4 digits),
+"Rahul · Switch", staff token never saved, reload → names.

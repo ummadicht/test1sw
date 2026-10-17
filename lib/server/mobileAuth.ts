@@ -26,11 +26,16 @@ export function userPayload(u: SessionUser) {
   };
 }
 
+/** What the store app gets when someone signs in — by password, or by PIN on the store tablet. One shape, one token. */
+export function tokenResponse(u: SessionUser) {
+  return { token: issueToken(u), expiresAt: new Date(u.exp).toISOString(), user: userPayload(u) };
+}
+
 export function tokenLogin(username: string, password: string) {
   const u = authenticate(username, password);
   if (!u) return null;
   if (u.role !== "advisor" && u.role !== "store_manager") throw new HttpError(403, "The store app is for store staff. Use the web console for your role.");
-  return { token: issueToken(u), expiresAt: new Date(u.exp).toISOString(), user: userPayload(u) };
+  return tokenResponse(u);
 }
 
 /** Only same-site paths into the counter: never an absolute URL, never back into auth. */

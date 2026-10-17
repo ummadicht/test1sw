@@ -36,6 +36,12 @@ export type SessionUser = {
   orgId: string;
   storeId: string | null;
   exp: number;
+  /**
+   * Set when the session came from unlocking a store tablet with a PIN: the
+   * tablet's store_devices id. getSession() ends the session the moment that
+   * tablet is removed, and such a session can't enrol another tablet.
+   */
+  dev?: string;
 };
 
 const COOKIE = "swapup_session";
@@ -119,6 +125,15 @@ export function authenticate(username: string, password: string): SessionUser | 
   // Always run the KDF so a wrong username costs the same as a wrong password.
   const ok = verifyPassword(password || "", row?.password_hash || "scrypt$00$00");
   if (!row || !ok || !row.active) return null;
+  return sessionFor(row);
+}
+
+/**
+ * A fresh session (one shift, MAX_AGE_S) for a user row the caller has already
+ * checked. Shared by password sign-in and the store tablet's PIN unlock, so an
+ * unlocked tablet gets exactly the token a password sign-in would.
+ */
+export function sessionFor(row: Pick<UserRow, "id" | "username" | "name" | "role" | "org_id" | "store_id">): SessionUser {
   return {
     id: row.id,
     username: row.username,
@@ -163,6 +178,13 @@ export async function getSession(): Promise<SessionUser | null> {
   // different person (the manager signed in on the desk, an advisor in the
   // app). Cookie-first would act as the wrong user; a bad Bearer token is a 401.
   const h = (await headers()).get("authorization") || "";
+  // "Authorization: Device …" is the store tablet's device token
+  // (docs/STORE-TABLET.md). It is never a session — it can only list the
+  // store's staff and unlock one of them (lib/server/storeTablet.ts) — so it is
+  // not matched below. Nor does it fall through to the cookie: the browser
+  // tablet at /app/store/ shares the desk's origin, and a request that says
+  // "I am the tablet" must not run as whoever is signed in on that browser's desk.
+  if (/^Device\s/i.test(h)) return null;
   const m = /^Bearer\s+(\S+)$/i.exec(h);
   const token = m ? m[1] : (await cookies()).get(COOKIE)?.value;
   const u = decode(token);
@@ -171,6 +193,8 @@ export async function getSession(): Promise<SessionUser | null> {
     | Pick<UserRow, "role" | "org_id" | "store_id" | "active" | "name">
     | undefined;
   if (!row || !row.active || row.role !== u.role || row.org_id !== u.orgId || row.store_id !== u.storeId) return null;
+  // Unlocked on a store tablet: only while that tablet is still enrolled (docs/STORE-TABLET.md).
+  if (u.dev && !db().prepare(`SELECT 1 FROM store_devices WHERE id = ? AND revoked_at IS NULL`).get(u.dev)) return null;
   return { ...u, name: row.name };
 }
 

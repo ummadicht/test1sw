@@ -5,8 +5,10 @@ import { AppShell } from "@/components/AppShell";
 import { Banner, Card, Empty, Meter, Money, Pct, SourceBadge, Stat, StatusPill } from "@/components/ui";
 import { PickupTable } from "@/components/pickups/PickupTable";
 import { CloseShortfall } from "@/components/pickups/CloseShortfall";
-import { fmtWhen, istMonthStart, wholeDays } from "@/components/pickups/format";
+import { ageLabel, fmtWhen, istMonthStart, wholeDays } from "@/components/pickups/format";
 import { BookPickup, type BookableDevice } from "./BookPickup";
+import { StoreTablets, type TabletRow } from "./StoreTablets";
+import { listStoreDevices } from "@/lib/server/storeTablet";
 import { requirePage } from "@/lib/server/page";
 import { HttpError, type SessionUser } from "@/lib/server/auth";
 import { creditSummary, type CreditSummary } from "@/lib/server/credit";
@@ -98,6 +100,19 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
 
   const month = istMonthStart(now);
   const monthRow = programmeReport(u, { from: month.iso }).stores.find((s) => s.storeId === cs.store.id) ?? null;
+
+  const tablets: TabletRow[] = listStoreDevices(u, cs.store.id).map((d) => {
+    const age = d.lastSeenAt ? ageLabel(d.lastSeenAt, now) : null;
+    return {
+      id: d.id,
+      name: d.name,
+      added: fmtWhen(d.createdAt),
+      addedBy: d.createdBy,
+      lastSeen: age === null ? null : age === "just now" || age === "—" ? age : `${age} ago`,
+      lastSeenExact: d.lastSeenAt ? fmtWhen(d.lastSeenAt) : null,
+      removed: d.revokedAt ? fmtWhen(d.revokedAt, false) : null,
+    };
+  });
 
   const releaseRule =
     policy.releaseOn === "collected"
@@ -388,6 +403,9 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
             <Empty title="No figures for this store" />
           )}
         </Card>
+
+        {/* ── store tablets ───────────────────────────────── */}
+        <StoreTablets tablets={tablets} canRemove={isManager} />
 
         {/* ── credit ledger ───────────────────────────────── */}
         <Card

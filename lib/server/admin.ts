@@ -238,7 +238,8 @@ function userInScope(u: SessionUser, id: string): { id: string; org_id: string; 
 export function resetPassword(u: SessionUser, id: string): { tempPassword: string } {
   const t = userInScope(u, id);
   const temp = generateTempPassword();
-  db().prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(hashPassword(temp), t.id);
+  // A PIN set with the old password must not outlive it (docs/STORE-TABLET.md).
+  db().prepare(`UPDATE users SET password_hash = ?, pin_hash = NULL, pin_set_at = NULL WHERE id = ?`).run(hashPassword(temp), t.id);
   audit({ userId: u.id, orgId: t.org_id, action: "user.reset_password", entity: "user", entityId: id });
   return { tempPassword: temp };
 }
@@ -247,7 +248,7 @@ export function setUserActive(u: SessionUser, id: string, active: boolean): User
   if (id === u.id) throw new HttpError(400, "You cannot deactivate yourself.");
   const t = userInScope(u, id);
   tx(() => {
-    db().prepare(`UPDATE users SET active = ? WHERE id = ?`).run(active ? 1 : 0, t.id);
+    db().prepare(`UPDATE users SET active = ?${active ? "" : ", pin_hash = NULL, pin_set_at = NULL"} WHERE id = ?`).run(active ? 1 : 0, t.id);
     if (!active && t.role === "platform") {
       const left = db().prepare(`SELECT COUNT(*) n FROM users WHERE role = 'platform' AND active = 1`).get() as { n: number };
       if (left.n === 0) throw new HttpError(409, "That is the last platform account.");
@@ -261,7 +262,7 @@ export function changeOwnPassword(u: SessionUser, current: string, next: string)
   const row = db().prepare(`SELECT password_hash FROM users WHERE id = ?`).get(u.id) as { password_hash: string } | undefined;
   if (!row || !verifyPassword(current, row.password_hash)) throw new HttpError(400, "Current password is wrong.");
   if ((next || "").length < 10) throw new HttpError(400, "New password must be at least 10 characters.");
-  db().prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(hashPassword(next), u.id);
+  db().prepare(`UPDATE users SET password_hash = ?, pin_hash = NULL, pin_set_at = NULL WHERE id = ?`).run(hashPassword(next), u.id);
   audit({ userId: u.id, orgId: u.orgId, action: "user.change_password", entity: "user", entityId: u.id });
 }
 

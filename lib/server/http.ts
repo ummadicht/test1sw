@@ -4,11 +4,12 @@ import { HttpError } from "./auth";
 /**
  * Every API route body runs inside `handle()`: an HttpError becomes its status
  * and message; anything else is a 500 whose detail is logged, not leaked.
+ * `status` is for a success that isn't a plain 200 (201 when something was created).
  */
-export async function handle<T>(fn: () => Promise<T> | T): Promise<NextResponse> {
+export async function handle<T>(fn: () => Promise<T> | T, status = 200): Promise<NextResponse> {
   try {
     const data = await fn();
-    return NextResponse.json(data ?? { ok: true }, { headers: { "cache-control": "no-store" } });
+    return NextResponse.json(data ?? { ok: true }, { status, headers: { "cache-control": "no-store" } });
   } catch (e) {
     if (e instanceof HttpError) return NextResponse.json({ error: e.message }, { status: e.status });
     // Domain rule violations (lib/domain/errors.ts) — duck-typed so a second

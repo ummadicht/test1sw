@@ -42,6 +42,28 @@ other roles get `403 "The store app is for store staff."`.
 `/api/auth/handoff/<nonce>` valid 60 s that sets the web session cookie and redirects to
 `next`. Load that URL in the WebView.
 
+## 1b. Store tablet (signed in for the store, advisor by name + PIN)
+
+The full contract — model, data, rules, sentences and the app's screens — is
+[`STORE-TABLET.md`](STORE-TABLET.md). In short: a store manager enrolls the counter tablet once and
+it keeps a long-lived, revocable **device token** (`sdt_…`) for that one store, sent as
+`Authorization: Device <token>` (never Bearer — it is not a session). Unlocking with a PIN returns
+the same 12 h staff token as `/api/auth/token`; everything after that is the staff API above.
+
+Staff (Bearer):
+- `POST /api/store-devices` `{ name }` (store manager) → `201 { deviceToken, device: { id, name, createdAt }, store: { id, name, code, city } }` — the token is shown once.
+- `GET /api/store-devices` (store manager; programme admin with `?storeId=`) → `{ devices: [{ id, name, createdAt, createdBy, lastSeenAt, revokedAt }] }`, newest first.
+- `POST /api/store-devices/<id>/revoke` (store manager of that store / programme admin) → `{ ok: true }`, idempotent.
+- `POST /api/me/pin` `{ password, pin }` (advisor / store manager) → `{ ok: true }`; wrong password 403, weak PIN 400.
+
+Tablet (Device):
+- `GET /api/tablet` → `{ device, store, org, staff: [{ id, name, role, roleLabel, hasPin }] }`.
+- `POST /api/tablet/unlock` `{ userId, pin }` → `{ token, expiresAt, user }` (404 not staff · 409 no PIN yet · 429 locked · 403 wrong PIN).
+- `POST /api/tablet/set-pin` `{ userId, password, pin }` → `{ token, expiresAt, user }`.
+
+Unknown or removed device token → `401 "This tablet was removed from the store. A manager can set it up again."`;
+a rejected store → 403. 5 wrong tries for one person on one tablet lock that person there for 10 minutes.
+
 ## 2. Store Wi‑Fi (the network the customer's phone joins)
 
 `GET /api/stores/<storeId>/wifi` (Bearer, counter roles of that store) →
