@@ -66,11 +66,11 @@ export default async function PlatformUsersPage({ searchParams }: { searchParams
               </Link>
             </>
           ) : org?.kind === "partner" ? (
-            <>Buyback partner accounts handle pickups, verification, settlement and rate cards for every client that uses this partner.</>
+            <>Partner accounts: pickups, verdicts, settlement, rate cards.</>
           ) : org?.kind === "platform" ? (
-            <>SwapUp platform accounts see and change every programme. Keep this list short.</>
+            <>Platform accounts see every programme — keep it short.</>
           ) : (
-            <>Every account across clients, buyback partners and SwapUp. Pick an organisation above to work inside one.</>
+            <>Every account. Pick an organisation to narrow.</>
           )
         }
       />

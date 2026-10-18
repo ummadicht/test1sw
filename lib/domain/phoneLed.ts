@@ -46,9 +46,27 @@ export function scanFirstApp(device: Pick<DeviceReport, "appVersion"> | null | u
   return !!r && versionAtLeast(r.version, SCAN_FIRST_FROM);
 }
 
+export const COLOURS_FROM = [0, 8, 0] as const;
+
+/**
+ * SwapUp Check ≥ 0.8.0 (native or browser) shows the test colours on its result
+ * screen for the advisor to certify the screen, and asks the customer nothing
+ * about condition. An older app can't: its screen is certified without them.
+ */
+export function coloursApp(device: Pick<DeviceReport, "appVersion"> | null | undefined): boolean {
+  const r = readAppVersion(device?.appVersion);
+  return !!r && versionAtLeast(r.version, COLOURS_FROM);
+}
+
 /* ─────────────────────────── where the phone is ─────────────────────────── */
 
-export const PHONE_PHASES = ["identify", "scan", "battery", "test", "done"] as const;
+/**
+ * "colours" (SwapUp Check ≥ 0.8.0): the tests are done and the phone is showing
+ * the test colours full-screen while the advisor certifies its screen in SwapUp
+ * Store (GET /api/device/status says `colours: true`). It goes back to "done"
+ * when they stop.
+ */
+export const PHONE_PHASES = ["identify", "scan", "battery", "test", "done", "colours"] as const;
 export type PhonePhase = (typeof PHONE_PHASES)[number];
 
 export function readPhase(raw: unknown): PhonePhase | null {
@@ -66,10 +84,15 @@ const BATTERY_HEALTH_ITEM: PlanItem = { id: BATTERY_HEALTH_ID, name: "Battery he
  * and the store would see one more untested line for a step that was never
  * offered. So it is taken out for older apps, and put back (after `battery`)
  * for a new app joining a session made before the step existed.
+ *
+ * `batteryKnown`: the case already has a battery-health % from another source (an
+ * attached Phonecheck report). The screenshot step is then left out of the plan too,
+ * so the customer isn't asked for it (owner, 2026-10-17: "the battery screenshot
+ * only when no other battery source exists"); the grade reads that report's figure.
  */
-export function planForApp(plan: readonly PlanItem[], scanFirst: boolean): PlanItem[] {
+export function planForApp(plan: readonly PlanItem[], scanFirst: boolean, batteryKnown = false): PlanItem[] {
   const has = plan.some((p) => p.id === BATTERY_HEALTH_ID);
-  if (!scanFirst) return plan.filter((p) => p.id !== BATTERY_HEALTH_ID);
+  if (!scanFirst || batteryKnown) return plan.filter((p) => p.id !== BATTERY_HEALTH_ID);
   if (has) return [...plan];
   const at = plan.findIndex((p) => p.id === "battery");
   return at < 0 ? [...plan, BATTERY_HEALTH_ITEM] : [...plan.slice(0, at + 1), BATTERY_HEALTH_ITEM, ...plan.slice(at + 1)];
@@ -90,18 +113,26 @@ export function phoneMayPost(testId: string, outcome: string, existing: { [id: s
 
 /**
  * A new screenshot's reading against what is stored. A screenshot that couldn't
- * be read never wipes an earlier reading (null = keep what is there). A new
- * reading replaces the old one — the first may have been the wrong screen — but
- * the earlier figures stay in `detail.earlier`, so the store can see a seller
- * who tried several screenshots.
+ * be read never wipes an earlier reading (null = keep what is there). Of two
+ * readings of this check the LOWER one is kept — a customer can't retry a sub-80 %
+ * reading away with another screenshot — and every other figure stays in
+ * `detail.earlier`, so the store can see a seller who tried several screenshots.
  */
 export function nextBatteryHealth(existing: TestResult | undefined, reading: TestResult): TestResult | null {
   const had = existing && (existing.outcome === "pass" || existing.outcome === "fail");
   if (reading.outcome === "skip") return had ? null : reading;
   if (!had) return reading;
   const prev = existing!.detail ?? {};
-  const earlier = [...(Array.isArray(prev.earlier) ? (prev.earlier as unknown[]) : []), prev.healthPct].filter((x): x is number => typeof x === "number").slice(-5);
-  return { ...reading, detail: { ...(reading.detail ?? {}), earlier } };
+  const pctOf = (r: TestResult) => (typeof r.detail?.healthPct === "number" ? (r.detail.healthPct as number) : null);
+  const was = pctOf(existing!);
+  const now = pctOf(reading);
+  // The lower reading stands; the other one joins the earlier figures.
+  const keepOld = was !== null && (now === null || was < now);
+  const kept = keepOld ? existing! : reading;
+  const other = keepOld ? now : was;
+  const earlier = [...(Array.isArray(prev.earlier) ? (prev.earlier as unknown[]) : []), other].filter((x): x is number => typeof x === "number").slice(-5);
+  const { earlier: _drop, ...keptDetail } = (kept.detail ?? {}) as Record<string, unknown>;
+  return { ...kept, detail: { ...keptDetail, earlier }, at: reading.at };
 }
 
 /* ─────────────────────────── identity ─────────────────────────── */
@@ -186,7 +217,7 @@ export function storageFromTest(i: {
     return {
       variant: reading,
       source: "measured",
-      flag: said && said !== reading ? `Storage: the customer said ${said}, the phone measures ${reading}. The measurement is used.` : null,
+      flag: said && said !== reading ? `Storage: customer said ${said}, phone measures ${reading} — measurement used.` : null,
     };
   }
   if (reading) {
@@ -196,7 +227,7 @@ export function storageFromTest(i: {
     return {
       variant: null,
       source: null,
-      flag: `Storage: the phone measures ${reading}, which isn't a size on file${said ? ` (the customer said ${said} — not used)` : typed ? ` (the customer said ${i.caseVariant} earlier — removed)` : ""}. Check Settings › About phone, and enter the Cashify quote on the full case if it's really ${reading}.`,
+      flag: `Storage: phone measures ${reading}, not on file${said ? ` (customer said ${said} — not used)` : typed ? ` (customer's earlier ${i.caseVariant} removed)` : ""} — check Settings, then enter the partner's quote.`,
       ...(typed ? { clear: true as const } : {}),
     };
   }
@@ -206,7 +237,7 @@ export function storageFromTest(i: {
     return {
       variant: i.picked.variant,
       source: "customer",
-      flag: `Storage: the customer said ${i.picked.variant} — the phone couldn't measure it. Check Settings › About phone before the trade-in.`,
+      flag: `Storage: customer said ${i.picked.variant}, not measured — check Settings › About phone.`,
     };
   }
   return none;
@@ -289,30 +320,31 @@ export type ScanFirstState = {
 export function scanFirstMessage(s: ScanFirstState): string {
   const phase = s.phase ?? "identify";
   const camera = s.photosDone || s.screenDone;
-  if (phase === "identify" && !camera) return "The customer's phone is identifying itself. It shows its scan code next.";
+  if (phase === "identify" && !camera) return "Phone identifying itself — scan code next.";
   if (phase === "scan" || (phase === "identify" && camera)) {
     if (!camera) {
-      if (!s.unlocked) return s.locked ?? "Waiting for the customer's phone to show its scan code…";
+      if (!s.unlocked) return s.locked ?? "Waiting for the phone's scan code…";
       return s.cameraAtWork
-        ? "The store camera is photographing the customer's phone and checking its screen — keep the phone facing it."
-        : "The customer's phone is showing its scan code — scan it with your camera, or Take photos.";
+        ? "Camera at work — keep the phone facing it."
+        : "Scan the phone's code, or Take photos.";
     }
-    if (!s.screenDone) return "Photos accepted — the camera page checks the screen next. Keep the customer's phone facing it.";
-    return s.gradeLine && s.gradeSettled ? s.gradeLine : "Photos and screen checked — the camera grade is being worked out.";
+    if (!s.screenDone) return "Photos in — screen check next; keep the phone facing it.";
+    return s.gradeLine && s.gradeSettled ? s.gradeLine : "Photos and screen done — grade coming.";
   }
-  const where = phase === "done" ? "The customer's phone has finished its tests." : "The customer's phone is testing itself.";
+  if (phase === "colours") return "Phone showing test colours — tap what you see.";
+  const where = phase === "done" ? "Tests done" : "Phone testing";
   if (camera) {
-    if (s.gradeLine && s.gradeSettled) return `${s.gradeLine} ${where}`;
-    return phase === "done" ? `${where} The camera grade is being worked out.` : "The customer's phone is testing itself — the camera grade is being worked out.";
+    if (s.gradeLine && s.gradeSettled) return `${s.gradeLine} ${where}.`;
+    return `${where} — grade coming.`;
   }
-  if (s.unlocked) return `${where} The camera check hasn't run — Take photos on this device.`;
-  return `${where} The camera check didn't run, so check the screen and glass by eye — or Take photos with your name and a reason.`;
+  if (s.unlocked) return `${where} — no camera check; Take photos.`;
+  return `${where} — no camera check; certify it or Take photos.`;
 }
 
 /** Why the camera page is still locked for a scan-first session (the phone isn't echoing its scan screen). */
 export function scanFirstLock(phase: PhonePhase | null, cameraSkipped: boolean, sessionComplete: boolean): string {
   if (cameraSkipped || sessionComplete || (phase && phase !== "identify" && phase !== "scan"))
-    return "The customer's phone went on without the camera check. Photos now need an override with your name and a reason (the LCD is then not camera-checked).";
-  if (phase === "scan") return "Waiting for the customer's phone to show its scan code…";
-  return "The customer's phone shows its scan code once it has identified itself — the camera unlocks by itself then.";
+    return "Phone went on without the camera — photos need an override.";
+  if (phase === "scan") return "Waiting for the phone's scan code…";
+  return "Camera unlocks when the phone shows its scan code.";
 }

@@ -136,7 +136,7 @@ export function CampaignsConsole({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-ink-2 text-[14.5px]">
             {liveCount === 0
-              ? "No campaign is live at the counter right now — customers who upgrade get the trade-in value only."
+              ? "No campaign live — upgrades get the trade-in only."
               : liveCount === 1
                 ? "1 campaign is live at the counter."
                 : `${liveCount} campaigns are live — the counter gives each customer whichever pays the most.`}

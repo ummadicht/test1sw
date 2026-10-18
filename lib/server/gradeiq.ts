@@ -59,7 +59,8 @@ export function gradeiqConfig(): GradeiqConfig {
   };
 }
 
-export type GradeiqErrorKind = "disabled" | "timeout" | "network" | "http" | "not_found" | "tenant" | "shape";
+/** reader_off: GradeIQ answered, but its AI reader was off for this call (its vision service refused it — e.g. out of credit). */
+export type GradeiqErrorKind = "disabled" | "timeout" | "network" | "http" | "not_found" | "tenant" | "shape" | "reader_off";
 
 export class GradeiqError extends Error {
   kind: GradeiqErrorKind;
@@ -232,8 +233,12 @@ export async function exportDeviceFax(id: string): Promise<Record<string, unknow
 export async function readBatteryHealth(id: string, image: string): Promise<number | null> {
   const cfg = gradeiqConfig();
   const r = (await call(sessionPath(id, "/ocr"), { method: "POST", body: { frames: [image], kind: "battery" }, timeoutMs: cfg.ocrTimeoutMs })) as {
-    ocr?: { batteryHealth?: unknown } | null;
+    ocr?: { batteryHealth?: unknown; source?: unknown; error?: unknown } | null;
   } | null;
+  // GradeIQ says WHY nothing was read: source "error" = its AI call failed (e.g. "gemini 402: …" — out
+  // of prepaid credit); "stub" = it has no AI key at all. Either is the reader being off, not a bad
+  // screenshot. Its text is never passed on.
+  if (r?.ocr?.source === "error" || r?.ocr?.source === "stub") throw new GradeiqError("reader_off", "The battery reader is off right now.");
   const pct = Number(r?.ocr?.batteryHealth);
   return Number.isFinite(pct) && pct > 0 && pct <= 100 ? Math.round(pct) : null;
 }

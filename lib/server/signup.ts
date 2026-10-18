@@ -29,7 +29,7 @@ export function throttle(key: string, max = 10, windowMs = 30 * 60_000): void {
   const now = Date.now();
   const cur = attempts.get(key);
   if (cur && cur.until > now) {
-    if (cur.n >= max) throw new HttpError(429, "Too many tries from this network. Wait a while and try again.");
+    if (cur.n >= max) throw new HttpError(429, "Too many tries — wait a while.");
     cur.n += 1;
   } else attempts.set(key, { n: 1, until: now + windowMs });
 }
@@ -46,7 +46,7 @@ function cleanPerson(input: { name?: unknown; username?: unknown; password?: unk
   if (/^(.)\1+$/.test(password) || password.toLowerCase() === username) throw new HttpError(400, "That password is too easy to guess.");
   if (needPhone && !/^[6-9]\d{9}$/.test(phone)) throw new HttpError(400, "Enter a 10-digit Indian mobile number.");
   const taken = db().prepare(`SELECT 1 FROM users WHERE username = ?`).get(username);
-  if (taken) throw new HttpError(409, "That username is taken. Try another.");
+  if (taken) throw new HttpError(409, "That username is taken.");
   return { name: name.slice(0, 80), username, password, phone };
 }
 
@@ -96,7 +96,7 @@ function storeCode(orgId: string, name: string): string {
 /* ── register a new store ────────────────────────────────────── */
 export function registerStore(input: Record<string, unknown>) {
   const programmeId = String(input.programmeId ?? "");
-  if (!selfSignupAllowed(programmeId)) throw new HttpError(400, "That programme doesn't accept new stores from the app. Ask your programme contact for an invite.");
+  if (!selfSignupAllowed(programmeId)) throw new HttpError(400, "This programme needs an invite — ask your contact.");
   const storeName = String(input.storeName ?? "").trim().replace(/\s+/g, " ");
   const city = String(input.city ?? "").trim().replace(/\s+/g, " ");
   const kind = String(input.storeKind ?? "") as (typeof KINDS)[number];
@@ -105,7 +105,7 @@ export function registerStore(input: Record<string, unknown>) {
   if (!KINDS.includes(kind)) throw new HttpError(400, "Choose what kind of store it is.");
   const person = cleanPerson({ name: input.managerName, username: input.username, password: input.password, phone: input.phone }, true);
   const dupe = db().prepare(`SELECT 1 FROM stores WHERE org_id = ? AND lower(name) = lower(?) AND lower(COALESCE(city,'')) = lower(?)`).get(programmeId, storeName, city);
-  if (dupe) throw new HttpError(409, "A store with this name in this city is already registered. Ask its manager for an invite instead.");
+  if (dupe) throw new HttpError(409, "That store is already registered — ask its manager for an invite.");
 
   const ids = tx(() => {
     const now = nowIso();
@@ -189,12 +189,12 @@ export function revokeInvite(u: SessionUser, storeId: string, id: string) {
 /** What an invite code would let you join — shown before the person fills in their details. */
 export function peekInvite(raw: unknown) {
   const code = String(raw ?? "").toUpperCase().replace(/[\s-]/g, "");
-  if (!/^[A-Z2-9]{8}$/.test(code)) throw new HttpError(404, "That invite code doesn't look right. It has 8 letters and numbers.");
+  if (!/^[A-Z2-9]{8}$/.test(code)) throw new HttpError(404, "An invite code is 8 letters and numbers.");
   const inv = db().prepare(`SELECT * FROM store_invites WHERE code_hash = ?`).get(sha(code)) as
     | { store_id: string; role: string; expires_at: string; max_uses: number; uses: number; revoked_at: string | null }
     | undefined;
   if (!inv || inv.revoked_at || Date.parse(inv.expires_at) < Date.now() || inv.uses >= inv.max_uses)
-    throw new HttpError(404, "That invite code isn't valid any more. Ask your manager for a new one.");
+    throw new HttpError(404, "That invite has expired — ask your manager for a new one.");
   const store = getStore(inv.store_id)!;
   return { code, inv, store };
 }
@@ -207,7 +207,7 @@ export function joinWithInvite(input: Record<string, unknown>) {
     const { inv, store } = peekInvite(code);
     if (!store.active || store.status === "rejected") throw new HttpError(409, "This store is closed in SwapUp.");
     const upd = db().prepare(`UPDATE store_invites SET uses = uses + 1 WHERE code_hash = ? AND uses < max_uses`).run(sha(code));
-    if (upd.changes !== 1) throw new HttpError(409, "That invite has just been used up. Ask your manager for a new one.");
+    if (upd.changes !== 1) throw new HttpError(409, "That invite is used up — ask your manager for a new one.");
     const id = newId("usr");
     db()
       .prepare(`INSERT INTO users (id, org_id, store_id, username, name, role, password_hash, created_at) VALUES (?,?,?,?,?,?,?,?)`)

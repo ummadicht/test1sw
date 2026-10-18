@@ -144,7 +144,7 @@ export function fromDraft(d: Draft, band: { minBp: number; maxBp: number }): { c
   let cap: number | null = null;
   if (d.cap.trim()) {
     cap = parseRupees(d.cap);
-    if (cap === null || cap <= 0) errs.push("The ₹ cap must be a positive whole number, or left blank for no cap.");
+    if (cap === null || cap <= 0) errs.push("Cap: a whole number, or blank.");
   }
   const rules: BonusRule[] = d.rules.map((r, i) => {
     const n = `Rule ${i + 1}`;
@@ -166,7 +166,7 @@ export function fromDraft(d: Draft, band: { minBp: number; maxBp: number }): { c
     rules,
   };
   if (campaign.name.length < 3) errs.unshift("Give the campaign a name.");
-  if (!campaign.fundedBy) errs.push("Say who funds the bonus — the claims report is grouped by it.");
+  if (!campaign.fundedBy) errs.push("Say who funds the bonus.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(campaign.startsOn)) errs.push("Choose a start date.");
   if (!rules.length) errs.push("A campaign needs at least one rule.");
   if (minP !== null && maxP !== null) errs.push(...validateCampaign(campaign, band));

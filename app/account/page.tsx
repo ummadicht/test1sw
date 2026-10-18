@@ -50,9 +50,7 @@ export default async function AccountPage() {
                 </div>
               ))}
             </dl>
-            <p className="hint mt-4">
-              Your name, role and store are set by whoever manages your team. Ask them if something here is wrong.
-            </p>
+            <p className="hint mt-4">Wrong? Ask your manager.</p>
           </Card>
           <Card title="Change password">
             <PasswordForm />

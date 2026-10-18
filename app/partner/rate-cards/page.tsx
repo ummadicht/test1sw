@@ -5,16 +5,14 @@ import { requirePage } from "@/lib/server/page";
 import { listOrgs } from "@/lib/server/admin";
 import { rateCards, rateCardDetail } from "@/lib/server/catalog";
 import { partnerMode } from "@/lib/server/buyback";
-import { SAMPLE_DEDUCTIONS } from "@/lib/server/seed";
+import { DEFECT_DEDUCTIONS } from "@/lib/domain/ratecard";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Rate cards" };
 
-const DEFAULT_PARTNER = "ptn_cashify";
-
 /**
  * The buyback partner's price sheets. A partner manages its own; SwapUp
- * platform staff pick the partner (?partnerId=, Cashify by default).
+ * platform staff pick the partner (?partnerId=, the first partner by default).
  */
 export default async function RateCardsPage({ searchParams }: { searchParams: Promise<{ partnerId?: string }> }) {
   const u = await requirePage(["partner", "platform"], "/partner/rate-cards");
@@ -26,14 +24,13 @@ export default async function RateCardsPage({ searchParams }: { searchParams: Pr
     partners = listOrgs(u)
       .filter((o) => o.kind === "partner")
       .map((o) => ({ id: o.id, name: o.name }));
-    const want = sp.partnerId ?? DEFAULT_PARTNER;
-    const hit = partners.find((p) => p.id === want) ?? partners[0];
+    const hit = partners.find((p) => p.id === sp.partnerId) ?? partners[0];
     if (!hit) {
       return (
         <AppShell user={u}>
           <h1 className="text-[26px] font-[750] tracking-tight">Rate cards</h1>
           <p className="hint mt-2">
-            There are no buyback partners yet. <Link href="/platform">Add one on Clients &amp; partners.</Link>
+            No partners yet. <Link href="/platform">Add one.</Link>
           </p>
         </AppShell>
       );
@@ -82,7 +79,7 @@ export default async function RateCardsPage({ searchParams }: { searchParams: Pr
               ))}
             </nav>
           ) : (
-            <span className="text-[13.5px] text-ink-2">You are managing this partner&apos;s rate cards on its behalf.</span>
+            <span className="text-[13.5px] text-ink-2">Managing on the partner&apos;s behalf.</span>
           )}
         </div>
       ) : null}
@@ -92,7 +89,7 @@ export default async function RateCardsPage({ searchParams }: { searchParams: Pr
         mode={mode}
         cards={cards}
         active={active}
-        sampleDeductions={SAMPLE_DEDUCTIONS}
+        swapupDeductions={DEFECT_DEDUCTIONS}
       />
     </AppShell>
   );

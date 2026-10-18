@@ -2,7 +2,8 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import { db, tx, nowIso, newId, parseJson, audit } from "./db";
 import { HttpError, type SessionUser } from "./auth";
 import { getStore, getOrg, canSeeStore, ownStore, storeInScope, type StoreRow } from "./scope";
-import { createCase, getCase, updateCase, recordCameraCheck, markLcdOverride } from "./cases";
+import { createCase, getCase, updateCase, recordCameraCheck, markLcdOverride, certifyBlock, type CertifyBlock } from "./cases";
+import { customerGradingFor, issueQuietly, reportPathFor } from "./gradingReport";
 import {
   initialGradeiqState,
   kickCreate,
@@ -24,6 +25,7 @@ import {
   deviceCameraLink,
 } from "./gradeiqBridge";
 import { GradeiqError, gradeiqConfig, readBatteryHealth } from "./gradeiq";
+import { readCertification, withCertification } from "../domain/certify";
 import { applyCameraFloor, addFaultSources, blankCameraCheck, resultsWithCameraDisplay, type CaseCameraCheck } from "../domain/gradeiqMap";
 import {
   DEFAULT_PLAN,
@@ -34,6 +36,7 @@ import {
   readResults,
   mergeResults,
   mergeCondition,
+  withIssues,
   readDeclared,
   summarise,
   progressOf,
@@ -51,6 +54,7 @@ import {
   type TradeModelRef,
   type StoreWifi,
 } from "../domain/diagnostics";
+import { autoApplyState, type AutoApplyView } from "../domain/autoApply";
 import {
   scanFirstApp,
   planForApp,
@@ -129,7 +133,12 @@ type Row = GiqRow & {
   phone_phase_at: string | null;
   /** 'counter' (the customer started it from the store's counter code), 'demo' (the standing test code), NULL (staff). */
   started_via: string | null;
+  /** The advisor let the phone go on from Scan without the camera ({by, userId, at}). */
+  scan_release: string | null;
 };
+
+/** "Check the phone" — the same block as the CaseView's (lib/server/cases.ts certifyBlock). */
+export type { CertifyBlock };
 
 export type TestSessionView = {
   id: string;
@@ -161,6 +170,13 @@ export type TestSessionView = {
   customerStarted: boolean;
   /** The IMEI(s) the phone gave against the case's. Staff responses only (null elsewhere). */
   imeiAgreement: ImeiAgreement | null;
+  /** "Check the phone": what the advisor certifies by eye. Staff responses only (null elsewhere). */
+  certify: CertifyBlock | null;
+  /**
+   * The answer by itself (lib/domain/autoApply.ts): what the results are waiting for before
+   * they go on the case with no "Apply to case" tap, or why Apply refused. Staff only.
+   */
+  autoApply: AutoApplyView | null;
 };
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -208,6 +224,17 @@ function rowById(id: string): Row | null {
   return r ? expireIfDue(r) : null;
 }
 
+/**
+ * What "Check the phone" needs for this session, and whether the customer's
+ * phone should show the test colours (lib/server/cases.ts certifyBlock).
+ */
+function certifyFor(r: Row, ce: ReturnType<typeof cameraEvidence>): { block: CertifyBlock; coloursWanted: boolean } {
+  const c = db().prepare(`SELECT status, camera_check, certification, faults FROM cases WHERE id = ?`).get(r.case_id) as
+    | { status: string; camera_check: string | null; certification: string | null; faults: string | null }
+    | undefined;
+  return certifyBlock(c ?? { status: "closed", camera_check: null, certification: null, faults: null }, r, ce);
+}
+
 /** `staff`: include the grading block (camera URL, GradeIQ result). Never for a device response. */
 function view(r: Row, opts: { staff?: boolean } = {}): TestSessionView {
   const plan = parseJson<PlanItem[]>(r.plan, [...DEFAULT_PLAN]);
@@ -219,8 +246,9 @@ function view(r: Row, opts: { staff?: boolean } = {}): TestSessionView {
   const hasAnything = !!device || Object.keys(results).length > 0 || !!declared;
   // The store camera's LCD sweep is the native run's display test — fold it in
   // so a fully tested phone isn't reported "incomplete".
-  const effective = resultsWithCameraDisplay(results, cameraEvidence(r).mapping.lcd, r.updated_at);
-  const nativeApp = !!device?.appVersion && !device.appVersion.startsWith("web-");
+  const ce = cameraEvidence(r);
+  const effective = resultsWithCameraDisplay(results, ce.mapping.lcd, r.updated_at);
+  const cert = opts.staff ? certifyFor(r, ce) : null;
   return {
     id: r.id,
     code: r.code,
@@ -239,13 +267,15 @@ function view(r: Row, opts: { staff?: boolean } = {}): TestSessionView {
     results: effective,
     declared,
     progress: progressOf(plan, effective),
-    summary: hasAnything ? summarise(plan, effective, declared, device, tradeModelRefs(), { declaredExpected: !nativeApp }) : null,
+    summary: hasAnything ? summarise(plan, effective, declared, device, tradeModelRefs()) : null,
     grading: opts.staff ? gradingView(r) : null,
     scanFirst: scanFirstApp(device),
     phonePhase: readPhase(r.phone_phase),
     phonePhaseAt: r.phone_phase_at ?? null,
     customerStarted: r.started_via === "counter",
     imeiAgreement: opts.staff && c ? imeiAgreement(declared, { imei: c.imei, imei2: c.imei2 }) : null,
+    certify: cert?.block ?? null,
+    autoApply: opts.staff ? autoApplyFor(r, cert?.block ?? null) : null,
   };
 }
 
@@ -348,8 +378,8 @@ function noteCounterCreate(storeId: string, ip: string): void {
   const fresh = (k: string) => (counterCreates.get(k) ?? []).filter((t) => now - t < 10 * 60_000);
   const byStore = fresh(`store:${storeId}`);
   const byIp = fresh(`ip:${ip}`);
-  if (byIp.length >= COUNTER_NEW_PER_IP_PER_10_MIN) throw new HttpError(429, "Too many new checks from this network in the last few minutes. Ask the advisor for a code.");
-  if (byStore.length >= COUNTER_NEW_PER_10_MIN) throw new HttpError(429, "Too many new checks at this store in the last few minutes. Ask the advisor for a code.");
+  if (byIp.length >= COUNTER_NEW_PER_IP_PER_10_MIN) throw new HttpError(429, "Too many new checks — ask the advisor for a code.");
+  if (byStore.length >= COUNTER_NEW_PER_10_MIN) throw new HttpError(429, "Too many new checks — ask the advisor for a code.");
   counterCreates.set(`store:${storeId}`, [...byStore, now]);
   counterCreates.set(`ip:${ip}`, [...byIp, now]);
 }
@@ -364,13 +394,13 @@ function standingSessionFor(t: StandingTarget, installId: string, ip: string, re
   // The app re-joining by itself (on resume, or after a 401) may only get its OWN
   // open check back — never a new trade-in. A cancelled, expired or finished check
   // ends here; starting another takes a deliberate scan of the counter QR.
-  if (resume) throw new HttpError(410, "This check has ended. To check a phone again, scan the store's QR code.");
+  if (resume) throw new HttpError(410, "This check has ended — scan the store's QR to start again.");
   if (t.kind === "counter") {
     const last = db()
       .prepare(`SELECT status, applied_at FROM test_sessions WHERE code = ? AND store_id = ? AND install_id = ? ORDER BY created_at DESC LIMIT 1`)
       .get(t.code, t.store.id, installId) as { status: string; applied_at: string | null } | undefined;
     if (last?.status === "applied" && last.applied_at && Date.now() - Date.parse(last.applied_at) < COUNTER_REJOIN_AFTER_APPLY_MS)
-      throw new HttpError(409, `This phone's check at ${t.store.name} is finished — the store has its results. To check another phone, ask the advisor.`);
+      throw new HttpError(409, `Check done at ${t.store.name} — ask the advisor for another.`);
   }
   const free = db()
     .prepare(`SELECT id FROM test_sessions WHERE code = ? AND store_id = ? AND install_id IS NULL AND ${OPEN_SQL} ORDER BY created_at DESC LIMIT 1`)
@@ -414,7 +444,7 @@ export function createTestSession(
   let caseId = input.caseId || null;
   if (caseId) {
     const c = getCase(u, caseId); // scope check
-    if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "That case is past the counter — start a new one for this customer.");
+    if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "That case is past the counter — start a new one.");
   } else {
     caseId = createCase(u, { customerName: input.customerName, customerPhone: input.customerPhone, via: internal.via }).id;
   }
@@ -444,6 +474,8 @@ function withLinks(session: TestSessionView, store: StoreRow, origin?: string | 
 export async function getTestSession(u: SessionUser, id: string, origin?: string | null) {
   const { r, store } = inScope(u, id);
   await refreshGrading(r.id);
+  // Tests in, camera in: the results go on the case now, and this answer already says "applied".
+  if (r.status === "complete") await Promise.race([autoApply(r.id, u), new Promise((res) => setTimeout(res, AUTO_POLL_WAIT_MS))]);
   return withLinks(view(rowById(r.id) ?? r, { staff: true }), store, origin);
 }
 
@@ -459,19 +491,25 @@ export function listOpenSessions(u: SessionUser): TestSessionView[] {
     .map((r) => view(r, { staff: true }));
 }
 
-export async function applyTestSession(u: SessionUser, id: string) {
+/** Apply's answer while the store camera's grade can still change — a wait, not a refusal (the answer opens by itself after it). */
+export const GRADE_WAIT = "Camera grade coming — apply again in a moment.";
+
+/**
+ * Put the phone's results on the case. `auto`: the server did it by itself, the moment the
+ * tests and the camera grade were in (autoApply below) — the same gates, the same record.
+ */
+export async function applyTestSession(u: SessionUser, id: string, opts: { auto?: boolean } = {}) {
   requireCounter(u);
   const { r } = inScope(u, id);
   if (r.status === "applied") throw new HttpError(409, "These results are already on the case.");
   if (!["joined", "testing", "complete"].includes(r.status)) throw new HttpError(409, "There are no results to apply yet.");
   if (!view(r).summary) throw new HttpError(409, "There are no results to apply yet.");
-  if (!["draft", "quoted"].includes(getCase(u, r.case_id).status)) throw new HttpError(409, "The case is past the counter, so the results can't change it any more.");
+  if (!["draft", "quoted"].includes(getCase(u, r.case_id).status)) throw new HttpError(409, "The case is past the counter.");
 
   // What the store camera saw (GradeIQ) — one last pull and the DeviceFax
   // snapshot, outside any transaction. Only a FINAL grade's confirmed damage
   // counts; anything weaker stays a flag for the advisor.
   const cam = await evidenceForApply(r.id);
-  const GRADE_WAIT = "The store camera's grade is still being worked out — usually under 30 seconds. Apply again in a moment.";
   if (cam.pending) throw new HttpError(409, GRADE_WAIT);
   const now = nowIso();
 
@@ -489,7 +527,7 @@ export async function applyTestSession(u: SessionUser, id: string) {
   // turning confirmed damage into "not final" flags.
   if (cameraGradePending(fresh)) throw new HttpError(409, GRADE_WAIT);
   const c = getCase(u, r.case_id);
-  if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "The case is past the counter, so the results can't change it any more.");
+  if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "The case is past the counter.");
 
   const patch: Parameters<typeof updateCase>[2] = {};
   // What the advisor reads at the top of the case's camera record: things the
@@ -505,7 +543,7 @@ export async function applyTestSession(u: SessionUser, id: string) {
     // "No" and then picking the SAME model is agreement, not a dispute.
     if ((picked && picked.id !== s.model.modelId) || (v.declared?.identityConfirmed === false && !picked)) {
       identityFlags.push(
-        `Model: the phone reports ${s.model.label ?? "a known model"}, but the customer said that isn't right${picked ? ` and picked ${picked.brand} ${picked.model}` : ""}. Check Settings › About phone before pricing.`
+        `Model: phone says ${s.model.label ?? "a known model"}; customer disagreed${picked ? `, picked ${picked.brand} ${picked.model}` : ""} — check Settings.`
       );
     }
   } else if (picked && (!c.device || c.device.modelId === picked.id)) {
@@ -515,7 +553,7 @@ export async function applyTestSession(u: SessionUser, id: string) {
     patch.modelId = picked.id;
     if (!c.device)
       identityFlags.push(
-        `Model: customer picked ${picked.brand} ${picked.model} on their phone — the phone didn't report a model code SwapUp knows. Check the model before pricing.`
+        `Model: customer picked ${picked.brand} ${picked.model}; code unknown — check before pricing.`
       );
   }
   // Storage (lib/domain/phoneLed.ts storageFromTest): the phone's measurement, else
@@ -546,8 +584,15 @@ export async function applyTestSession(u: SessionUser, id: string) {
   const testedFaults = s.faults.map((f) => f.id);
   const cameraFaults = cam.mapping.faults.map((f) => f.id);
   patch.faults = unionFaults(unionFaults(c.faults, testedFaults), cameraFaults);
-  // Never better than what the advisor recorded, the faults allow, or the camera confirmed.
-  patch.condition = applyCameraFloor(mergeCondition(c.condition, patch.faults as typeof c.faults), cam.mapping.floor);
+  // Never better than what the advisor recorded, the faults allow, or the camera confirmed — and what the
+  // advisor certified by eye on "Check the phone" (before Apply too) is the screen and body, on that floor.
+  patch.condition = withCertification(
+    // A failed Wi-Fi / Bluetooth, fingerprint or vibration test puts its priced issue on the condition.
+    applyCameraFloor(withIssues(mergeCondition(c.condition, patch.faults as typeof c.faults), s.issues), cam.mapping.floor),
+    c.certification,
+    patch.faults as typeof c.faults,
+    cam.mapping.floor
+  );
   // The IMEI(s) the customer's phone gave (*#06#). An IMEI the case already has
   // is never replaced by one typed on the customer's phone: when they share no
   // number, the case keeps its own and the advisor is told — the copy of
@@ -556,7 +601,7 @@ export async function applyTestSession(u: SessionUser, id: string) {
   const agreement = imeiAgreement(said, { imei: c.imei, imei2: c.imei2 });
   if (agreement === "differs") {
     identityFlags.push(
-      `IMEI differs: the customer's phone gave ${[said?.imei, said?.imei2].filter(Boolean).join(" / ")}, the case has ${[c.imei, c.imei2].filter(Boolean).join(" / ")}. The case keeps its own — dial *#06# on the phone and check before the trade-in.`
+      `IMEI differs: phone gave ${[said?.imei, said?.imei2].filter(Boolean).join(" / ")}, case has ${[c.imei, c.imei2].filter(Boolean).join(" / ")} — check *#06#.`
     );
   } else {
     if (said?.imei && !c.imei) patch.imei = said.imei;
@@ -602,7 +647,7 @@ export async function applyTestSession(u: SessionUser, id: string) {
           ? []
           : cam.snap?.cosmeticGrade || cam.fin.status === "failed"
             ? cam.fin.reasons
-            : ["Not camera-graded — no camera grade came back before Apply. The condition is the advisor's."]),
+            : ["No camera grade by Apply — condition is the advisor's."]),
       ...cam.mapping.flags,
       ...cam.notes,
     ],
@@ -618,10 +663,20 @@ export async function applyTestSession(u: SessionUser, id: string) {
 
   // updateCase re-prices (partner quote, repair estimate, decision) outside any
   // transaction, and suggests the new phone unless staff already chose one.
-  const after = await updateCase(u, r.case_id, patch, { variantSource: storage.source ?? undefined, autoUpgrade: true, measuredStorage: measuredNow ?? (earlier ? undefined : null) });
+  // It also issues the grading report's next version ("swapup_check"): the case's
+  // camera record names this session now, so its results are the report's evidence.
+  const after = await updateCase(u, r.case_id, patch, {
+    variantSource: storage.source ?? undefined,
+    autoUpgrade: true,
+    measuredStorage: measuredNow ?? (earlier ? undefined : null),
+    reportReason: "swapup_check",
+  });
   // The ticket stays valid for STATUS reads only (byTicket refuses writes once
   // applied), so the customer's phone can show "the store has your results".
   db().prepare(`UPDATE test_sessions SET status = 'applied', applied_at = ?, updated_at = ? WHERE id = ?`).run(now, now, r.id);
+  // A no-op when updateCase already issued it (same body, same hash) — here so the
+  // report is never missing once the session reads "applied".
+  issueQuietly(r.case_id, "swapup_check", u.id);
   audit({
     userId: u.id,
     orgId: r.org_id,
@@ -630,6 +685,7 @@ export async function applyTestSession(u: SessionUser, id: string) {
     entity: "test_session",
     entityId: r.id,
     detail: {
+      ...(opts.auto ? { auto: true } : {}),
       faults: patch.faults,
       model: s.model,
       ...(patch.modelId && !s.model.modelId ? { modelSource: "customer picked" } : {}),
@@ -639,7 +695,104 @@ export async function applyTestSession(u: SessionUser, id: string) {
       camera: { state: cam.state, grade: check.grade, final: check.final, faults: cameraFaults, identity: check.identity.verdict, lcdChecked: check.lcd.cameraChecked },
     },
   });
+  autoRefused.delete(r.id);
   return { session: view(rowById(r.id)!, { staff: true }), caseId: r.case_id };
+}
+
+/* ─────────────────────────── the answer by itself ─────────────────────────── */
+
+/**
+ * When the customer's phone has finished and the camera's grade is in (and, where the camera
+ * couldn't decide, the advisor has tapped every row of "Check the phone"), the results go on
+ * the case with no "Apply to case" tap — lib/domain/autoApply.ts decides when. It is tried from
+ * the store's poll of the session (as the advisor watching it), when the phone says it has
+ * finished, and from the phone's own status poll (as the advisor who started the trade-in), so
+ * the answer is ready even when nobody is on the Session screen. Apply keeps all its gates; a
+ * refusal is kept with the session's version and shown with a Retry (a manual Apply), and is
+ * not tried again until something changes. One attempt at a time per session.
+ */
+const autoInFlight = new Map<string, Promise<void>>();
+const autoRefused = new Map<string, { reason: string; key: string }>();
+/** Not an answer from Apply (a database or GradeIQ hiccup): try again after this. */
+const autoBackoff = new Map<string, number>();
+const AUTO_BACKOFF_MS = 10_000;
+/** How long the store's poll waits for an attempt in progress before answering anyway. */
+const AUTO_POLL_WAIT_MS = 4_000;
+
+/** The session's version for a kept refusal: the session or its case changing is worth one more try. */
+function autoKey(r: Row): string {
+  const c = db().prepare(`SELECT updated_at FROM cases WHERE id = ?`).get(r.case_id) as { updated_at: string } | undefined;
+  return `${r.updated_at}|${c?.updated_at ?? ""}`;
+}
+
+function autoApplyFor(r: Row, certify: CertifyBlock | null): AutoApplyView {
+  const refused = autoRefused.get(r.id) ?? null;
+  return autoApplyState({
+    status: r.status,
+    gradePending: r.status === "complete" && cameraGradePending(r),
+    certify,
+    refused,
+    key: refused ? autoKey(r) : "",
+  });
+}
+
+/**
+ * Who an automatic Apply is recorded as: the advisor or manager polling the session when it is
+ * one of this store's counter staff, else the advisor who started the trade-in, else (gone since,
+ * or a counter-code session) the store's first advisor.
+ */
+function sessionActor(r: Row, polling: SessionUser | null): SessionUser | null {
+  if (polling && (polling.role === "advisor" || polling.role === "store_manager") && polling.storeId === r.store_id) return polling;
+  const staff = (id: string | null | undefined): SessionUser | null => {
+    if (!id) return null;
+    const u = db()
+      .prepare(`SELECT id, username, name, role, org_id, store_id FROM users WHERE id = ? AND active = 1 AND role IN ('advisor','store_manager') AND store_id = ?`)
+      .get(id, r.store_id) as { id: string; username: string; name: string; role: SessionUser["role"]; org_id: string; store_id: string | null } | undefined;
+    return u ? { id: u.id, username: u.username, name: u.name, role: u.role, orgId: u.org_id, storeId: u.store_id, exp: Date.now() + 60_000 } : null;
+  };
+  // Whoever looked at the phone — the last "Check the phone" tap, else the one who released its
+  // Scan step — before whoever only started the trade-in, and a stand-in advisor last of all.
+  const certRow = db().prepare(`SELECT certification FROM cases WHERE id = ?`).get(r.case_id) as { certification: string | null } | undefined;
+  const lastCert = Object.values(readCertification(parseJson<unknown>(certRow?.certification ?? null, null)))
+    .filter((x): x is NonNullable<typeof x> => !!x)
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+  const released = parseJson<{ userId?: string } | null>(r.scan_release, null);
+  const u = staff(lastCert?.userId) ?? staff(released?.userId) ?? staff(r.created_by);
+  if (u) return u;
+  const store = getStore(r.store_id);
+  return store ? standingStaff(store, "advisor") : null;
+}
+
+/** Put the results on the case if everything is in. Never throws: what happened is on the session's view. */
+export function autoApply(id: string, polling: SessionUser | null = null): Promise<void> {
+  const running = autoInFlight.get(id);
+  if (running) return running;
+  const p = (async () => {
+    const r0 = rowById(id);
+    if (!r0 || r0.status !== "complete" || (autoBackoff.get(id) ?? 0) > Date.now()) return;
+    // The camera's latest word first (throttled inside): a grade that just landed lifts the wait.
+    if (cameraGradePending(r0)) await refreshGrading(id).catch(() => {});
+    const r = rowById(id);
+    if (!r || r.status !== "complete") return;
+    if (autoApplyFor(r, certifyFor(r, cameraEvidence(r)).block).state !== "ready") return;
+    const u = sessionActor(r, polling);
+    if (!u) return;
+    try {
+      await applyTestSession(u, id, { auto: true });
+    } catch (e) {
+      if (e instanceof HttpError && e.status < 500) {
+        // The grade turned out to be still coming (Apply's last pull): a wait, not a refusal.
+        if (e.message === GRADE_WAIT) return;
+        const fresh = rowById(id);
+        if (fresh && fresh.status !== "applied") autoRefused.set(id, { reason: e.message, key: autoKey(fresh) });
+        return;
+      }
+      autoBackoff.set(id, Date.now() + AUTO_BACKOFF_MS);
+      console.error(`[swapup] automatic apply of ${id} failed:`, e instanceof Error ? e.message : e);
+    }
+  })().finally(() => autoInFlight.delete(id));
+  autoInFlight.set(id, p);
+  return p;
 }
 
 /**
@@ -707,14 +860,35 @@ export async function cameraOverride(u: SessionUser, id: string, raw: { reason?:
   requireCounter(u);
   const { r, store } = inScope(u, id);
   if (!["joined", "testing", "complete"].includes(r.status)) throw new HttpError(409, "The customer's phone has to join the session first.");
-  if (r.gradeiq_state !== "ready" || !r.gradeiq_id) throw new HttpError(409, "Camera grading is not available for this session.");
+  if (r.gradeiq_state !== "ready" || !r.gradeiq_id) throw new HttpError(409, "No camera grading for this session.");
   const reason = typeof raw?.reason === "string" ? raw.reason.trim().slice(0, 300) : "";
-  if (reason.length < 8) throw new HttpError(400, "Say why the camera has to start without the customer's phone showing the patterns.");
+  if (reason.length < 8) throw new HttpError(400, "Say why the camera starts without the phone's colours.");
   const info = { by: u.name, reason, at: nowIso() };
   recordOverride(r.id, info);
   markLcdOverride(r.case_id, { ...info, userId: u.id, testSessionId: r.id });
+  // Going on without the phone's colours lets the phone go on from its Scan step too — the one way an
+  // older SwapUp Store (no "release" button) can let a SwapUp Check ≥ 0.8.0 phone past Scan.
+  db().prepare(`UPDATE test_sessions SET scan_release = ? WHERE id = ? AND scan_release IS NULL`).run(JSON.stringify({ by: u.name, userId: u.id, at: info.at }), r.id);
   audit({ userId: u.id, orgId: r.org_id, storeId: r.store_id, action: "test_session.camera_override", entity: "test_session", entityId: r.id, detail: { reason } });
   return getTestSession(u, r.id, origin);
+}
+
+/**
+ * Let the customer's phone go on from its Scan step without the camera — by
+ * name, in SwapUp Store. The customer is never asked to skip it: the phone stays
+ * on Scan (showing the patterns the camera asks for) until the camera finishes,
+ * or until the advisor releases it here; GET /api/device/screen then says
+ * `released`. The screen is certified by eye afterwards ("Check the phone").
+ */
+export function releaseScan(u: SessionUser, id: string, origin?: string | null) {
+  requireCounter(u);
+  const { r, store } = inScope(u, id);
+  if (!["joined", "testing", "complete"].includes(r.status)) throw new HttpError(409, "The customer's phone has to join the session first.");
+  if (r.scan_release) return withLinks(view(r, { staff: true }), store, origin);
+  const info = { by: u.name, userId: u.id, at: nowIso() };
+  db().prepare(`UPDATE test_sessions SET scan_release = ?, updated_at = ? WHERE id = ? AND scan_release IS NULL`).run(JSON.stringify(info), info.at, r.id);
+  audit({ userId: u.id, orgId: r.org_id, storeId: r.store_id, action: "test_session.scan_release", entity: "test_session", entityId: r.id, detail: { phase: r.phone_phase } });
+  return withLinks(view(rowById(r.id)!, { staff: true }), store, origin);
 }
 
 /* ─────────────────────────── store Wi-Fi ─────────────────────────── */
@@ -845,7 +1019,7 @@ const joinAttempts = new Map<string, { n: number; until: number }>();
  */
 function checkJoinRate(ip: string): void {
   const cur = joinAttempts.get(ip);
-  if (cur && cur.until > Date.now() && cur.n >= 20) throw new HttpError(429, "Too many tries. Wait a few minutes, then scan the store's QR again.");
+  if (cur && cur.until > Date.now() && cur.n >= 20) throw new HttpError(429, "Too many tries — wait, then scan the QR again.");
 }
 
 function noteRefusedJoin(ip: string): void {
@@ -877,7 +1051,7 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
   const code = normaliseCode(input.code);
   const installId = typeof input.installId === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(input.installId) ? input.installId : null;
   if (!installId) throw new HttpError(400, "The app did not send its install id — update SwapUp Check.");
-  const invalid = new HttpError(404, "That code is not valid any more. Ask the store for a new one.");
+  const invalid = new HttpError(404, "That code has expired — ask the store for a new one.");
   if (!code) throw invalid;
   const st = standingFor(code);
   if (st.standing && !st.target) throw invalid;
@@ -896,13 +1070,14 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
     if (!r0) throw invalid;
     const r = expireIfDue(r0);
     if (!["waiting", "opened", "joined", "testing", "complete"].includes(r.status)) throw invalid;
-    if (r.install_id && r.install_id !== installId) throw new HttpError(409, "This code is already being used on another phone. Ask the store for a new one.");
+    if (r.install_id && r.install_id !== installId) throw new HttpError(409, "This code is in use on another phone — ask for a new one.");
     const ticket = randomBytes(32).toString("base64url");
     const now = nowIso();
     const device = readDevice(input.device, input.appVersion);
     const firstJoin = !r.install_id;
-    // The plan this app can run: battery_health only for SwapUp Check ≥ 0.6.0.
-    const plan = planForApp(parseJson<PlanItem[]>(r.plan, [...DEFAULT_PLAN]), scanFirstApp(device));
+    // The plan this app can run: battery_health only for SwapUp Check ≥ 0.6.0, and only when the
+    // case has no battery-health % from another source (an attached Phonecheck report).
+    const plan = planForApp(parseJson<PlanItem[]>(r.plan, [...DEFAULT_PLAN]), scanFirstApp(device), batteryKnown(r.case_id));
     db()
       .prepare(
         `UPDATE test_sessions SET install_id = ?, ticket_hash = ?, device = ?, plan = ?, status = CASE WHEN status IN ('waiting','opened') THEN 'joined' ELSE status END,
@@ -937,14 +1112,26 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
   });
 }
 
+/**
+ * The case already has a battery-health % from somewhere other than the customer's screenshot:
+ * the Phonecheck report attached to it (the one its grade reads). Then the phone isn't asked.
+ */
+function batteryKnown(caseId: string): boolean {
+  const row = db()
+    .prepare(`SELECT record FROM phonecheck_records WHERE case_id = ? AND attached_at IS NOT NULL ORDER BY attached_at DESC, received_at DESC LIMIT 1`)
+    .get(caseId) as { record: string } | undefined;
+  const pct = parseJson<{ batteryHealthPct?: unknown } | null>(row?.record, null)?.batteryHealthPct;
+  return typeof pct === "number" && pct > 0 && pct <= 100;
+}
+
 /** The session a device ticket belongs to — or 401. */
 function byTicket(authorization: string | null): Row {
   const m = /^Ticket\s+([A-Za-z0-9_-]{20,100})$/.exec(authorization || "");
-  if (!m) throw new HttpError(401, "This phone is not connected to a store session. Scan the store's QR again.");
+  if (!m) throw new HttpError(401, "Not connected to a store — scan the store's QR again.");
   const r0 = db().prepare(`SELECT * FROM test_sessions WHERE ticket_hash = ?`).get(sha(m[1])) as Row | undefined;
-  if (!r0) throw new HttpError(401, "This test session has ended or moved to another phone. Scan the store's QR again.");
+  if (!r0) throw new HttpError(401, "This session ended or moved — scan the store's QR again.");
   const r = expireIfDue(r0);
-  if (!["joined", "testing", "complete"].includes(r.status)) throw new HttpError(401, "This test session has ended. Ask the store for a new code.");
+  if (!["joined", "testing", "complete"].includes(r.status)) throw new HttpError(401, "This session has ended — ask the store for a new code.");
   return r;
 }
 
@@ -975,7 +1162,7 @@ export function deviceDeclare(authorization: string | null, raw: unknown) {
 export function devicePhase(authorization: string | null, raw: { phase?: unknown }) {
   const r = byTicket(authorization);
   const phase = readPhase(raw?.phase);
-  if (!phase) throw new HttpError(400, "Say which step the phone is on: identify, scan, battery, test or done.");
+  if (!phase) throw new HttpError(400, "Say which step the phone is on: identify, scan, battery, test, done or colours.");
   const now = nowIso();
   db().prepare(`UPDATE test_sessions SET phone_phase = ?, phone_phase_at = ?, updated_at = ? WHERE id = ?`).run(phase, now, now, r.id);
   return { ok: true as const };
@@ -994,7 +1181,7 @@ export function deviceCameraLinkGet(authorization: string | null): { url: string
   const r = byTicket(authorization);
   const out = deviceCameraLink(r);
   if (!out.ok)
-    throw new HttpError(409, out.why === "pending" ? "The camera check isn't ready yet." : "The camera check isn't running for this check — carry on with the tests.");
+    throw new HttpError(409, out.why === "pending" ? "The camera check isn't ready yet." : "No camera check — carry on with the tests.");
   if (!linkAudited.has(r.id)) {
     linkAudited.add(r.id);
     audit({ orgId: r.org_id, storeId: r.store_id, action: "test_session.camera_link", entity: "test_session", entityId: r.id, detail: { to: "customer's phone" } });
@@ -1045,21 +1232,25 @@ export async function deviceBattery(
 ): Promise<{ healthPct: number | null; outcome: "pass" | "fail" | "skip"; recorded: { healthPct: number | null; outcome: string } | null }> {
   const r = byTicket(authorization);
   const reads = batteryReads.get(r.id) ?? [];
-  if (reads.length >= BATTERY_READS_PER_SESSION) throw new HttpError(429, "That's enough tries for the battery screenshot. Skip this step — the advisor can check the battery.");
+  if (reads.length >= BATTERY_READS_PER_SESSION) throw new HttpError(429, "No more tries — skip; the advisor checks the battery.");
   if (reads.length && Date.now() - reads[reads.length - 1] < BATTERY_READ_GAP_MS) throw new HttpError(429, "One moment — the last screenshot is still being read.");
   const image = typeof raw?.image === "string" ? raw.image.trim() : "";
-  if (image.length > MAX_SCREENSHOT_CHARS) throw new HttpError(413, "That screenshot is too big. Crop it to the battery screen, or take a fresh one.");
+  if (image.length > MAX_SCREENSHOT_CHARS) throw new HttpError(413, "Screenshot too big — crop it to the battery screen.");
   if (!SCREENSHOT_RE.test(image)) throw new HttpError(400, "Choose a screenshot of the battery health screen.");
-  if (gradeiqConfig().enabled && r.gradeiq_state === "pending") throw new HttpError(409, "The battery reader is still starting. Try again in a moment, or skip this step.");
+  if (gradeiqConfig().enabled && r.gradeiq_state === "pending") throw new HttpError(409, "Battery reader starting — try again, or skip.");
   if (!gradeiqConfig().enabled || r.gradeiq_state !== "ready" || !r.gradeiq_id)
-    throw new HttpError(409, "The battery reader isn't available for this check. Skip this step — the advisor can check the battery.");
+    throw new HttpError(409, "Battery reader isn't available — skip; the advisor checks it.");
   batteryReads.set(r.id, [...reads, Date.now()]);
   let pct: number | null;
   try {
     // Outside any transaction: one vision call, up to GRADEIQ_OCR_TIMEOUT_MS.
     pct = await readBatteryHealth(r.gradeiq_id, image);
   } catch (e) {
-    if (e instanceof GradeiqError) throw new HttpError(503, "Couldn't read the screenshot just now. Try again in a moment, or skip this step.");
+    // The reader itself is off (its AI service refused the call — e.g. out of credit): not the
+    // customer's screenshot. The phone moves on and the advisor checks the battery instead.
+    if (e instanceof GradeiqError && e.kind === "reader_off")
+      throw new HttpError(409, "Battery reader isn't available — skip; the advisor checks it.");
+    if (e instanceof GradeiqError) throw new HttpError(503, "Couldn't read the screenshot — try again, or skip.");
     throw e;
   }
   const result = batteryHealthResult(pct, nowIso());
@@ -1111,6 +1302,8 @@ export function deviceComplete(authorization: string | null) {
   const r = byTicket(authorization);
   const now = nowIso();
   db().prepare(`UPDATE test_sessions SET status = 'complete', completed_at = COALESCE(completed_at, ?), updated_at = ? WHERE id = ?`).run(now, now, r.id);
+  // The phone has finished: if the camera grade is in too, the answer is ready without a tap.
+  void autoApply(r.id);
   return { ok: true as const, summary: view(rowById(r.id)!).summary };
 }
 
@@ -1120,9 +1313,28 @@ export function deviceStatus(authorization: string | null) {
   if (!m) throw new HttpError(401, "This phone is not connected to a store session.");
   const r0 = db().prepare(`SELECT * FROM test_sessions WHERE ticket_hash = ?`).get(sha(m[1])) as Row | undefined;
   // Cancelled, expired or re-joined elsewhere: the ticket is gone, so the session is closed for this phone.
-  if (!r0) return { status: "closed" as const, progress: null, storeName: null, caseRef: null };
-  const v = view(expireIfDue(r0));
-  return { status: v.status, progress: v.progress, storeName: v.storeName, caseRef: v.caseRef };
+  if (!r0) return { status: "closed" as const, progress: null, storeName: null, caseRef: null, reportPath: null, grading: null, colours: false };
+  const r = expireIfDue(r0);
+  // The phone asks every few seconds once it has finished: the results go on the case as soon as
+  // everything is in, whether or not anyone has the Session screen open (autoApply).
+  if (r.status === "complete") void autoApply(r.id);
+  const v = view(r);
+  // Once applied, the customer's own link to the phone's grading report (public, no money in it),
+  // and the grade that page opens on — the SwapUp grade with its letter ("Good (B)"), no reasons, no price.
+  const applied = v.status === "applied";
+  // The tests are done and the advisor still has to certify the screen: show the test colours
+  // full-screen on the result screen until they tap it (or Apply). The customer taps nothing.
+  const phase = readPhase(r.phone_phase);
+  const colours = !applied && (phase === "done" || phase === "colours") && certifyFor(r, cameraEvidence(r)).coloursWanted;
+  return {
+    status: v.status,
+    progress: v.progress,
+    storeName: v.storeName,
+    caseRef: v.caseRef,
+    reportPath: applied ? reportPathFor(r0.case_id) : null,
+    grading: applied ? customerGradingFor(r0.case_id) : null,
+    colours,
+  };
 }
 
 /* ─────────────────────────── the photo check (customer's phone) ─────────────────────────── */
@@ -1138,7 +1350,7 @@ export async function deviceScreenGet(authorization: string | null): Promise<Dev
   try {
     return await deviceScreen(r);
   } catch (e) {
-    if (e instanceof DeviceScreenUnavailable) throw new HttpError(503, "The photo check can't reach the grading service right now. Keep this screen open — it carries on by itself.");
+    if (e instanceof DeviceScreenUnavailable) throw new HttpError(503, "Can't reach the photo check — keep this screen open.");
     throw e;
   }
 }
@@ -1153,7 +1365,7 @@ export async function deviceScreenPost(authorization: string | null, raw: { show
   try {
     await deviceScreenShown(r, shown);
   } catch (e) {
-    if (e instanceof GradeiqError) throw new HttpError(e.kind === "disabled" ? 409 : 503, e.kind === "disabled" ? "The photo check is not running for this session." : "The photo check can't reach the grading service right now. Keep this screen open.");
+    if (e instanceof GradeiqError) throw new HttpError(e.kind === "disabled" ? 409 : 503, e.kind === "disabled" ? "No photo check for this session." : "Can't reach the photo check — keep this screen open.");
     throw e;
   }
   return { ok: true as const };

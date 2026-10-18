@@ -64,9 +64,7 @@ export function NewPhonesTab({ orgId, isPlatform, initial }: { orgId: string; is
           <Empty title={devices.length ? "No phone matches that search" : "No new phones yet"}>{devices.length ? null : "Add the first one below."}</Empty>
         )}
       </Card>
-      <p className="hint">
-        Changing a price records it as entered by the programme admin, with today&apos;s date and the source you give. Hiding a phone keeps its price and source.
-      </p>
+      <p className="hint">Price changes are logged with your source.</p>
 
       <Card title="Add a phone">
         <AddPhoneForm

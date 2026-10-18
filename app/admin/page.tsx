@@ -52,7 +52,7 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
         ctx={ctx}
         section="/admin"
         title="Programme overview"
-        intro="How the repair-or-upgrade desk is doing across your stores, and how much trade-in credit each store is carrying right now."
+        intro="Your stores' results and credit right now."
       >
         <Card pad={false}>
           <form method="get" action="/admin" className="px-5 py-4 flex flex-wrap items-end gap-3">
@@ -174,8 +174,7 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
           )}
         </Card>
         <p className="hint">
-          Upgrade rate = upgrades ÷ (repairs + upgrades + walk-aways). Cases still being assessed or quoted are not counted. Bonus and new-phone figures
-          exclude cancelled trade-ins.
+          Upgrade rate = upgrades ÷ (repairs + upgrades + walk-aways). Cancelled trade-ins are left out.
         </p>
       </AdminFrame>
     </AppShell>

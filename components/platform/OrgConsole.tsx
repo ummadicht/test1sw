@@ -79,9 +79,7 @@ export function BandEditor({ orgId, minBp, maxBp }: { orgId: string; minBp: numb
           Cancel
         </button>
       </div>
-      <p className="hint">
-        Checked whenever this client saves a bonus campaign. Campaigns already running keep their own minimum and maximum until they are edited.
-      </p>
+      <p className="hint">Running campaigns keep theirs until edited.</p>
       <ErrorText error={error} />
     </form>
   );
@@ -121,7 +119,7 @@ export function OnboardClient({ partners, defaultBand }: { partners: PartnerOpti
           }
         }}
       >
-        <Field label="Client name" hint="As it should appear to their staff, e.g. the brand's service network or the retail chain.">
+        <Field label="Client name" hint="As their staff see it.">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} required minLength={3} maxLength={120} />
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -138,7 +136,7 @@ export function OnboardClient({ partners, defaultBand }: { partners: PartnerOpti
             <input className="input" value={targetBrand} onChange={(e) => setTargetBrand(e.target.value)} maxLength={40} />
           </Field>
         </div>
-        <Field label="Buyback partner" hint="Prices the trade-ins and collects the phones from this client's stores.">
+        <Field label="Buyback partner">
           {partners.length === 0 ? (
             <div className="input flex items-center text-muted">Add a buyback partner first</div>
           ) : (
@@ -152,8 +150,7 @@ export function OnboardClient({ partners, defaultBand }: { partners: PartnerOpti
           )}
         </Field>
         <p className="hint">
-          A new client starts with no stores, no people, and the default programme settings (upgrade bonus band {fmtBp(defaultBand.minBp)}–
-          {fmtBp(defaultBand.maxBp)}). It is a real programme, not a demo: its stores cannot lock a trade-in priced from a SAMPLE rate card.
+          Bonus band {fmtBp(defaultBand.minBp)}–{fmtBp(defaultBand.maxBp)}. A live programme: real trade-ins, priced by PriceIQ, the partner&apos;s rate card or a typed quote.
         </p>
         <button className="btn btn-primary" disabled={busy || partners.length === 0}>
           {busy ? "Creating…" : "Create client"}
@@ -207,13 +204,10 @@ export function AddPartner() {
           }
         }}
       >
-        <Field label="Partner name" hint="The company that prices trade-ins, collects phones from stores and settles.">
+        <Field label="Partner name">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} required minLength={3} maxLength={120} />
         </Field>
-        <p className="hint">
-          A new partner has no rate card, so it cannot price a trade-in until its team uploads one (or its live API is connected). Its first upload
-          must include its condition deductions.
-        </p>
+        <p className="hint">Prices nothing until it uploads a rate card.</p>
         <button className="btn btn-primary" disabled={busy}>
           {busy ? "Adding…" : "Add partner"}
         </button>

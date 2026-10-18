@@ -5,13 +5,7 @@ import { Money, Banner, ErrorText } from "@/components/ui";
 import { StepCard } from "./StepCard";
 import { ID_TYPES } from "./shared";
 import type { CaseOps } from "./ops";
-
-const CHECKS = [
-  ["ownership", "The customer confirms they own this phone"],
-  ["simRemoved", "SIM and memory card removed"],
-  ["imeiMatches", "IMEI on the phone (*#06#) matches the one recorded"],
-  ["noFinanceLock", "Not on an EMI / finance plan, and no lender or company lock on it"],
-] as const;
+import { HANDOVER_HINT, HANDOVER_LABEL, handoverChecks } from "./handover";
 
 const KYM_OPTIONS = [
   ["clear", "No block — OK to buy"],
@@ -21,10 +15,9 @@ const KYM_OPTIONS = [
 ] as const;
 type Kym = (typeof KYM_OPTIONS)[number][0];
 
-type CheckKey = (typeof CHECKS)[number][0];
-
 /**
- * ⑦ Take the trade-in: who the customer is, the hand-over checks, and the credit it uses.
+ * TAKE THE TRADE-IN — the last step, opened by "Swap up" on the answer: who the customer is, ONE hand-over
+ * confirm for the four checks (./handover.ts — the server still gets each flag), and the credit it uses.
  * The IMEI is asked here, first, when the case has none — only taking the phone needs it.
  * The forwarded ref is the first field (the IMEI when it is asked, else the name).
  */
@@ -34,12 +27,7 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
   const [phone, setPhone] = useState(view.customer?.phone ?? "");
   const [idType, setIdType] = useState("");
   const [idLast4, setIdLast4] = useState("");
-  const [checks, setChecks] = useState<Record<CheckKey, boolean>>({
-    ownership: false,
-    simRemoved: false,
-    imeiMatches: false,
-    noFinanceLock: false,
-  });
+  const [handover, setHandover] = useState(false);
   const [kym, setKym] = useState<Kym | "">("");
   const [kymRef, setKymRef] = useState("");
   const [imeiAck, setImeiAck] = useState(false);
@@ -72,7 +60,7 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
       return;
     }
     if (d.length !== 14 && d.length !== 15) {
-      setImeiErr(`An IMEI has 15 digits — this has ${d.length}.`);
+      setImeiErr("An IMEI has 15 digits.");
       return;
     }
     imeiSent.current = d;
@@ -85,7 +73,7 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
   const phoneOk = /^[6-9]\d{9}$/.test(digits);
   const last4Ok = /^[A-Za-z0-9]{4}$/.test(idLast4);
   const anyImeiInvalid = view.imeiCheck === "invalid" || view.imei2Check === "invalid";
-  const ticked = CHECKS.every(([k]) => checks[k]);
+  const ticked = handover;
   // A storage the customer typed (the phone couldn't measure it) is enough to show a price; taking the phone needs it seen.
   const variant = view.device?.variant ?? null;
   const storageClaimed = view.variantSource === "customer";
@@ -96,8 +84,11 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
   const formOk = name.trim().length >= 2 && phoneOk && !!idType && last4Ok && kym === "clear" && ticked && storageOk && imeiAckOk;
   const blockers = view.lockBlockers;
   const cc = view.creditCheck;
-  const d = view.decision?.upgrade;
   const canSubmit = editable && view.status === "quoted" && blockers.length === 0 && !busy && !submitting;
+  // The step's one line: the swap being taken, as the store app names it. Every figure is the answer's (each number once).
+  const deal = view.upgrade
+    ? `${[view.device?.model, view.device?.variant].filter(Boolean).join(" ") || "The customer's phone"} → ${[view.upgrade.model, view.upgrade.variant].filter(Boolean).join(" ") || view.upgrade.label}`
+    : null;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -106,20 +97,20 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
         name.trim().length < 2
           ? "Enter the customer's name."
           : !phoneOk
-            ? "Enter a 10-digit Indian mobile number."
+            ? "Enter a 10-digit mobile."
             : !idType
-              ? "Choose the customer's ID document."
+              ? "Choose the ID."
               : !last4Ok
-                ? "Enter the last 4 characters of the ID number."
+                ? "Enter the ID's last 4."
                 : !kym
-                  ? "Do the government IMEI check (KYM) and record what it says."
+                  ? "Do the IMEI register check (KYM)."
                   : kymBlocked
-                    ? "The government register flags this phone — do not take it."
+                    ? "Register flags it — do not take it."
                     : !ticked
-                      ? "Tick every hand-over check before taking the phone."
+                      ? "Tick the hand-over check."
                       : !storageOk
-                        ? `Confirm before taking the phone: Settings › About phone shows ${variant ?? "the storage"} (the customer typed it — the phone couldn't measure it).`
-                        : "An IMEI fails its check digit. Re-read it from *#06#, or confirm it is correct."
+                        ? `Confirm Settings shows ${variant ?? "the storage"}.`
+                        : "Re-read the IMEI, or confirm it."
       );
       return;
     }
@@ -127,7 +118,8 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
     const e2 = await act("lock", {
       customer: { name: name.trim(), phone: digits, idType, idLast4: idLast4.toUpperCase() },
       checks: {
-        ...checks,
+        // One tick on the form, the four flags the server checks one by one.
+        ...handoverChecks(handover),
         kym: { status: kym, reference: kymRef.trim() || null },
         imeiCheckAck: anyImeiInvalid ? imeiAck : undefined,
         storageSeen: storageClaimed ? storageSeen : undefined,
@@ -138,12 +130,15 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
   }
 
   return (
-    <StepCard n={7} id="step-lock" title="Take the trade-in">
+    <StepCard
+      id="step-lock"
+      title="Take the trade-in"
+      line={deal}
+      details={
+        <p className="text-[14px] text-ink-2">Held on the store&apos;s credit line until the partner collects. Data clear comes next.</p>
+      }
+    >
       <form onSubmit={submit} className="space-y-5">
-        <p className="text-[14px] text-ink-2">
-          Only when the customer has chosen to upgrade. The store keeps the old phone and its trade-in value is held on the store&apos;s credit line
-          until the partner collects it. Next, the customer clears their data from the phone&apos;s Settings — the next screen walks you through it.
-        </p>
 
         {askImei ? (
           <div>
@@ -174,7 +169,7 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
                   aria-invalid={!!imeiErr || view.imeiCheck === "invalid" || undefined}
                 />
                 {view.imei && view.imeiCheck === "valid" && imei.replace(/\D/g, "") === view.imei ? <span className="pill pill-up">✓ Check digit OK</span> : null}
-                {view.imeiCheck === "invalid" ? <span className="pill pill-warn">⚠ Check digit fails — re-read it</span> : null}
+                {view.imeiCheck === "invalid" ? <span className="pill pill-warn">⚠ Re-read the IMEI</span> : null}
               </div>
             </label>
             {imeiErr ? (
@@ -182,7 +177,7 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
                 {imeiErr}
               </span>
             ) : (
-              <span className="hint">Dial *#06# on the phone, or scan the barcode on the box. 14 digits are completed automatically.</span>
+              <span className="hint">Dial *#06#, or scan the box.</span>
             )}
           </div>
         ) : null}
@@ -205,10 +200,10 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
               disabled={!editable}
               aria-invalid={(digits.length > 0 && !phoneOk) || undefined}
             />
-            {digits.length > 0 && !phoneOk ? <span className="hint" style={{ color: "var(--bad)" }}>A 10-digit mobile starting with 6, 7, 8 or 9.</span> : null}
+            {digits.length > 0 && !phoneOk ? <span className="hint" style={{ color: "var(--bad)" }}>10 digits, starting 6–9.</span> : null}
           </label>
           <label className="block">
-            <span className="label">ID document seen</span>
+            <span className="label">ID seen</span>
             <select className="select" value={idType} onChange={(e) => setIdType(e.target.value)} disabled={!editable}>
               <option value="">Choose…</option>
               {ID_TYPES.map((t) => (
@@ -219,7 +214,7 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
             </select>
           </label>
           <label className="block">
-            <span className="label">Last 4 characters of the ID number</span>
+            <span className="label">ID last 4</span>
             <input
               className="input num uppercase"
               value={idLast4}
@@ -229,22 +224,21 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
               placeholder="e.g. 4821"
               disabled={!editable}
             />
-            <span className="hint">Only these 4 characters are stored — never the full ID number or a copy of it.</span>
+            <span className="hint">Only these 4 are stored.</span>
           </label>
         </div>
 
         <fieldset>
-          <legend className="label">Government IMEI check (required)</legend>
+          <legend className="label">IMEI register check</legend>
           <p className="hint !mt-0 mb-2">
-            Since October 2025 anyone buying a used phone must check it against the national IMEI register first. SMS{" "}
-            <span className="num font-semibold">KYM {view.imei ?? "<IMEI>"}</span> to <span className="num font-semibold">14422</span>
+            SMS <span className="num font-semibold">KYM {view.imei ?? "<IMEI>"}</span> to <span className="num font-semibold">14422</span>
             {view.imei2 ? (
               <>
                 {" "}
-                (and again for <span className="num font-semibold">{view.imei2}</span>)
+                (again for <span className="num font-semibold">{view.imei2}</span>)
               </>
             ) : null}
-            , or use the Sanchar Saathi app, and record the answer.
+            , or use Sanchar Saathi.
           </p>
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Government IMEI check result">
             {KYM_OPTIONS.map(([k, label]) => (
@@ -263,32 +257,31 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
           </div>
           {kymBlocked ? (
             <div className="mt-2">
-              <Banner tone="bad">
-                The register flags this phone. Do not take it — hand it back to the customer. Buying a phone reported lost or stolen is an offence.
-              </Banner>
+              <Banner tone="bad">Flagged — do not take it. Hand it back.</Banner>
             </div>
           ) : null}
           <label className="block mt-3">
             <span className="label">Reference (optional)</span>
-            <input className="input" value={kymRef} onChange={(e) => setKymRef(e.target.value)} placeholder="e.g. time of the SMS reply" maxLength={80} disabled={!editable} />
+            <input className="input" value={kymRef} onChange={(e) => setKymRef(e.target.value)} placeholder="e.g. SMS time" maxLength={80} disabled={!editable} />
           </label>
         </fieldset>
 
         <fieldset>
-          <legend className="label">Before you take the phone</legend>
+          <legend className="label">Hand-over</legend>
           <div className="space-y-2">
-            {CHECKS.map(([k, label]) => (
-              <label key={k} className="flex items-start gap-3 rounded-[10px] border border-line px-3 py-2.5 cursor-pointer has-[:checked]:border-[color:var(--up)] has-[:checked]:bg-up-bg">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 w-5 h-5 accent-[color:var(--up)]"
-                  checked={checks[k]}
-                  onChange={(e) => setChecks((c) => ({ ...c, [k]: e.target.checked }))}
-                  disabled={!editable}
-                />
-                <span className="text-[14.5px]">{label}</span>
-              </label>
-            ))}
+            <label className="flex items-start gap-3 rounded-[10px] border border-line px-3 py-2.5 cursor-pointer has-[:checked]:border-[color:var(--up)] has-[:checked]:bg-up-bg">
+              <input
+                type="checkbox"
+                className="mt-0.5 w-5 h-5 accent-[color:var(--up)]"
+                checked={handover}
+                onChange={(e) => setHandover(e.target.checked)}
+                disabled={!editable}
+              />
+              <span className="text-[14.5px]">
+                <span className="font-semibold">{HANDOVER_LABEL}</span>
+                <span className="block text-muted text-[13.5px] mt-0.5">{HANDOVER_HINT}</span>
+              </span>
+            </label>
             {storageClaimed && variant ? (
               <label className="flex items-start gap-3 rounded-[10px] border border-line px-3 py-2.5 cursor-pointer has-[:checked]:border-[color:var(--up)] has-[:checked]:bg-up-bg">
                 <input
@@ -299,7 +292,7 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
                   disabled={!editable}
                 />
                 <span className="text-[14.5px]">
-                  Settings › About phone shows {variant} <span className="text-muted">(the customer typed it — the phone couldn&apos;t measure it)</span>
+                  Settings shows {variant}
                 </span>
               </label>
             ) : null}
@@ -307,7 +300,7 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
               <label className="flex items-start gap-3 rounded-[10px] border border-[color:var(--warn)] bg-warn-bg px-3 py-2.5 cursor-pointer">
                 <input type="checkbox" className="mt-0.5 w-5 h-5" checked={imeiAck} onChange={(e) => setImeiAck(e.target.checked)} disabled={!editable} />
                 <span className="text-[14.5px]">
-                  The IMEI is correct even though the check digit fails <span className="text-muted">(re-read it from *#06# first)</span>
+                  IMEI is correct <span className="text-muted">(re-read *#06#)</span>
                 </span>
               </label>
             ) : null}
@@ -320,7 +313,7 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
           {cc ? (
             cc.ok ? (
               <div className="text-[14.5px]">
-                <Money value={cc.availableAfter} className="font-bold" /> of credit left after this trade-in.
+                <Money value={cc.availableAfter} className="font-bold" /> credit left after this.
                 {cc.warn ? (
                   <div className="mt-2">
                     <Banner tone="warn">{cc.warn}</Banner>
@@ -331,13 +324,13 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
               <Banner tone="bad">{cc.reason}</Banner>
             )
           ) : (
-            <p className="text-[14px] text-muted">Checked once the trade-in is priced.</p>
+            <p className="text-[14px] text-muted">Checked once priced.</p>
           )}
         </div>
 
         {blockers.length ? (
           <Banner tone="warn">
-            <div className="font-semibold">Before the trade-in can be taken:</div>
+            <div className="font-semibold">Before taking it:</div>
             <ul className="list-disc pl-4 mt-1 space-y-0.5">
               {blockers.map((b) => (
                 <li key={b}>{b}</li>
@@ -346,21 +339,8 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
           </Banner>
         ) : null}
 
-        {d && view.upgrade ? (
-          <div className="rounded-[12px] bg-up-bg px-4 py-3 text-[14.5px]">
-            The customer gets <Money value={d.tradeIn} className="font-bold" /> for the old phone
-            {d.bonus ? (
-              <>
-                {" "}
-                plus a <Money value={d.bonus} className="font-bold" /> upgrade bonus
-              </>
-            ) : null}{" "}
-            off the {view.upgrade.model} {view.upgrade.variant}, and pays <Money value={d.pays} className="font-bold" />.
-          </div>
-        ) : null}
-
         <button className="btn btn-up w-full sm:w-auto" disabled={!canSubmit}>
-          {submitting ? "Taking the trade-in…" : "Take the trade-in"}
+          {submitting ? "Taking…" : "Take the trade-in"}
         </button>
         <ErrorText error={err} />
       </form>

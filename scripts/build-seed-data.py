@@ -7,7 +7,8 @@ Build lib/server/seed-data.json from the research snapshots (2026-10-15).
   lineup.csv  — samsung.com/in selling prices for phones on sale.
 
 Everything that is NOT from those sources is labelled: release years and update
-policy years are approximate; the trade-in rate card is a SAMPLE.
+policy years are approximate. No trade-in prices: those come from PriceIQ, the
+partner's uploaded rate card, or a quote staff type in.
 """
 import csv, json, re, sys, os
 
@@ -93,33 +94,6 @@ def variants_for(model):
     if x and int(x.group(1)) >= 3: return ["128GB", "256GB"]
     return ["64GB", "128GB"]
 
-def launch_class(model):
-    m = model.replace("Galaxy ", "")
-    s = series_of(model)
-    if s == "S":
-        if "Ultra" in m: return 125000
-        if "Edge" in m: return 110000
-        if "+" in m: return 90000
-        if "FE" in m: return 55000
-        return 75000
-    if s == "Z":
-        if "Fold" in m: return 200000 if "Ultra" in m else 155000
-        return 90000 if "FE" in m else 95000
-    if m.startswith("F70"): return 30000
-    if m.startswith("M47"): return 26000
-    x = re.match(r"([AMF])(\d)(\d)", m)
-    if not x: return 15000
-    fam, d = x.group(1), int(x.group(2))
-    if fam == "A": return {0: 11000, 1: 15000, 2: 20000, 3: 28000, 5: 38000, 7: 42000}.get(d, 20000)
-    return {0: 9000, 1: 12000, 2: 15000, 3: 18000, 4: 22000, 5: 26000, 6: 24000}.get(d, 15000)
-
-RESIDUAL = {0: 0.65, 1: 0.52, 2: 0.42, 3: 0.32, 4: 0.24, 5: 0.18}
-
-def sample_prices(launch, year, variants):
-    age = max(0, THIS_YEAR - year)
-    base = launch * RESIDUAL.get(age, 0.13)
-    return {v: int(round(base * (1 + 0.08 * i) / 100.0) * 100) for i, v in enumerate(variants)}
-
 # ── Samsung models + repair book from the official page ─────────────────
 models = {}
 repair = []
@@ -175,26 +149,14 @@ OTHER = [
     ("Google", "Pixel 6a", 2022, 44000), ("Google", "Pixel 7", 2022, 60000), ("Google", "Pixel 8", 2023, 76000),
 ]
 PIXEL_SEC = {"Pixel 6a": 5, "Pixel 7": 5, "Pixel 8": 7}
-other_launch = {}
 for brand, model, y, launch in OTHER:
     mid = slug(model if brand != "Apple" else model)
     sec = PIXEL_SEC.get(model)
     models[mid] = {
         "id": mid, "brand": brand, "model": model, "series": None, "releaseYear": y,
         "supportEndYear": (y + sec) if sec else None, "variants": ["128GB", "256GB"], "serviceTier": "other", "carePlusFee": None, "modelCodes": [],
-        "source": {"kind": "sample", "label": "Release year approximate; update policy not recorded" if not sec else f"Google update policy ({sec} yrs), release year approximate", "observedAt": OBSERVED},
+        "source": {"kind": "approximate", "label": "Release year approximate; update policy not recorded" if not sec else f"Google update policy ({sec} yrs), release year approximate", "observedAt": OBSERVED},
     }
-    other_launch[mid] = launch
-
-# ── SAMPLE rate card (illustrative, never a Cashify price) ──────────────
-entries = []
-for mid, m in models.items():
-    launch = other_launch.get(mid) or launch_class("Galaxy " + m["model"].replace("Galaxy ", ""))
-    if m["brand"] == "Apple":
-        launch = int(launch * 1.4)  # iPhones hold resale value better — still a SAMPLE
-    for v, p in sample_prices(launch, m["releaseYear"], m["variants"]).items():
-        if p >= 500:
-            entries.append({"modelId": mid, "variant": v, "maxPrice": p})
 
 # ── new devices from samsung.com/in selling prices ──────────────────────
 new = []
@@ -226,6 +188,6 @@ with open(os.path.join(SRC_DIR, "research-samsung-lineup-2026-10-15.csv")) as f:
             "source": {"kind": "oem_public", "label": "samsung.com/in selling price", "url": row["source_url"], "observedAt": row["source_date"]},
         })
 
-out = {"observedAt": OBSERVED, "tradeModels": list(models.values()), "repairBook": repair, "sampleRateCard": entries, "newDevices": new}
+out = {"observedAt": OBSERVED, "tradeModels": list(models.values()), "repairBook": repair, "newDevices": new}
 json.dump(out, open(OUT, "w"), indent=1)
-print(f"models={len(models)} repair={len(repair)} sampleEntries={len(entries)} newDevices={len(new)}")
+print(f"models={len(models)} repair={len(repair)} newDevices={len(new)}")

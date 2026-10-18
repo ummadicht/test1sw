@@ -3,6 +3,7 @@ import { HttpError, orgSettings, type SessionUser } from "./auth";
 import { getStore, getOrg, canSeeStore, ownStore, storeInScope, orgPartnerId, type StoreRow } from "./scope";
 import { postEvents } from "./credit";
 import { listCases, type CaseListItem, type Clearance } from "./cases";
+import { pickupGrading } from "./gradingReport";
 import {
   assertTransition,
   canPickupTransition,
@@ -57,7 +58,12 @@ export type PickupView = {
   settlementAmount: number | null;
   notes: string | null;
   demo: boolean;
-  items: (CaseListItem & { clearance: Clearance | null })[];
+  /**
+   * `grading`: the counter grade frozen at hand-over (docs/GRADING.md) — its label ("Good (B)"),
+   * and the link to exactly that version of the report — the evidence beside the partner's
+   * verdict. null when the phone was never tested. It never moves a price or the regrade rules.
+   */
+  items: (CaseListItem & { clearance: Clearance | null; grading: { label: string; final: boolean; version: number; path: string } | null })[];
   totals: { devices: number; quoted: number; accepted: number; shortfall: number; verified: number };
 };
 
@@ -76,7 +82,7 @@ function pickupInScope(u: SessionUser, id: string): { p: PickupRow; store: Store
 function view(u: SessionUser, p: PickupRow, store: StoreRow): PickupView {
   const items = listCases(u, { pickupId: p.id, limit: 500 }).map((c) => {
     const r = db().prepare(`SELECT clearance FROM cases WHERE id = ?`).get(c.id) as { clearance: string | null };
-    return { ...c, clearance: parseJson<Clearance | null>(r.clearance, null) };
+    return { ...c, clearance: parseJson<Clearance | null>(r.clearance, null), grading: pickupGrading(c.id) };
   });
   const totals = items.reduce(
     (t, i) => {
@@ -160,7 +166,7 @@ function setCaseStatus(id: string, from: CaseStatus, to: CaseStatus, extra: Reco
   const r = db()
     .prepare(`UPDATE cases SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ? AND status = ?`)
     .run(...cols.map((c) => (sets as Record<string, unknown>)[c]), id, from);
-  if (r.changes !== 1) throw new HttpError(409, "A device in this pickup changed while you were working — reload.");
+  if (r.changes !== 1) throw new HttpError(409, "A device in this pickup changed — reload.");
 }
 
 /** The store asks the partner to come and collect. Takes every phone waiting at the store unless a subset is named. */
@@ -192,7 +198,7 @@ function movePickup(p: PickupRow, to: PickupStatus, extra: Record<string, unknow
   const r = db()
     .prepare(`UPDATE pickups SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ? AND status = ?`)
     .run(...cols.map((c) => (sets as Record<string, unknown>)[c]), p.id, p.status);
-  if (r.changes !== 1) throw new HttpError(409, "This pickup changed while you were working — reload.");
+  if (r.changes !== 1) throw new HttpError(409, "This pickup changed — reload.");
 }
 
 export function schedulePickup(u: SessionUser, id: string, input: { scheduledFor: string; collectorName: string }): PickupView {
@@ -277,15 +283,15 @@ export function clearItem(u: SessionUser, id: string, input: { caseId: string; o
   const outcome = input.outcome;
   if (!["cleared", "regraded", "rejected", "not_received"].includes(outcome)) throw new HttpError(400, "Unknown outcome.");
   const reason = String(input.reason || "").trim();
-  if (outcome !== "cleared" && reason.length < 6) throw new HttpError(400, "Say why — the store will see this reason against its credit line.");
+  if (outcome !== "cleared" && reason.length < 6) throw new HttpError(400, "Say why — the store sees this reason.");
   // A regrade without an amount must not silently become a ₹0 regrade (a full
   // chargeback on the store's line) — Number(undefined) is NaN, which used to fall to 0.
   const acceptedRaw = input.accepted as unknown;
   const acceptedGiven = acceptedRaw !== undefined && acceptedRaw !== null && acceptedRaw !== "" && Number.isFinite(Number(acceptedRaw));
-  if (outcome === "regraded" && !acceptedGiven) throw new HttpError(400, "Enter what the partner will pay for this phone after the regrade.");
+  if (outcome === "regraded" && !acceptedGiven) throw new HttpError(400, "Enter what the partner pays after the regrade.");
   return tx(() => {
     const { p, store } = pickupInScope(u, id);
-    if (p.status !== "collected") throw new HttpError(409, "Devices are verified after collection and before the pickup is settled.");
+    if (p.status !== "collected") throw new HttpError(409, "Verify devices after collection, before settling.");
     const c = db().prepare(`SELECT id, status, trade_value FROM cases WHERE id = ? AND pickup_id = ?`).get(input.caseId, id) as
       | { id: string; status: CaseStatus; trade_value: number }
       | undefined;
@@ -347,7 +353,7 @@ export function recoverChargeback(u: SessionUser, caseId: string, input: { amoun
     if (!canSeeStore(u, store)) throw new HttpError(404, "Case not found.");
     const allowed =
       u.role === "platform" || u.role === "org_admin" || (u.role === "partner" && c.status === "not_received");
-    if (!allowed) throw new HttpError(403, "Only the programme admin (or the partner, for a not-received dispute) closes a chargeback.");
+    if (!allowed) throw new HttpError(403, "Only the programme admin closes this chargeback.");
     const sums = db()
       .prepare(`SELECT COALESCE(SUM(CASE kind WHEN 'chargeback' THEN amount WHEN 'recovery' THEN -amount ELSE 0 END),0) AS open FROM credit_ledger WHERE case_id = ?`)
       .get(caseId) as { open: number };

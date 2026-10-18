@@ -250,7 +250,8 @@ export function orgSettingsDefaults() {
 export function orgSettings(orgId: string): OrgSettings {
   const row = db().prepare(`SELECT settings FROM orgs WHERE id = ?`).get(orgId) as { settings: string } | undefined;
   const d = orgSettingsDefaults();
-  const s = parseJson<Partial<OrgSettings>>(row?.settings, {});
+  // `priceiq` (a buy spread and an age limit) is retired: the markdown and the 14/90-day rule are the same everywhere.
+  const { priceiq: _retired, ...s } = parseJson<Partial<OrgSettings> & { priceiq?: unknown }>(row?.settings, {});
   return {
     ...d,
     ...s,

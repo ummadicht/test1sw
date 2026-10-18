@@ -8,11 +8,11 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/client/api";
-import { ErrorText, Field, Money, SourceBadge } from "@/components/ui";
+import { ErrorText, Field, Money } from "@/components/ui";
 import { inr } from "@/lib/domain/money";
 import { OUTCOME_LABEL, type ClearanceOutcome } from "@/lib/domain/lifecycle";
 
-type Item = { id: string; ref: string; device: string | null; tradeValue: number | null; sample: boolean };
+type Item = { id: string; ref: string; device: string | null; tradeValue: number | null };
 
 function useAction(pickupId: string) {
   const router = useRouter();
@@ -49,15 +49,15 @@ export function ScheduleForm({ pickupId, defaultWhen, defaultCollector }: { pick
   return (
     <form onSubmit={submit} className="space-y-4">
       <div className="grid sm:grid-cols-2 gap-4">
-        <Field label="Collection date and time" hint="The store will expect your collector then.">
+        <Field label="Collection time">
           <input className="input" type="datetime-local" required value={when} onChange={(e) => setWhen(e.target.value)} />
         </Field>
-        <Field label="Collector's name" hint="The store checks this name at handover.">
+        <Field label="Collector's name" hint="Checked at handover.">
           <input className="input" required minLength={2} maxLength={80} value={collector} onChange={(e) => setCollector(e.target.value)} placeholder="e.g. Sunil K." />
         </Field>
       </div>
       <button className="btn btn-primary" disabled={busy || !when || collector.trim().length < 2}>
-        {busy ? "Booking…" : "Book this collection"}
+        {busy ? "Booking…" : "Book collection"}
       </button>
       <ErrorText error={error} />
     </form>
@@ -103,34 +103,27 @@ export function HandoverForm({
   };
   return (
     <form onSubmit={submit} className="space-y-4">
-      <p className="text-[14.5px] text-ink-2 leading-relaxed">
-        Tick only the phones the collector is physically taking.{" "}
-        <strong>Unticked phones go back to waiting at the store</strong> and can go on the next pickup.{" "}
-        {releaseOn === "collected"
-          ? "The ticked phones free the store's credit line the moment you confirm."
-          : `The store's credit line frees up later, when ${partnerName} clears each phone after inspection.`}
-      </p>
+      <p className="text-[14.5px] text-ink-2 leading-relaxed">Tick only the phones being taken.</p>
       <fieldset className="card divide-y divide-[color:var(--line)] overflow-hidden">
         <legend className="sr-only">Phones handed over</legend>
         {items.map((i) => (
           <label key={i.id} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[color:var(--surface-2)]">
             <input type="checkbox" className="w-5 h-5 accent-[color:var(--ink)]" checked={ticked.has(i.id)} onChange={() => toggle(i.id)} />
             <span className="min-w-0 flex-1">
-              <span className="block font-semibold truncate">{i.device ?? "Device not recorded"}</span>
+              <span className="block font-semibold truncate">{i.device ?? "No phone recorded"}</span>
               <span className="block text-[12.5px] text-muted num">{i.ref}</span>
             </span>
             <span className="flex flex-col items-end gap-1">
               <Money value={i.tradeValue} className="font-semibold" />
-              {i.sample ? <SourceBadge kind="sample" /> : null}
             </span>
           </label>
         ))}
       </fieldset>
       <div className="grid sm:grid-cols-2 gap-4">
-        <Field label="Collector's name" hint={viewer === "store_manager" ? "Check it against the collector's ID." : "Who is taking the phones."}>
+        <Field label="Collector's name" hint={viewer === "store_manager" ? "Check their ID." : undefined}>
           <input className="input" required minLength={2} maxLength={80} value={collector} onChange={(e) => setCollector(e.target.value)} />
         </Field>
-        <Field label="Handed over by" hint="The store person giving the phones.">
+        <Field label="Handed over by">
           <input className="input" required minLength={2} maxLength={80} value={handover} onChange={(e) => setHandover(e.target.value)} />
         </Field>
       </div>
@@ -139,9 +132,7 @@ export function HandoverForm({
           {busy ? "Recording…" : `Confirm handover · ${taking.length} ${taking.length === 1 ? "phone" : "phones"} · ${inr(value)}`}
         </button>
         {left > 0 ? (
-          <span className="hint mt-0!">
-            {left} {left === 1 ? "phone stays" : "phones stay"} at the store.
-          </span>
+          <span className="hint mt-0!">{left} stay at the store.</span>
         ) : null}
       </div>
       <ErrorText error={error} />
@@ -173,17 +164,12 @@ export function VerdictForm({ pickupId, item, storeCarriesShortfall }: { pickupI
     <form onSubmit={submit} className="card p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="font-semibold">{item.device ?? "Device not recorded"}</div>
+          <div className="font-semibold">{item.device ?? "No phone recorded"}</div>
           <div className="text-[12.5px] text-muted num">{item.ref}</div>
         </div>
         <div className="text-right">
           <div className="text-[12px] text-muted">Quoted</div>
           <Money value={item.tradeValue} className="font-semibold" />
-          {item.sample ? (
-            <div className="mt-1">
-              <SourceBadge kind="sample" />
-            </div>
-          ) : null}
         </div>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
@@ -199,40 +185,36 @@ export function VerdictForm({ pickupId, item, storeCarriesShortfall }: { pickupI
         {outcome === "regraded" ? (
           <Field
             label="You pay (₹)"
-            hint={regradeOk ? `Below the quoted ${inr(quoted)}.` : `Must be below the quoted ${inr(quoted)} — if you pay in full, choose Cleared.`}
+            hint={regradeOk ? undefined : "Below the quote — or choose Cleared."}
           >
             <input className="input num" inputMode="numeric" value={accepted} onChange={(e) => setAccepted(e.target.value.replace(/[^\d]/g, ""))} />
           </Field>
         ) : null}
       </div>
       {outcome !== "cleared" ? (
-        <Field label="Reason" hint="The store sees this against its credit line. At least a short sentence.">
+        <Field label="Reason" hint="The store sees this.">
           <textarea
             className="textarea"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder={
               outcome === "regraded"
-                ? "e.g. Back glass cracked — not declared at the counter"
+                ? "e.g. Back glass cracked, not declared"
                 : outcome === "rejected"
-                  ? "e.g. Account lock still on; phone returned"
-                  : "e.g. Phone missing from the sealed bag at our facility"
+                  ? "e.g. Account lock still on"
+                  : "e.g. Missing from the sealed bag"
             }
           />
         </Field>
       ) : null}
       <p className="text-[13.5px] text-ink-2">
         {outcome === "cleared" ? (
-          <>The store is paid the full {inr(quoted)}.</>
+          <>Paid in full.</>
         ) : (
           <>
-            You pay <strong>{inr(pays)}</strong>; shortfall <strong>{inr(shortfall)}</strong>{" "}
-            {outcome === "not_received"
-              ? "opens a dispute on the store's credit line until it is resolved."
-              : carried
-                ? "is charged back to the store's credit line."
-                : "is carried by the partner under this programme's terms."}
-            {outcome === "rejected" ? " The phone goes back to the store." : ""}
+            You pay <strong>{inr(pays)}</strong> · shortfall <strong>{inr(shortfall)}</strong>{" "}
+            {outcome === "not_received" ? "(disputed)" : carried ? "(store's line)" : "(partner carries)"}
+            {outcome === "rejected" ? " · phone goes back" : ""}
           </>
         )}
       </p>
@@ -257,18 +239,18 @@ export function SettleForm({ pickupId, amount, storeName }: { pickupId: string; 
     <form onSubmit={submit} className="space-y-4">
       <div className="grid sm:grid-cols-2 gap-4 items-start">
         <div>
-          <span className="label">Amount to pay {storeName}</span>
+          <span className="label">To pay {storeName}</span>
           <div className="kpi">
             <Money value={amount} />
           </div>
-          <span className="hint">Everything you accepted on this pickup. Fixed by your verdicts — not editable here.</span>
+          <span className="hint">Fixed by your verdicts.</span>
         </div>
-        <Field label="Payment reference (UTR / transfer id)">
+        <Field label="Payment ref (UTR)">
           <input className="input num" required minLength={4} maxLength={60} value={reference} onChange={(e) => setReference(e.target.value)} placeholder="e.g. UTR 4321…" />
         </Field>
       </div>
       <button className="btn btn-up" disabled={busy || reference.trim().length < 4}>
-        {busy ? "Saving…" : `Mark settled · ${inr(amount)} paid`}
+        {busy ? "Saving…" : "Mark settled"}
       </button>
       <ErrorText error={error} />
     </form>
@@ -286,10 +268,10 @@ export function RemoveItemButton({ pickupId, caseId, caseRef }: { pickupId: stri
         className="btn btn-sm"
         disabled={busy}
         onClick={() => {
-          if (window.confirm(`Take ${caseRef} off this pickup? It goes back to waiting at the store.`)) void run({ action: "remove", caseId });
+          if (window.confirm(`Take ${caseRef} off this pickup?`)) void run({ action: "remove", caseId });
         }}
       >
-        {busy ? "Removing…" : "Take off this pickup"}
+        {busy ? "Removing…" : "Take off"}
       </button>
       <ErrorText error={error} />
     </div>
@@ -305,7 +287,7 @@ export function CancelPickupButton({ pickupId, count }: { pickupId: string; coun
         className="btn btn-danger btn-sm"
         disabled={busy}
         onClick={() => {
-          if (window.confirm(`Cancel this pickup? Its ${count} ${count === 1 ? "phone goes" : "phones go"} back to waiting at the store.`)) void run({ action: "cancel" });
+          if (window.confirm(`Cancel this pickup? ${count} ${count === 1 ? "phone goes" : "phones go"} back to the store.`)) void run({ action: "cancel" });
         }}
       >
         {busy ? "Cancelling…" : "Cancel pickup"}

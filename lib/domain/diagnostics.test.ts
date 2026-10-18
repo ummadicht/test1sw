@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   DEFAULT_PLAN,
   summarise,
+  CERTIFY_NOTE,
   matchModel,
   storageVariant,
   normaliseModelCode,
@@ -17,6 +18,7 @@ import {
   normaliseCode,
   mergeCondition,
   unionFaults,
+  withIssues,
   wifiQr,
   wifiEscape,
   readWifi,
@@ -123,7 +125,7 @@ test("model: a regional code of the same family matches as family", () => {
   assert.equal(m.match, "family");
   assert.equal(m.modelId, "galaxy-s22");
   assert.equal(m.variant, "256GB");
-  assert.match(m.why, /same model family/);
+  assert.match(m.why, /a regional Galaxy S22/);
 });
 
 test("model: expo's modelId / an explicit modelCode is used when modelName is not a code", () => {
@@ -145,11 +147,11 @@ test("model: no code, unknown code, or an ambiguous family → none, never a gue
   assert.equal(pixel.match, "none");
   assert.equal(pixel.modelId, null);
   assert.equal(pixel.variant, null);
-  assert.match(pixel.why, /not a Samsung model code/);
+  assert.match(pixel.why, /isn't a Samsung model code/);
 
   const unknown = matchModel({ ...DEVICE, modelName: "SM-Z999X" }, MODELS);
   assert.equal(unknown.match, "none");
-  assert.match(unknown.why, /not in SwapUp's model list/);
+  assert.match(unknown.why, /isn't on file/);
 
   const twins: TradeModelRef[] = [
     { id: "a", brand: "Samsung", model: "Phone A", variants: ["128GB"], modelCodes: ["SM-A555F"] },
@@ -157,11 +159,11 @@ test("model: no code, unknown code, or an ambiguous family → none, never a gue
   ];
   const amb = matchModel({ ...DEVICE, modelName: "SM-A555E" }, twins);
   assert.equal(amb.match, "none");
-  assert.match(amb.why, /more than one model/);
+  assert.match(amb.why, /matches .+, .+ — choose by hand/);
 
   const silent = matchModel({ ...DEVICE, brand: null, manufacturer: null, modelName: null }, MODELS);
   assert.equal(silent.match, "none");
-  assert.match(silent.why, /did not report its model/);
+  assert.match(silent.why, /No model reported/);
 
   assert.equal(matchModel(null, MODELS).match, "none");
   assert.equal(matchModel(DEVICE, []).match, "none");
@@ -171,11 +173,11 @@ test("model: storage that is not a variant on file, or not reported, is left for
   const big = matchModel({ ...DEVICE, totalDiskBytes: 476e9 }, MODELS); // a 512 GB S22 is not on file
   assert.equal(big.modelId, "galaxy-s22");
   assert.equal(big.variant, null);
-  assert.match(big.why, /not a storage option/);
+  assert.match(big.why, /not on file for the Galaxy S22/);
   const none = matchModel({ ...DEVICE, totalDiskBytes: null }, MODELS);
   assert.equal(none.modelId, "galaxy-s22");
   assert.equal(none.variant, null);
-  assert.match(none.why, /did not report its storage/);
+  assert.match(none.why, /No storage reported/);
 });
 
 test("model: the shipped seed data carries a code for every Samsung model, and the S22 matches", () => {
@@ -233,7 +235,7 @@ test("summary: the camera fault follows detail.side", () => {
   const s = summarise(DEFAULT_PLAN, all("pass", { camera: fail(null) }), NO_DAMAGE, DEVICE, MODELS);
   assert.deepEqual(faultIds(s), []);
   assert.equal(s.verdict, "faults_found");
-  assert.ok(s.notes.some((n) => /did not say which camera/.test(n)));
+  assert.ok(s.notes.some((n) => /side unknown/.test(n)));
   assert.equal(cameraSide({ side: " Rear " }), "rear");
   assert.equal(cameraSide({ side: 3 }), null);
   assert.equal(cameraSide(undefined), null);
@@ -243,11 +245,21 @@ test("summary: note-only tests never become faults, and say which condition box 
   for (const id of ["flash", "faceid", "vibration", "sensors", "motion", "connectivity", "bluetooth", "nfc"]) {
     const s = summarise(DEFAULT_PLAN, all("pass", { [id]: fail() }), NO_DAMAGE, DEVICE, MODELS);
     assert.deepEqual(faultIds(s), [], `${id} must be a note only`);
-    assert.equal(s.notes.length, 1, `${id} gives one note`);
+    assert.deepEqual(s.notes.filter((n) => n !== CERTIFY_NOTE).length, 1, `${id} gives one note`);
     assert.equal(s.verdict, "faults_found", "a failed test is never 'all passed'");
   }
   const bt = summarise(DEFAULT_PLAN, all("pass", { bluetooth: fail() }), NO_DAMAGE, DEVICE, MODELS);
   assert.match(bt.notes[0], /Wi-Fi \/ Bluetooth faulty/);
+});
+
+test("summary: a failed Wi-Fi / Bluetooth, fingerprint or vibration test proves its priced condition issue — Apply puts it on (withIssues)", () => {
+  const s = summarise(DEFAULT_PLAN, all("pass", { connectivity: fail(), faceid: fail(), vibration: fail(), flash: fail() }), NO_DAMAGE, DEVICE, MODELS);
+  assert.deepEqual(s.issues, ["fingerprint", "vibration", "wifi_bt"]);
+  assert.deepEqual(summarise(DEFAULT_PLAN, all("pass"), NO_DAMAGE, DEVICE, MODELS).issues, []);
+  const base = conditionFromFaults([], { accessories: { charger: true, box: true, bill: false }, age: "3to11m" });
+  const c = withIssues(base, s.issues);
+  assert.deepEqual(c.issues, ["fingerprint", "vibration", "wifi_bt"]);
+  assert.equal(withIssues(c, ["wifi_bt"]), c, "nothing new: the same answers");
 });
 
 test("summary: what the customer declares becomes the matching fault", () => {
@@ -257,12 +269,14 @@ test("summary: what the customer declares becomes the matching fault", () => {
   assert.equal(s.verdict, "faults_found");
 });
 
-test("summary: unanswered damage questions are notes, not passes and not faults", () => {
+test("summary: no answer and 'no' are never passes or faults — the advisor certifies; one note says so", () => {
   const none = summarise(DEFAULT_PLAN, all("pass"), null, DEVICE, MODELS);
   assert.deepEqual(faultIds(none), []);
-  assert.ok(none.notes.some((n) => /has not answered the damage questions/.test(n)));
+  assert.deepEqual(none.notes.filter((n) => /Certify/.test(n)), [CERTIFY_NOTE]);
   const partly = summarise(DEFAULT_PLAN, all("pass"), { screenCracked: false, backCracked: null, liquid: null, imei: null }, DEVICE, MODELS);
-  assert.equal(partly.notes.filter((n) => /did not say/.test(n)).length, 2);
+  assert.deepEqual(faultIds(partly), []);
+  assert.equal(partly.notes.filter((n) => /did not say/.test(n)).length, 0);
+  assert.equal(partly.notes.filter((n) => n === CERTIFY_NOTE).length, 1);
 });
 
 test("summary: everything passed and nothing declared → all_passed, nothing untested", () => {
@@ -270,7 +284,7 @@ test("summary: everything passed and nothing declared → all_passed, nothing un
   assert.equal(s.verdict, "all_passed");
   assert.deepEqual(s.faults, []);
   assert.deepEqual(s.untested, []);
-  assert.deepEqual(s.notes, []);
+  assert.deepEqual(s.notes, [CERTIFY_NOTE], "only that the advisor certifies the condition");
   assert.equal(s.model.modelId, "galaxy-s22");
 });
 
@@ -323,7 +337,7 @@ test("summary: one fault from two tests is listed once with both reasons; order 
 
 test("summary: an emulator run is called out", () => {
   const s = summarise(DEFAULT_PLAN, all("pass"), NO_DAMAGE, { ...DEVICE, isPhysicalDevice: false }, MODELS);
-  assert.ok(s.notes.some((n) => /emulator/.test(n)));
+  assert.ok(s.notes.some((n) => /emulator/i.test(n)));
 });
 
 test("summary: a browser run (appVersion web-…) says so, and what the browser could not test stays UNTESTED", () => {
@@ -332,7 +346,7 @@ test("summary: a browser run (appVersion web-…) says so, and what the browser 
   const results = all("pass", { charging: unsupported, buttons: unsupported, bluetooth: unsupported, nfc: unsupported, faceid: unsupported });
   const s = summarise(DEFAULT_PLAN, results, NO_DAMAGE, WEB, MODELS);
   assert.ok(s.notes.includes(BROWSER_NOTE), "the browser note is in the summary");
-  assert.equal(BROWSER_NOTE, "Tested in a web browser — some tests can't run in a browser; the SwapUp Check app covers more.");
+  assert.equal(BROWSER_NOTE, "Tested in a browser — the SwapUp Check app covers more.");
   assert.deepEqual(
     s.untested.map((u) => u.id),
     DEFAULT_PLAN.map((p) => p.id).filter((id) => ["charging", "buttons", "bluetooth", "nfc", "faceid"].includes(id)),
@@ -551,7 +565,7 @@ test("camera display fold: a LOW-confidence camera fail is 'not tested — check
   const { resultsWithCameraDisplay } = await import("./gradeiqMap.ts");
   const native = all("pass");
   delete native.display;
-  const weak = { cameraChecked: true, verdict: "fail" as const, reason: null, confirmed: false, doubt: "the camera's screen sweep failed with low confidence (50%)" };
+  const weak = { cameraChecked: true, verdict: "fail" as const, reason: null, confirmed: false, doubt: "the screen sweep failed with low confidence (50%)" };
   const w = resultsWithCameraDisplay(native, weak, AT);
   assert.equal(w.display?.outcome, "skip");
   assert.match(String((w.display?.detail as Record<string, unknown>).reason), /low confidence/);

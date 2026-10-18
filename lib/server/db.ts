@@ -70,7 +70,8 @@ export function parseJson<T>(s: string | null | undefined, fallback: T): T {
   }
 }
 
-const MIGRATIONS: string[] = [
+/** The schema, one step per version (exported for the migration tests). */
+export const MIGRATIONS: readonly string[] = [
   /* 1 — initial schema */ `
   CREATE TABLE orgs (
     id TEXT PRIMARY KEY,
@@ -374,7 +375,7 @@ const MIGRATIONS: string[] = [
   /* 10 — BUY vs SELL at the counter. refurb_cost: the store's own cost to put
           the phone right ({amount, by, at}); NOT the customer's repair price
           (manual_repair), so it never moves the advice, the bonus or the
-          partner quote. market_listings: PriceIQ's Cashify refurbished listings
+          partner quote. market_listings: PriceIQ's refurbished-market listings
           (lib/server/marketPrices.ts) — the SELL price. Additive only. */ `
   ALTER TABLE cases ADD COLUMN refurb_cost TEXT;
   CREATE TABLE market_listings (
@@ -393,7 +394,7 @@ const MIGRATIONS: string[] = [
           catalogue (the model comes in one size), customer (a CLAIM typed on
           their phone: locking needs the advisor's "Settings › About phone"
           tick) or advisor. storage_quotes: the partner's what-if price for
-          each size, JSON [{variant, amount, reason, sample}], kept only while
+          each size, JSON [{variant, amount, reason, note}], kept only while
           the storage is unknown so the answer asks with priced chips.
           Additive only. */ `
   ALTER TABLE cases ADD COLUMN variant_source TEXT;
@@ -406,6 +407,87 @@ const MIGRATIONS: string[] = [
           would say "the phone couldn't measure its storage" and offer only
           sizes the phone has ruled out. Additive only. */ `
   ALTER TABLE cases ADD COLUMN measured_storage TEXT;
+  `,
+  /* 13 — the grading report (docs/GRADING.md). report_token: the public link
+          /r/<token> (16 random bytes, base64url), made at the first issue.
+          grading_reports: one row per issued version of a case's report — the
+          body is public-safe JSON (no money, no customer, masked IMEI) and
+          sha256 is the hash of exactly that text; photo_sources (the GradeIQ
+          photo URLs the report proxies by index) never leaves the server.
+          phonecheck_records: one row per Phonecheck check (record_key: the A4
+          report number, else IMEI + test time), from a pull, the webhook or a
+          staff upload; record = the parsed PcRecord, raw = what arrived
+          (capped). attach_override: a manager attached a report whose IMEI
+          differs from the case's. Additive only. */ `
+  ALTER TABLE cases ADD COLUMN report_token TEXT;
+  CREATE UNIQUE INDEX cases_report_token ON cases (report_token) WHERE report_token IS NOT NULL;
+  CREATE TABLE grading_reports (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    version INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    ruleset TEXT NOT NULL,
+    status TEXT NOT NULL,
+    label TEXT NOT NULL,
+    final INTEGER NOT NULL DEFAULT 0,
+    body TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    photo_sources TEXT NOT NULL DEFAULT '[]',
+    issued_at TEXT NOT NULL,
+    issued_by TEXT,
+    UNIQUE (case_id, version)
+  );
+  CREATE TABLE phonecheck_records (
+    id TEXT PRIMARY KEY,
+    record_key TEXT NOT NULL UNIQUE,
+    source TEXT NOT NULL CHECK (source IN ('pull','webhook','upload')),
+    imei TEXT,
+    imei2 TEXT,
+    store_id TEXT REFERENCES stores(id),
+    case_id TEXT REFERENCES cases(id),
+    tested_at TEXT,
+    record TEXT NOT NULL,
+    raw TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    attached_at TEXT,
+    attached_by TEXT,
+    attach_override TEXT
+  );
+  CREATE INDEX phonecheck_imei ON phonecheck_records (imei);
+  CREATE INDEX phonecheck_imei2 ON phonecheck_records (imei2);
+  CREATE INDEX phonecheck_case ON phonecheck_records (case_id);
+  `,
+  /* 14 — the advisor certifies (lib/domain/certify.ts). cases.certification:
+          what the advisor tapped on "Check the phone" in SwapUp Store when the
+          store camera couldn't decide — screen / body / liquid indicator, each
+          with the name, the time and whether the customer's phone was showing
+          the test colours. test_sessions.scan_release: the advisor let the
+          customer's phone go on from its Scan step without the camera
+          ({by, userId, at}) — the customer is no longer asked to skip it.
+          Additive only. */ `
+  ALTER TABLE cases ADD COLUMN certification TEXT;
+  ALTER TABLE test_sessions ADD COLUMN scan_release TEXT;
+  `,
+  /* 15 — PriceIQ LIVE (lib/server/priceiq.ts, contract v1 §3). market_listings
+          is now only the cache of PriceIQ's /api/market-grades answers: one row
+          per grade (its lowest listing) per model + storage, fetched_at = when
+          SwapUp got it (fresh for an hour), observed_at = when the market saw
+          it, points = how many distinct prices; a row with grade '' = "PriceIQ
+          has none". The rows the old bundled snapshot file put there (no
+          fetched_at) are deleted, with the record of that import. And the
+          sample data goes (owner, 2026-10-18 "Remove sample data"): every rate
+          card that isn't a partner's own uploaded card, and the illustrative
+          provenance on catalogue models (their release years are approximate,
+          which is what it now says). */ `
+  ALTER TABLE market_listings ADD COLUMN fetched_at TEXT;
+  ALTER TABLE market_listings ADD COLUMN observed_at TEXT;
+  ALTER TABLE market_listings ADD COLUMN points INTEGER;
+  DELETE FROM market_listings WHERE fetched_at IS NULL;
+  DELETE FROM meta WHERE key LIKE 'priceiq\\_%\\_sell' ESCAPE '\\';
+  DELETE FROM rate_cards WHERE json_extract(data, '$.source.kind') <> 'partner_ratecard';
+  UPDATE trade_models SET source = json_set(source, '$.kind', 'approximate')
+   WHERE json_valid(source) AND json_extract(source, '$.kind') NOT IN ('oem_public', 'client', 'manual', 'approximate');
   `,
 ];
 

@@ -25,7 +25,7 @@ export function PickupTimeline({ p }: { p: PickupView }) {
     {
       label: "Scheduled",
       at: p.scheduledFor,
-      sub: p.scheduledFor ? (p.collectorName ? `collector ${p.collectorName}` : null) : reached >= 2 ? "Collected without a booked slot" : null,
+      sub: p.scheduledFor ? (p.collectorName ? `collector ${p.collectorName}` : null) : reached >= 2 ? "No booked slot" : null,
     },
     { label: "Collected", at: p.collectedAt, sub: p.handoverBy ? `handed over by ${p.handoverBy}` : null },
     {

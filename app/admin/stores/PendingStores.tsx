@@ -24,10 +24,7 @@ export function PendingStores({ stores }: { stores: PendingStore[] }) {
   if (!stores.length) return null;
   return (
     <Card title={`Waiting for approval · ${stores.length}`} className="mb-5 border-[color:var(--warn)]">
-      <p className="hint !mt-0 mb-3 text-[14px]">
-        These stores signed up from the SwapUp Store app. They can already test customers&apos; phones and see quotes; they can&apos;t take a trade-in until you
-        approve them and set a credit limit. Check the manager by phone before approving.
-      </p>
+      <p className="hint !mt-0 mb-3 text-[14px]">Call the manager, then approve and set a credit limit.</p>
       <div className="space-y-3">
         {stores.map((s) => (
           <Row key={s.id} s={s} />

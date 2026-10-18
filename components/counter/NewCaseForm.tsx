@@ -19,7 +19,7 @@ export function NewCaseForm() {
   async function start(e: React.FormEvent) {
     e.preventDefault();
     if (phoneBad) {
-      setError("Enter a 10-digit mobile number, or leave it blank for now.");
+      setError("Enter 10 digits, or leave it blank.");
       return;
     }
     setBusy(true);
@@ -52,14 +52,14 @@ export function NewCaseForm() {
             maxLength={14}
             aria-invalid={phoneBad || undefined}
           />
-          {phoneBad ? <span className="hint" style={{ color: "var(--bad)" }}>A 10-digit Indian mobile starts with 6, 7, 8 or 9.</span> : null}
+          {phoneBad ? <span className="hint" style={{ color: "var(--bad)" }}>10 digits, starting 6–9.</span> : null}
         </label>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button className="btn btn-primary" disabled={busy}>
-          {busy ? "Opening…" : "Start a new case →"}
+          {busy ? "Opening…" : "Start case →"}
         </button>
-        <span className="hint !mt-0">You can add the customer&apos;s details when they decide.</span>
+        <span className="hint !mt-0">Details can wait.</span>
       </div>
       <ErrorText error={error} />
     </form>

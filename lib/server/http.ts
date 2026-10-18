@@ -51,3 +51,34 @@ export function originFromHeaders(h: Headers, defaultProto = "http"): string | n
   if (host && /^[A-Za-z0-9.\-\[\]:]+$/.test(host) && /^https?$/.test(proto)) return `${proto}://${host}`;
   return null;
 }
+
+/**
+ * The request body, read with a running byte count: past `max` the read stops and a 413 is
+ * thrown — whatever Content-Length said, or with none at all (a chunked body). Nothing over
+ * the limit is ever held in memory.
+ */
+export async function readCapped(req: Request, max: number, tooBig: () => Error): Promise<Uint8Array<ArrayBuffer>> {
+  const declared = Number(req.headers.get("content-length") || 0);
+  if (declared > max) throw tooBig();
+  if (!req.body) return new Uint8Array(0);
+  const reader = req.body.getReader();
+  const parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > max) {
+      await reader.cancel().catch(() => {});
+      throw tooBig();
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.byteLength;
+  }
+  return out;
+}

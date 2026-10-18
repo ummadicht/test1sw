@@ -4,7 +4,7 @@ import { ratecardPartnerId, rateCardTemplateCsv } from "@/lib/server/ratecard-ex
 
 /**
  * The upload template as a CSV download: every catalogue model × storage,
- * prices filled in from the partner's own active card (never from the SAMPLE card).
+ * prices filled in from the partner's own active card (blank without one).
  */
 export async function GET(req: Request) {
   try {

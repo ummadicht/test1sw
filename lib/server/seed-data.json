@@ -2546,7 +2546,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2566,7 +2566,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2586,7 +2586,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2606,7 +2606,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2626,7 +2626,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2646,7 +2646,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2666,7 +2666,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2686,7 +2686,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2706,7 +2706,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2726,7 +2726,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2746,7 +2746,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2766,7 +2766,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2786,7 +2786,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2806,7 +2806,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2826,7 +2826,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2846,7 +2846,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2866,7 +2866,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2886,7 +2886,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2906,7 +2906,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2926,7 +2926,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2946,7 +2946,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Release year approximate; update policy not recorded",
     "observedAt": "2026-10-15"
    }
@@ -2966,7 +2966,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Google update policy (5 yrs), release year approximate",
     "observedAt": "2026-10-15"
    }
@@ -2986,7 +2986,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Google update policy (5 yrs), release year approximate",
     "observedAt": "2026-10-15"
    }
@@ -3006,7 +3006,7 @@
    "carePlusFee": null,
    "modelCodes": [],
    "source": {
-    "kind": "sample",
+    "kind": "approximate",
     "label": "Google update policy (7 yrs), release year approximate",
     "observedAt": "2026-10-15"
    }
@@ -7445,1398 +7445,6 @@
     "observedAt": "2026-10-15",
     "label": "Samsung India list price, excl. GST & labour (premium colour / max storage) \u2014 Main Screen Assembly"
    }
-  }
- ],
- "sampleRateCard": [
-  {
-   "modelId": "galaxy-z-fold8-ultra",
-   "variant": "256GB",
-   "maxPrice": 130000
-  },
-  {
-   "modelId": "galaxy-z-fold8-ultra",
-   "variant": "512GB",
-   "maxPrice": 140400
-  },
-  {
-   "modelId": "galaxy-z-fold8",
-   "variant": "256GB",
-   "maxPrice": 100800
-  },
-  {
-   "modelId": "galaxy-z-fold8",
-   "variant": "512GB",
-   "maxPrice": 108800
-  },
-  {
-   "modelId": "galaxy-z-flip8",
-   "variant": "256GB",
-   "maxPrice": 61800
-  },
-  {
-   "modelId": "galaxy-z-flip8",
-   "variant": "512GB",
-   "maxPrice": 66700
-  },
-  {
-   "modelId": "galaxy-z-fold7",
-   "variant": "256GB",
-   "maxPrice": 80600
-  },
-  {
-   "modelId": "galaxy-z-fold7",
-   "variant": "512GB",
-   "maxPrice": 87000
-  },
-  {
-   "modelId": "galaxy-z-flip7",
-   "variant": "256GB",
-   "maxPrice": 49400
-  },
-  {
-   "modelId": "galaxy-z-flip7",
-   "variant": "512GB",
-   "maxPrice": 53400
-  },
-  {
-   "modelId": "galaxy-z-flip7-fe",
-   "variant": "256GB",
-   "maxPrice": 46800
-  },
-  {
-   "modelId": "galaxy-z-flip7-fe",
-   "variant": "512GB",
-   "maxPrice": 50500
-  },
-  {
-   "modelId": "galaxy-z-fold6",
-   "variant": "256GB",
-   "maxPrice": 65100
-  },
-  {
-   "modelId": "galaxy-z-fold6",
-   "variant": "512GB",
-   "maxPrice": 70300
-  },
-  {
-   "modelId": "galaxy-z-flip6",
-   "variant": "256GB",
-   "maxPrice": 39900
-  },
-  {
-   "modelId": "galaxy-z-flip6",
-   "variant": "512GB",
-   "maxPrice": 43100
-  },
-  {
-   "modelId": "galaxy-z-fold5",
-   "variant": "256GB",
-   "maxPrice": 49600
-  },
-  {
-   "modelId": "galaxy-z-fold5",
-   "variant": "512GB",
-   "maxPrice": 53600
-  },
-  {
-   "modelId": "galaxy-z-flip5",
-   "variant": "256GB",
-   "maxPrice": 30400
-  },
-  {
-   "modelId": "galaxy-z-flip5",
-   "variant": "512GB",
-   "maxPrice": 32800
-  },
-  {
-   "modelId": "galaxy-z-fold4",
-   "variant": "256GB",
-   "maxPrice": 37200
-  },
-  {
-   "modelId": "galaxy-z-fold4",
-   "variant": "512GB",
-   "maxPrice": 40200
-  },
-  {
-   "modelId": "galaxy-z-flip4",
-   "variant": "128GB",
-   "maxPrice": 22800
-  },
-  {
-   "modelId": "galaxy-z-flip4",
-   "variant": "256GB",
-   "maxPrice": 24600
-  },
-  {
-   "modelId": "galaxy-s26-fe",
-   "variant": "128GB",
-   "maxPrice": 35800
-  },
-  {
-   "modelId": "galaxy-s26-fe",
-   "variant": "256GB",
-   "maxPrice": 38600
-  },
-  {
-   "modelId": "galaxy-s26-ultra",
-   "variant": "256GB",
-   "maxPrice": 81200
-  },
-  {
-   "modelId": "galaxy-s26-ultra",
-   "variant": "512GB",
-   "maxPrice": 87800
-  },
-  {
-   "modelId": "galaxy-s26-plus",
-   "variant": "256GB",
-   "maxPrice": 58500
-  },
-  {
-   "modelId": "galaxy-s26-plus",
-   "variant": "512GB",
-   "maxPrice": 63200
-  },
-  {
-   "modelId": "galaxy-s26",
-   "variant": "128GB",
-   "maxPrice": 48800
-  },
-  {
-   "modelId": "galaxy-s26",
-   "variant": "256GB",
-   "maxPrice": 52600
-  },
-  {
-   "modelId": "galaxy-s25-edge",
-   "variant": "256GB",
-   "maxPrice": 57200
-  },
-  {
-   "modelId": "galaxy-s25-edge",
-   "variant": "512GB",
-   "maxPrice": 61800
-  },
-  {
-   "modelId": "galaxy-s25-fe",
-   "variant": "128GB",
-   "maxPrice": 28600
-  },
-  {
-   "modelId": "galaxy-s25-fe",
-   "variant": "256GB",
-   "maxPrice": 30900
-  },
-  {
-   "modelId": "galaxy-s25-ultra",
-   "variant": "256GB",
-   "maxPrice": 65000
-  },
-  {
-   "modelId": "galaxy-s25-ultra",
-   "variant": "512GB",
-   "maxPrice": 70200
-  },
-  {
-   "modelId": "galaxy-s25-plus",
-   "variant": "256GB",
-   "maxPrice": 46800
-  },
-  {
-   "modelId": "galaxy-s25-plus",
-   "variant": "512GB",
-   "maxPrice": 50500
-  },
-  {
-   "modelId": "galaxy-s25",
-   "variant": "128GB",
-   "maxPrice": 39000
-  },
-  {
-   "modelId": "galaxy-s25",
-   "variant": "256GB",
-   "maxPrice": 42100
-  },
-  {
-   "modelId": "galaxy-s24-fe",
-   "variant": "128GB",
-   "maxPrice": 23100
-  },
-  {
-   "modelId": "galaxy-s24-fe",
-   "variant": "256GB",
-   "maxPrice": 24900
-  },
-  {
-   "modelId": "galaxy-s24-ultra",
-   "variant": "256GB",
-   "maxPrice": 52500
-  },
-  {
-   "modelId": "galaxy-s24-ultra",
-   "variant": "512GB",
-   "maxPrice": 56700
-  },
-  {
-   "modelId": "galaxy-s24-plus",
-   "variant": "256GB",
-   "maxPrice": 37800
-  },
-  {
-   "modelId": "galaxy-s24-plus",
-   "variant": "512GB",
-   "maxPrice": 40800
-  },
-  {
-   "modelId": "galaxy-s24",
-   "variant": "128GB",
-   "maxPrice": 31500
-  },
-  {
-   "modelId": "galaxy-s24",
-   "variant": "256GB",
-   "maxPrice": 34000
-  },
-  {
-   "modelId": "galaxy-s23-fe",
-   "variant": "128GB",
-   "maxPrice": 17600
-  },
-  {
-   "modelId": "galaxy-s23-fe",
-   "variant": "256GB",
-   "maxPrice": 19000
-  },
-  {
-   "modelId": "galaxy-s23-ultra",
-   "variant": "256GB",
-   "maxPrice": 40000
-  },
-  {
-   "modelId": "galaxy-s23-ultra",
-   "variant": "512GB",
-   "maxPrice": 43200
-  },
-  {
-   "modelId": "galaxy-s23-plus",
-   "variant": "256GB",
-   "maxPrice": 28800
-  },
-  {
-   "modelId": "galaxy-s23-plus",
-   "variant": "512GB",
-   "maxPrice": 31100
-  },
-  {
-   "modelId": "galaxy-s23",
-   "variant": "128GB",
-   "maxPrice": 24000
-  },
-  {
-   "modelId": "galaxy-s23",
-   "variant": "256GB",
-   "maxPrice": 25900
-  },
-  {
-   "modelId": "galaxy-s22-ultra",
-   "variant": "256GB",
-   "maxPrice": 30000
-  },
-  {
-   "modelId": "galaxy-s22-ultra",
-   "variant": "512GB",
-   "maxPrice": 32400
-  },
-  {
-   "modelId": "galaxy-s22-plus",
-   "variant": "256GB",
-   "maxPrice": 21600
-  },
-  {
-   "modelId": "galaxy-s22-plus",
-   "variant": "512GB",
-   "maxPrice": 23300
-  },
-  {
-   "modelId": "galaxy-s22",
-   "variant": "128GB",
-   "maxPrice": 18000
-  },
-  {
-   "modelId": "galaxy-s22",
-   "variant": "256GB",
-   "maxPrice": 19400
-  },
-  {
-   "modelId": "galaxy-s21-fe",
-   "variant": "128GB",
-   "maxPrice": 13200
-  },
-  {
-   "modelId": "galaxy-s21-fe",
-   "variant": "256GB",
-   "maxPrice": 14300
-  },
-  {
-   "modelId": "galaxy-s21",
-   "variant": "128GB",
-   "maxPrice": 13500
-  },
-  {
-   "modelId": "galaxy-s21",
-   "variant": "256GB",
-   "maxPrice": 14600
-  },
-  {
-   "modelId": "galaxy-s21-plus",
-   "variant": "256GB",
-   "maxPrice": 16200
-  },
-  {
-   "modelId": "galaxy-s21-plus",
-   "variant": "512GB",
-   "maxPrice": 17500
-  },
-  {
-   "modelId": "galaxy-s21-ultra",
-   "variant": "256GB",
-   "maxPrice": 22500
-  },
-  {
-   "modelId": "galaxy-s21-ultra",
-   "variant": "512GB",
-   "maxPrice": 24300
-  },
-  {
-   "modelId": "galaxy-a27-5g",
-   "variant": "64GB",
-   "maxPrice": 13000
-  },
-  {
-   "modelId": "galaxy-a27-5g",
-   "variant": "128GB",
-   "maxPrice": 14000
-  },
-  {
-   "modelId": "galaxy-a57-5g",
-   "variant": "128GB",
-   "maxPrice": 24700
-  },
-  {
-   "modelId": "galaxy-a57-5g",
-   "variant": "256GB",
-   "maxPrice": 26700
-  },
-  {
-   "modelId": "galaxy-a37-5g",
-   "variant": "128GB",
-   "maxPrice": 18200
-  },
-  {
-   "modelId": "galaxy-a37-5g",
-   "variant": "256GB",
-   "maxPrice": 19700
-  },
-  {
-   "modelId": "galaxy-a17-5g",
-   "variant": "64GB",
-   "maxPrice": 9800
-  },
-  {
-   "modelId": "galaxy-a17-5g",
-   "variant": "128GB",
-   "maxPrice": 10500
-  },
-  {
-   "modelId": "galaxy-a26-5g",
-   "variant": "64GB",
-   "maxPrice": 10400
-  },
-  {
-   "modelId": "galaxy-a26-5g",
-   "variant": "128GB",
-   "maxPrice": 11200
-  },
-  {
-   "modelId": "galaxy-a36-5g",
-   "variant": "128GB",
-   "maxPrice": 14600
-  },
-  {
-   "modelId": "galaxy-a36-5g",
-   "variant": "256GB",
-   "maxPrice": 15700
-  },
-  {
-   "modelId": "galaxy-a56-5g",
-   "variant": "128GB",
-   "maxPrice": 19800
-  },
-  {
-   "modelId": "galaxy-a56-5g",
-   "variant": "256GB",
-   "maxPrice": 21300
-  },
-  {
-   "modelId": "galaxy-a16-5g",
-   "variant": "64GB",
-   "maxPrice": 7800
-  },
-  {
-   "modelId": "galaxy-a16-5g",
-   "variant": "128GB",
-   "maxPrice": 8400
-  },
-  {
-   "modelId": "galaxy-a55-5g",
-   "variant": "128GB",
-   "maxPrice": 16000
-  },
-  {
-   "modelId": "galaxy-a55-5g",
-   "variant": "256GB",
-   "maxPrice": 17200
-  },
-  {
-   "modelId": "galaxy-a35-5g",
-   "variant": "128GB",
-   "maxPrice": 11800
-  },
-  {
-   "modelId": "galaxy-a35-5g",
-   "variant": "256GB",
-   "maxPrice": 12700
-  },
-  {
-   "modelId": "galaxy-a15-5g",
-   "variant": "64GB",
-   "maxPrice": 6300
-  },
-  {
-   "modelId": "galaxy-a15-5g",
-   "variant": "128GB",
-   "maxPrice": 6800
-  },
-  {
-   "modelId": "galaxy-a25",
-   "variant": "64GB",
-   "maxPrice": 8400
-  },
-  {
-   "modelId": "galaxy-a25",
-   "variant": "128GB",
-   "maxPrice": 9100
-  },
-  {
-   "modelId": "galaxy-a34-5g",
-   "variant": "128GB",
-   "maxPrice": 9000
-  },
-  {
-   "modelId": "galaxy-a34-5g",
-   "variant": "256GB",
-   "maxPrice": 9700
-  },
-  {
-   "modelId": "galaxy-a54-5g",
-   "variant": "128GB",
-   "maxPrice": 12200
-  },
-  {
-   "modelId": "galaxy-a54-5g",
-   "variant": "256GB",
-   "maxPrice": 13100
-  },
-  {
-   "modelId": "galaxy-a14-5g",
-   "variant": "64GB",
-   "maxPrice": 4800
-  },
-  {
-   "modelId": "galaxy-a14-5g",
-   "variant": "128GB",
-   "maxPrice": 5200
-  },
-  {
-   "modelId": "galaxy-a14",
-   "variant": "64GB",
-   "maxPrice": 4800
-  },
-  {
-   "modelId": "galaxy-a14",
-   "variant": "128GB",
-   "maxPrice": 5200
-  },
-  {
-   "modelId": "galaxy-a23-5g",
-   "variant": "64GB",
-   "maxPrice": 4800
-  },
-  {
-   "modelId": "galaxy-a23-5g",
-   "variant": "128GB",
-   "maxPrice": 5200
-  },
-  {
-   "modelId": "galaxy-a73-5g",
-   "variant": "128GB",
-   "maxPrice": 10100
-  },
-  {
-   "modelId": "galaxy-a73-5g",
-   "variant": "256GB",
-   "maxPrice": 10900
-  },
-  {
-   "modelId": "galaxy-a23",
-   "variant": "64GB",
-   "maxPrice": 4800
-  },
-  {
-   "modelId": "galaxy-a23",
-   "variant": "128GB",
-   "maxPrice": 5200
-  },
-  {
-   "modelId": "galaxy-a33",
-   "variant": "128GB",
-   "maxPrice": 6700
-  },
-  {
-   "modelId": "galaxy-a33",
-   "variant": "256GB",
-   "maxPrice": 7300
-  },
-  {
-   "modelId": "galaxy-a53",
-   "variant": "128GB",
-   "maxPrice": 9100
-  },
-  {
-   "modelId": "galaxy-a53",
-   "variant": "256GB",
-   "maxPrice": 9800
-  },
-  {
-   "modelId": "galaxy-a52s",
-   "variant": "128GB",
-   "maxPrice": 6800
-  },
-  {
-   "modelId": "galaxy-a52s",
-   "variant": "256GB",
-   "maxPrice": 7400
-  },
-  {
-   "modelId": "galaxy-a22",
-   "variant": "64GB",
-   "maxPrice": 3600
-  },
-  {
-   "modelId": "galaxy-a22",
-   "variant": "128GB",
-   "maxPrice": 3900
-  },
-  {
-   "modelId": "galaxy-a22-5g",
-   "variant": "64GB",
-   "maxPrice": 3600
-  },
-  {
-   "modelId": "galaxy-a22-5g",
-   "variant": "128GB",
-   "maxPrice": 3900
-  },
-  {
-   "modelId": "galaxy-a72",
-   "variant": "128GB",
-   "maxPrice": 7600
-  },
-  {
-   "modelId": "galaxy-a72",
-   "variant": "256GB",
-   "maxPrice": 8200
-  },
-  {
-   "modelId": "galaxy-a52",
-   "variant": "128GB",
-   "maxPrice": 6800
-  },
-  {
-   "modelId": "galaxy-a52",
-   "variant": "256GB",
-   "maxPrice": 7400
-  },
-  {
-   "modelId": "galaxy-a32",
-   "variant": "128GB",
-   "maxPrice": 5000
-  },
-  {
-   "modelId": "galaxy-a32",
-   "variant": "256GB",
-   "maxPrice": 5400
-  },
-  {
-   "modelId": "galaxy-m08",
-   "variant": "64GB",
-   "maxPrice": 5800
-  },
-  {
-   "modelId": "galaxy-m08",
-   "variant": "128GB",
-   "maxPrice": 6300
-  },
-  {
-   "modelId": "galaxy-m47-5g",
-   "variant": "128GB",
-   "maxPrice": 16900
-  },
-  {
-   "modelId": "galaxy-m47-5g",
-   "variant": "256GB",
-   "maxPrice": 18300
-  },
-  {
-   "modelId": "galaxy-m17e-5g",
-   "variant": "64GB",
-   "maxPrice": 7800
-  },
-  {
-   "modelId": "galaxy-m17e-5g",
-   "variant": "128GB",
-   "maxPrice": 8400
-  },
-  {
-   "modelId": "galaxy-m17-5g",
-   "variant": "64GB",
-   "maxPrice": 7800
-  },
-  {
-   "modelId": "galaxy-m17-5g",
-   "variant": "128GB",
-   "maxPrice": 8400
-  },
-  {
-   "modelId": "galaxy-m36-5g",
-   "variant": "128GB",
-   "maxPrice": 9400
-  },
-  {
-   "modelId": "galaxy-m36-5g",
-   "variant": "256GB",
-   "maxPrice": 10100
-  },
-  {
-   "modelId": "galaxy-m16-5g",
-   "variant": "64GB",
-   "maxPrice": 6200
-  },
-  {
-   "modelId": "galaxy-m16-5g",
-   "variant": "128GB",
-   "maxPrice": 6700
-  },
-  {
-   "modelId": "galaxy-m56-5g",
-   "variant": "128GB",
-   "maxPrice": 13500
-  },
-  {
-   "modelId": "galaxy-m56-5g",
-   "variant": "256GB",
-   "maxPrice": 14600
-  },
-  {
-   "modelId": "galaxy-m07",
-   "variant": "64GB",
-   "maxPrice": 5800
-  },
-  {
-   "modelId": "galaxy-m07",
-   "variant": "128GB",
-   "maxPrice": 6300
-  },
-  {
-   "modelId": "galaxy-m06-5g",
-   "variant": "64GB",
-   "maxPrice": 4700
-  },
-  {
-   "modelId": "galaxy-m06-5g",
-   "variant": "128GB",
-   "maxPrice": 5100
-  },
-  {
-   "modelId": "galaxy-m05",
-   "variant": "64GB",
-   "maxPrice": 3800
-  },
-  {
-   "modelId": "galaxy-m05",
-   "variant": "128GB",
-   "maxPrice": 4100
-  },
-  {
-   "modelId": "galaxy-m35-5g",
-   "variant": "128GB",
-   "maxPrice": 7600
-  },
-  {
-   "modelId": "galaxy-m35-5g",
-   "variant": "256GB",
-   "maxPrice": 8200
-  },
-  {
-   "modelId": "galaxy-m55s-5g",
-   "variant": "128GB",
-   "maxPrice": 10900
-  },
-  {
-   "modelId": "galaxy-m55s-5g",
-   "variant": "256GB",
-   "maxPrice": 11800
-  },
-  {
-   "modelId": "galaxy-m55-5g",
-   "variant": "128GB",
-   "maxPrice": 10900
-  },
-  {
-   "modelId": "galaxy-m55-5g",
-   "variant": "256GB",
-   "maxPrice": 11800
-  },
-  {
-   "modelId": "galaxy-m15-5g",
-   "variant": "64GB",
-   "maxPrice": 5000
-  },
-  {
-   "modelId": "galaxy-m15-5g",
-   "variant": "128GB",
-   "maxPrice": 5400
-  },
-  {
-   "modelId": "galaxy-m34-5g",
-   "variant": "128GB",
-   "maxPrice": 5800
-  },
-  {
-   "modelId": "galaxy-m34-5g",
-   "variant": "256GB",
-   "maxPrice": 6200
-  },
-  {
-   "modelId": "galaxy-m14-5g",
-   "variant": "64GB",
-   "maxPrice": 3800
-  },
-  {
-   "modelId": "galaxy-m14-5g",
-   "variant": "128GB",
-   "maxPrice": 4100
-  },
-  {
-   "modelId": "galaxy-m33-5g",
-   "variant": "128GB",
-   "maxPrice": 4300
-  },
-  {
-   "modelId": "galaxy-m33-5g",
-   "variant": "256GB",
-   "maxPrice": 4700
-  },
-  {
-   "modelId": "galaxy-m13-5g",
-   "variant": "64GB",
-   "maxPrice": 2900
-  },
-  {
-   "modelId": "galaxy-m13-5g",
-   "variant": "128GB",
-   "maxPrice": 3100
-  },
-  {
-   "modelId": "galaxy-m14",
-   "variant": "64GB",
-   "maxPrice": 3800
-  },
-  {
-   "modelId": "galaxy-m14",
-   "variant": "128GB",
-   "maxPrice": 4100
-  },
-  {
-   "modelId": "galaxy-m13",
-   "variant": "64GB",
-   "maxPrice": 2900
-  },
-  {
-   "modelId": "galaxy-m13",
-   "variant": "128GB",
-   "maxPrice": 3100
-  },
-  {
-   "modelId": "galaxy-m52-5g",
-   "variant": "128GB",
-   "maxPrice": 4700
-  },
-  {
-   "modelId": "galaxy-m52-5g",
-   "variant": "256GB",
-   "maxPrice": 5100
-  },
-  {
-   "modelId": "galaxy-m32-5g",
-   "variant": "128GB",
-   "maxPrice": 3200
-  },
-  {
-   "modelId": "galaxy-m32-5g",
-   "variant": "256GB",
-   "maxPrice": 3500
-  },
-  {
-   "modelId": "galaxy-m53-5g",
-   "variant": "128GB",
-   "maxPrice": 6200
-  },
-  {
-   "modelId": "galaxy-m53-5g",
-   "variant": "256GB",
-   "maxPrice": 6700
-  },
-  {
-   "modelId": "galaxy-m04",
-   "variant": "64GB",
-   "maxPrice": 2900
-  },
-  {
-   "modelId": "galaxy-m04",
-   "variant": "128GB",
-   "maxPrice": 3100
-  },
-  {
-   "modelId": "galaxy-m42-5g",
-   "variant": "128GB",
-   "maxPrice": 4000
-  },
-  {
-   "modelId": "galaxy-m42-5g",
-   "variant": "256GB",
-   "maxPrice": 4300
-  },
-  {
-   "modelId": "galaxy-m32",
-   "variant": "128GB",
-   "maxPrice": 3200
-  },
-  {
-   "modelId": "galaxy-m32",
-   "variant": "256GB",
-   "maxPrice": 3500
-  },
-  {
-   "modelId": "galaxy-m21-2021-edition",
-   "variant": "64GB",
-   "maxPrice": 2700
-  },
-  {
-   "modelId": "galaxy-m21-2021-edition",
-   "variant": "128GB",
-   "maxPrice": 2900
-  },
-  {
-   "modelId": "galaxy-m12",
-   "variant": "64GB",
-   "maxPrice": 2200
-  },
-  {
-   "modelId": "galaxy-m12",
-   "variant": "128GB",
-   "maxPrice": 2300
-  },
-  {
-   "modelId": "galaxy-m02",
-   "variant": "64GB",
-   "maxPrice": 1600
-  },
-  {
-   "modelId": "galaxy-m02",
-   "variant": "128GB",
-   "maxPrice": 1700
-  },
-  {
-   "modelId": "galaxy-f08",
-   "variant": "64GB",
-   "maxPrice": 5800
-  },
-  {
-   "modelId": "galaxy-f08",
-   "variant": "128GB",
-   "maxPrice": 6300
-  },
-  {
-   "modelId": "galaxy-f70-pro-5g",
-   "variant": "128GB",
-   "maxPrice": 19500
-  },
-  {
-   "modelId": "galaxy-f70-pro-5g",
-   "variant": "256GB",
-   "maxPrice": 21100
-  },
-  {
-   "modelId": "galaxy-f70e-5g",
-   "variant": "128GB",
-   "maxPrice": 19500
-  },
-  {
-   "modelId": "galaxy-f70e-5g",
-   "variant": "256GB",
-   "maxPrice": 21100
-  },
-  {
-   "modelId": "galaxy-f36-5g",
-   "variant": "128GB",
-   "maxPrice": 9400
-  },
-  {
-   "modelId": "galaxy-f36-5g",
-   "variant": "256GB",
-   "maxPrice": 10100
-  },
-  {
-   "modelId": "galaxy-f17-5g",
-   "variant": "64GB",
-   "maxPrice": 7800
-  },
-  {
-   "modelId": "galaxy-f17-5g",
-   "variant": "128GB",
-   "maxPrice": 8400
-  },
-  {
-   "modelId": "galaxy-f07",
-   "variant": "64GB",
-   "maxPrice": 5800
-  },
-  {
-   "modelId": "galaxy-f07",
-   "variant": "128GB",
-   "maxPrice": 6300
-  },
-  {
-   "modelId": "galaxy-f56-5g",
-   "variant": "128GB",
-   "maxPrice": 13500
-  },
-  {
-   "modelId": "galaxy-f56-5g",
-   "variant": "256GB",
-   "maxPrice": 14600
-  },
-  {
-   "modelId": "galaxy-f16-5g",
-   "variant": "64GB",
-   "maxPrice": 6200
-  },
-  {
-   "modelId": "galaxy-f16-5g",
-   "variant": "128GB",
-   "maxPrice": 6700
-  },
-  {
-   "modelId": "galaxy-f06-5g",
-   "variant": "64GB",
-   "maxPrice": 4700
-  },
-  {
-   "modelId": "galaxy-f06-5g",
-   "variant": "128GB",
-   "maxPrice": 5100
-  },
-  {
-   "modelId": "galaxy-f55-5g",
-   "variant": "128GB",
-   "maxPrice": 10900
-  },
-  {
-   "modelId": "galaxy-f55-5g",
-   "variant": "256GB",
-   "maxPrice": 11800
-  },
-  {
-   "modelId": "galaxy-f15-5g",
-   "variant": "64GB",
-   "maxPrice": 5000
-  },
-  {
-   "modelId": "galaxy-f15-5g",
-   "variant": "128GB",
-   "maxPrice": 5400
-  },
-  {
-   "modelId": "galaxy-f34-5g",
-   "variant": "128GB",
-   "maxPrice": 5800
-  },
-  {
-   "modelId": "galaxy-f34-5g",
-   "variant": "256GB",
-   "maxPrice": 6200
-  },
-  {
-   "modelId": "galaxy-f54-5g",
-   "variant": "128GB",
-   "maxPrice": 8300
-  },
-  {
-   "modelId": "galaxy-f54-5g",
-   "variant": "256GB",
-   "maxPrice": 9000
-  },
-  {
-   "modelId": "galaxy-f04",
-   "variant": "64GB",
-   "maxPrice": 2900
-  },
-  {
-   "modelId": "galaxy-f04",
-   "variant": "128GB",
-   "maxPrice": 3100
-  },
-  {
-   "modelId": "galaxy-f14-5g",
-   "variant": "64GB",
-   "maxPrice": 3800
-  },
-  {
-   "modelId": "galaxy-f14-5g",
-   "variant": "128GB",
-   "maxPrice": 4100
-  },
-  {
-   "modelId": "galaxy-f14",
-   "variant": "64GB",
-   "maxPrice": 3800
-  },
-  {
-   "modelId": "galaxy-f14",
-   "variant": "128GB",
-   "maxPrice": 4100
-  },
-  {
-   "modelId": "galaxy-f13",
-   "variant": "64GB",
-   "maxPrice": 2900
-  },
-  {
-   "modelId": "galaxy-f13",
-   "variant": "128GB",
-   "maxPrice": 3100
-  },
-  {
-   "modelId": "galaxy-f23",
-   "variant": "64GB",
-   "maxPrice": 3600
-  },
-  {
-   "modelId": "galaxy-f23",
-   "variant": "128GB",
-   "maxPrice": 3900
-  },
-  {
-   "modelId": "galaxy-f42-5g",
-   "variant": "128GB",
-   "maxPrice": 4000
-  },
-  {
-   "modelId": "galaxy-f42-5g",
-   "variant": "256GB",
-   "maxPrice": 4300
-  },
-  {
-   "modelId": "galaxy-f22",
-   "variant": "64GB",
-   "maxPrice": 2700
-  },
-  {
-   "modelId": "galaxy-f22",
-   "variant": "128GB",
-   "maxPrice": 2900
-  },
-  {
-   "modelId": "galaxy-f12",
-   "variant": "64GB",
-   "maxPrice": 2200
-  },
-  {
-   "modelId": "galaxy-f12",
-   "variant": "128GB",
-   "maxPrice": 2300
-  },
-  {
-   "modelId": "galaxy-f02s",
-   "variant": "64GB",
-   "maxPrice": 1600
-  },
-  {
-   "modelId": "galaxy-f02s",
-   "variant": "128GB",
-   "maxPrice": 1700
-  },
-  {
-   "modelId": "galaxy-f62",
-   "variant": "128GB",
-   "maxPrice": 4300
-  },
-  {
-   "modelId": "galaxy-f62",
-   "variant": "256GB",
-   "maxPrice": 4700
-  },
-  {
-   "modelId": "iphone-11",
-   "variant": "128GB",
-   "maxPrice": 11800
-  },
-  {
-   "modelId": "iphone-11",
-   "variant": "256GB",
-   "maxPrice": 12800
-  },
-  {
-   "modelId": "iphone-12",
-   "variant": "128GB",
-   "maxPrice": 12700
-  },
-  {
-   "modelId": "iphone-12",
-   "variant": "256GB",
-   "maxPrice": 13800
-  },
-  {
-   "modelId": "iphone-13",
-   "variant": "128GB",
-   "maxPrice": 17600
-  },
-  {
-   "modelId": "iphone-13",
-   "variant": "256GB",
-   "maxPrice": 19100
-  },
-  {
-   "modelId": "iphone-13-pro",
-   "variant": "128GB",
-   "maxPrice": 30200
-  },
-  {
-   "modelId": "iphone-13-pro",
-   "variant": "256GB",
-   "maxPrice": 32700
-  },
-  {
-   "modelId": "iphone-14",
-   "variant": "128GB",
-   "maxPrice": 26900
-  },
-  {
-   "modelId": "iphone-14",
-   "variant": "256GB",
-   "maxPrice": 29000
-  },
-  {
-   "modelId": "iphone-14-pro",
-   "variant": "128GB",
-   "maxPrice": 43700
-  },
-  {
-   "modelId": "iphone-14-pro",
-   "variant": "256GB",
-   "maxPrice": 47200
-  },
-  {
-   "modelId": "iphone-15",
-   "variant": "128GB",
-   "maxPrice": 35800
-  },
-  {
-   "modelId": "iphone-15",
-   "variant": "256GB",
-   "maxPrice": 38700
-  },
-  {
-   "modelId": "iphone-15-pro",
-   "variant": "128GB",
-   "maxPrice": 60500
-  },
-  {
-   "modelId": "iphone-15-pro",
-   "variant": "256GB",
-   "maxPrice": 65300
-  },
-  {
-   "modelId": "iphone-16",
-   "variant": "128GB",
-   "maxPrice": 47000
-  },
-  {
-   "modelId": "iphone-16",
-   "variant": "256GB",
-   "maxPrice": 50800
-  },
-  {
-   "modelId": "oneplus-9",
-   "variant": "128GB",
-   "maxPrice": 9000
-  },
-  {
-   "modelId": "oneplus-9",
-   "variant": "256GB",
-   "maxPrice": 9700
-  },
-  {
-   "modelId": "oneplus-10r",
-   "variant": "128GB",
-   "maxPrice": 9100
-  },
-  {
-   "modelId": "oneplus-10r",
-   "variant": "256GB",
-   "maxPrice": 9800
-  },
-  {
-   "modelId": "oneplus-11",
-   "variant": "128GB",
-   "maxPrice": 18200
-  },
-  {
-   "modelId": "oneplus-11",
-   "variant": "256GB",
-   "maxPrice": 19700
-  },
-  {
-   "modelId": "oneplus-12",
-   "variant": "128GB",
-   "maxPrice": 27300
-  },
-  {
-   "modelId": "oneplus-12",
-   "variant": "256GB",
-   "maxPrice": 29500
-  },
-  {
-   "modelId": "oneplus-nord-ce-3",
-   "variant": "128GB",
-   "maxPrice": 8600
-  },
-  {
-   "modelId": "oneplus-nord-ce-3",
-   "variant": "256GB",
-   "maxPrice": 9300
-  },
-  {
-   "modelId": "redmi-note-11",
-   "variant": "128GB",
-   "maxPrice": 3400
-  },
-  {
-   "modelId": "redmi-note-11",
-   "variant": "256GB",
-   "maxPrice": 3600
-  },
-  {
-   "modelId": "redmi-note-12",
-   "variant": "128GB",
-   "maxPrice": 5400
-  },
-  {
-   "modelId": "redmi-note-12",
-   "variant": "256GB",
-   "maxPrice": 5900
-  },
-  {
-   "modelId": "redmi-note-13-pro",
-   "variant": "128GB",
-   "maxPrice": 10900
-  },
-  {
-   "modelId": "redmi-note-13-pro",
-   "variant": "256GB",
-   "maxPrice": 11800
-  },
-  {
-   "modelId": "vivo-v27",
-   "variant": "128GB",
-   "maxPrice": 10600
-  },
-  {
-   "modelId": "vivo-v27",
-   "variant": "256GB",
-   "maxPrice": 11400
-  },
-  {
-   "modelId": "vivo-v29",
-   "variant": "128GB",
-   "maxPrice": 10600
-  },
-  {
-   "modelId": "vivo-v29",
-   "variant": "256GB",
-   "maxPrice": 11400
-  },
-  {
-   "modelId": "oppo-reno-8",
-   "variant": "128GB",
-   "maxPrice": 7200
-  },
-  {
-   "modelId": "oppo-reno-8",
-   "variant": "256GB",
-   "maxPrice": 7800
-  },
-  {
-   "modelId": "oppo-reno-10",
-   "variant": "128GB",
-   "maxPrice": 10600
-  },
-  {
-   "modelId": "oppo-reno-10",
-   "variant": "256GB",
-   "maxPrice": 11400
-  },
-  {
-   "modelId": "pixel-6a",
-   "variant": "128GB",
-   "maxPrice": 10600
-  },
-  {
-   "modelId": "pixel-6a",
-   "variant": "256GB",
-   "maxPrice": 11400
-  },
-  {
-   "modelId": "pixel-7",
-   "variant": "128GB",
-   "maxPrice": 14400
-  },
-  {
-   "modelId": "pixel-7",
-   "variant": "256GB",
-   "maxPrice": 15600
-  },
-  {
-   "modelId": "pixel-8",
-   "variant": "128GB",
-   "maxPrice": 24300
-  },
-  {
-   "modelId": "pixel-8",
-   "variant": "256GB",
-   "maxPrice": 26300
   }
  ],
  "newDevices": [

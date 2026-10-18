@@ -2,12 +2,11 @@ import Link from "next/link";
 import Form from "next/form";
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
-import { Banner, Card, Empty } from "@/components/ui";
+import { Card, Empty } from "@/components/ui";
 import { CasesListTable } from "./CasesListTable";
 import { requirePage } from "@/lib/server/page";
 import { listCases } from "@/lib/server/cases";
 import { storesForUser } from "@/lib/server/scope";
-import { tradeSources } from "@/lib/server/pickups-extra";
 import { CASE_STATUS_LABEL, type CaseStatus } from "@/lib/domain/lifecycle";
 
 export const dynamic = "force-dynamic";
@@ -53,8 +52,6 @@ export default async function CasesPage({ searchParams }: { searchParams: SP }) 
 
   const cases = listCases(u, { q: q || null, status: status.length ? status : null, limit: LIMIT });
   const showStore = storesForUser(u).length > 1;
-  const sources = tradeSources(cases.map((c) => c.id));
-  const samples = cases.filter((c) => sources[c.id]?.kind === "sample").map((c) => c.id);
 
   // A partner never sees cases before the trade-in is taken, so "At the counter" would always be empty for them.
   const groups = GROUPS.filter((g) => !(isPartner && g.key === "counter"));
@@ -69,10 +66,10 @@ export default async function CasesPage({ searchParams }: { searchParams: SP }) 
           <h1 className="text-[26px] sm:text-[30px] font-[750] tracking-tight">{title}</h1>
           <p className="text-[15px] text-ink-2">
             {isPartner
-              ? "Every traded-in phone from the programmes you serve, newest activity first."
+              ? "Traded-in phones, newest first."
               : u.role === "advisor" || u.role === "store_manager"
-                ? "Every customer this store has seen at the counter, newest activity first."
-                : "Every case across your stores, newest activity first."}
+                ? "This store's cases, newest first."
+                : "All your stores' cases, newest first."}
           </p>
         </div>
 
@@ -111,14 +108,6 @@ export default async function CasesPage({ searchParams }: { searchParams: SP }) 
             </nav>
           </div>
 
-          {samples.length ? (
-            <div className="px-5 pt-4">
-              <Banner tone="sample">
-                Trade-in values marked <strong>◆ SAMPLE</strong>{" "}come from an illustrative rate card, not the buyback partner&apos;s prices.
-              </Banner>
-            </div>
-          ) : null}
-
           {cases.length === 0 ? (
             filtered ? (
               <Empty title="No cases match">
@@ -139,18 +128,18 @@ export default async function CasesPage({ searchParams }: { searchParams: SP }) 
                     .
                   </>
                 ) : isPartner ? (
-                  "Phones appear here once a store takes them in on trade."
+                  "Traded-in phones show here."
                 ) : (
-                  "Cases appear here as stores start using the counter."
+                  "Cases show here."
                 )}
               </Empty>
             )
           ) : (
             <div className="px-5 pb-3">
-              <CasesListTable cases={cases} showStore={showStore} partnerView={isPartner} samples={samples} />
+              <CasesListTable cases={cases} showStore={showStore} partnerView={isPartner} />
               <p className="hint pb-2">
                 {cases.length >= LIMIT
-                  ? `Showing the ${LIMIT} most recently updated — search to narrow it down.`
+                  ? `Latest ${LIMIT} — search to narrow.`
                   : `${cases.length} ${cases.length === 1 ? "case" : "cases"}${filtered ? " match" : ""}.`}
               </p>
             </div>

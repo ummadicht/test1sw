@@ -10,25 +10,20 @@ import { webAppInfo } from "@/lib/server/downloads";
 export function TestPhoneCard() {
   const web = webAppInfo("store");
   return (
-    <Card title="Test the customer's phone">
-      <p className="text-[14.5px] text-ink-2 leading-relaxed">
-        The customer scans a QR and tests their own phone — in their browser, no install, or with the SwapUp Check app. Faults, model and storage
-        land here on the case.
-      </p>
+    <Card title="Test the phone">
+      <p className="text-[14.5px] text-ink-2 leading-relaxed">The customer scans a QR and tests their own phone.</p>
       {web ? (
         <>
           <a className="btn btn-primary mt-4 w-full whitespace-normal text-center" href={web.path} target="_blank" rel="noopener" data-choice="store-web">
-            Open SwapUp Store in this browser
+            Open SwapUp Store
           </a>
-          <p className="hint">
-            Same username and password as this desk — sign in once there. It keeps its own sign-in, separate from this page&apos;s. Then tap <b>New customer trade-in</b>.
-          </p>
+          <p className="hint">Same login as this desk. Then start a new trade-in.</p>
         </>
       ) : (
-        <p className="mt-3 text-warn text-[14px]">The browser version of SwapUp Store is not published yet.</p>
+        <p className="mt-3 text-warn text-[14px]">SwapUp Store web isn&apos;t published yet.</p>
       )}
       <p className="hint">
-        On the counter&apos;s Android phone? <a href="/downloads#store">Install the SwapUp Store app</a>.
+        Android? <a href="/downloads#store">Install SwapUp Store</a>.
       </p>
     </Card>
   );

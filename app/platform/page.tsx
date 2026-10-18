@@ -15,10 +15,8 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Clients & partners" };
 
 function ModePill({ mode }: { mode: PartnerMode }) {
-  if (mode.kind === "partner_live") return <span className="pill pill-up">● Live partner API</span>;
   if (mode.kind === "partner_ratecard") return <span className="pill pill-fix">Partner rate card</span>;
-  if (mode.rateCardId) return <span className="pill pill-sample">◆ SAMPLE rate card</span>;
-  return <span className="pill pill-bad">No rate card</span>;
+  return <span className="pill">No rate card — PriceIQ or a typed quote</span>;
 }
 
 function Meta({ label, children }: { label: string; children: ReactNode }) {
@@ -52,10 +50,7 @@ export default async function PlatformPage() {
       <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
         <div>
           <h1 className="text-[26px] font-[750] tracking-tight leading-tight">Clients &amp; partners</h1>
-          <p className="hint !mt-1 max-w-2xl">
-            Every programme SwapUp runs, and the buyback partners that price and collect their trade-ins. A new client needs stores, then people,
-            before its counters can quote.
-          </p>
+          <p className="hint !mt-1 max-w-2xl">Programmes and their buyback partners.</p>
         </div>
         <Link href="/platform/users" className="btn">
           All users
@@ -77,7 +72,6 @@ export default async function PlatformPage() {
           {clients.map((c) => {
             const mode = c.partnerId ? modes.get(c.partnerId) : undefined;
             const outside = outsideBand(c);
-            const sampleBlocksLocks = !c.demo && mode && mode.kind !== "partner_live" && mode.kind !== "partner_ratecard";
             return (
               <section key={c.id} className="card">
                 <div className="card-pad">
@@ -86,7 +80,7 @@ export default async function PlatformPage() {
                       <h3 className="text-[19px] font-[750] tracking-tight leading-snug">{c.name}</h3>
                       <div className="mt-1.5 flex flex-wrap gap-2">
                         <span className="pill pill-fix">Client</span>
-                        {c.demo ? <span className="pill pill-sample">◆ Demo programme</span> : <span className="pill pill-up">Live programme</span>}
+                        {c.demo ? <span className="pill pill-test">◆ Test programme — no real money</span> : <span className="pill pill-up">Live programme</span>}
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -121,15 +115,6 @@ export default async function PlatformPage() {
                     </Meta>
                   </dl>
 
-                  {sampleBlocksLocks ? (
-                    <div className="banner banner-warn mt-4">
-                      <span aria-hidden>⚠</span>
-                      <div>
-                        {c.partnerName ?? "The partner"} is not on its own rate card yet ({mode.label}), so this client&apos;s stores can quote but cannot
-                        lock a trade-in.
-                      </div>
-                    </div>
-                  ) : null}
                   {c.stores === 0 ? (
                     <div className="banner mt-4">
                       <span aria-hidden>ℹ</span>

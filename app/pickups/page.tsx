@@ -5,7 +5,6 @@ import { Card, Empty } from "@/components/ui";
 import { PickupTable, type PickupCol } from "@/components/pickups/PickupTable";
 import { requirePage } from "@/lib/server/page";
 import { listPickups } from "@/lib/server/pickups";
-import { tradeSources } from "@/lib/server/pickups-extra";
 import { nowIso } from "@/lib/server/db";
 import { PICKUP_STATUS_LABEL, type PickupStatus } from "@/lib/domain/lifecycle";
 
@@ -30,8 +29,6 @@ export default async function PickupsPage({ searchParams }: { searchParams: SP }
   const sp = await searchParams;
   const f = FILTERS.find((x) => x.key === one(sp.show)) ?? FILTERS[0];
   const pickups = listPickups(u, { status: f.statuses.length ? f.statuses : null });
-  const sources = tradeSources(pickups.flatMap((p) => p.items.map((i) => i.id)));
-  const sample = pickups.filter((p) => p.items.some((i) => sources[i.id]?.kind === "sample")).map((p) => p.id);
   const multiClient = new Set(pickups.map((p) => p.orgId)).size > 1;
   const multiStore = new Set(pickups.map((p) => p.storeId)).size > 1 || u.role !== "store_manager";
   const cols: PickupCol[] = [
@@ -72,10 +69,10 @@ export default async function PickupsPage({ searchParams }: { searchParams: SP }
         </nav>
         <Card pad={false}>
           {pickups.length === 0 ? (
-            <Empty title="No pickups here">{f.key ? "Try another filter." : "Pickups appear once a store manager books one."}</Empty>
+            <Empty title="No pickups here">{f.key ? "Try another filter." : "Booked pickups show here."}</Empty>
           ) : (
             <div className="px-5 py-3">
-              <PickupTable pickups={pickups} cols={cols} now={nowIso()} sample={sample} />
+              <PickupTable pickups={pickups} cols={cols} now={nowIso()} />
             </div>
           )}
         </Card>

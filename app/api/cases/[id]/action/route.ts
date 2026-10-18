@@ -8,6 +8,7 @@ import {
   cancelTradeIn,
   recordDataClear,
   setBonusOverride,
+  certifyCase,
   type CaseView,
   type LockInput,
 } from "@/lib/server/cases";
@@ -21,6 +22,9 @@ type ActionBody = {
   bp?: unknown;
   steps?: Record<string, unknown>;
   note?: unknown;
+  row?: unknown;
+  value?: unknown;
+  testSessionId?: unknown;
 };
 
 /**
@@ -39,7 +43,7 @@ async function transition(fn: () => CaseView | Promise<CaseView>): Promise<CaseV
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-/** One door for every case action: reprice, choose_repair, walk_away, lock, cancel, data_clear, bonus_override. */
+/** One door for every case action: reprice, choose_repair, walk_away, lock, cancel, data_clear, bonus_override, certify. */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   return handle(async () => {
     const u = await requireUser();
@@ -60,6 +64,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         return transition(() => cancelTradeIn(u, id, str(b.reason) ?? ""));
       case "data_clear":
         return recordDataClear(u, id, { ...(b.steps ?? {}), note: b.note });
+      // The advisor certifies one row of "Check the phone" by eye: {row: screen|body|liquid, value, testSessionId?}.
+      case "certify":
+        return certifyCase(u, id, { row: b.row, value: b.value, testSessionId: b.testSessionId });
       case "bonus_override": {
         if (b.bp !== null && typeof b.bp !== "number") throw new HttpError(400, "Send the bonus in basis points, or null to reset it.");
         return setBonusOverride(u, id, { bp: b.bp, reason: str(b.reason) });

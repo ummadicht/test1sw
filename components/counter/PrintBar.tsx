@@ -7,7 +7,7 @@ export function PrintBar({ back, label = "Print" }: { back: string; label?: stri
   return (
     <div className="no-print flex items-center justify-between gap-3 mb-5">
       <Link href={back} className="btn btn-sm btn-ghost">
-        ← Back to the case
+        ← Back
       </Link>
       <button type="button" className="btn btn-sm btn-primary" onClick={() => window.print()}>
         {label}

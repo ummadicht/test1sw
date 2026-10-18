@@ -293,12 +293,11 @@ function OneTimePassword({ secret, onDone }: { secret: OneTime; onDone: () => vo
             {copied === "yes" ? "Copied" : "Copy"}
           </button>
         </div>
-        {copied === "failed" ? <p className="hint">This browser blocked copying — select the password and copy it by hand.</p> : null}
+        {copied === "failed" ? <p className="hint">Copy blocked — copy it by hand.</p> : null}
         <div className="banner banner-warn mt-4">
           <span aria-hidden>⚠</span>
           <div>
-            <strong>Shown once.</strong> Give it to them in person — not by WhatsApp or email. SwapUp does not keep it, so if it is lost, reset it
-            again. They should change it from <em>Account</em> after signing in.
+            <strong>Shown once.</strong> Hand it over in person, not by WhatsApp or email.
           </div>
         </div>
         <button className="btn btn-primary mt-4" onClick={onDone}>
@@ -390,7 +389,7 @@ function AddPerson({
           <Field label="Full name">
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required minLength={2} maxLength={80} />
           </Field>
-          <Field label="Username" hint="What they type to sign in: 3–32 lowercase letters, digits, dot, dash or underscore.">
+          <Field label="Username" hint="3–32 lowercase letters, digits, . - _">
             <input
               className="input num"
               value={username_}
@@ -472,13 +471,13 @@ function AddPerson({
                   Add a store first
                 </Link>
               ) : (
-                "Ask the programme admin to add the store first."
+                "Ask your admin to add the store."
               )}
             </div>
           </div>
         ) : null}
 
-        <p className="hint">They get a temporary password, shown to you once on the next screen. Nothing is emailed or texted.</p>
+        <p className="hint">A temporary password shows once, next.</p>
 
         <div className="flex flex-wrap gap-3">
           <button className="btn btn-primary" disabled={busy || blockedNoStore || (pickOrg && orgsForRole.length === 0)}>

@@ -42,8 +42,7 @@ export function RepairBookTab({
   return (
     <div className="space-y-5">
       <Banner>
-        These are <strong>Samsung list prices for the part</strong>, excluding GST and labour. When the counter quotes a repair it adds the labour charge for the
-        model&apos;s service tier and GST ({fmtBp(gstBp)}) on parts and labour — both set on Settings.
+        <strong>Samsung part list prices</strong>, before labour and GST ({fmtBp(gstBp)}).
       </Banner>
 
       <Card title="Find a model">
@@ -105,7 +104,7 @@ export function RepairBookTab({
               </div>
             ) : (
               <Empty title="No part prices for this model yet">
-                Without them the counter shows a repair on this phone as unpriced, and the advisor has to enter the service centre's own quote. Add prices below.
+                Repairs show unpriced until you add them below.
               </Empty>
             )}
           </Card>
@@ -307,7 +306,7 @@ function PartRow({ r, org, onSaved }: { r: RepairPriceView; org: string | undefi
           className="btn btn-sm btn-danger"
           disabled={busy}
           onClick={() => {
-            if (window.confirm(`Remove the ${r.partLabel.toLowerCase()} price? The counter will no longer be able to quote this part for this model.`))
+            if (window.confirm(`Remove the ${r.partLabel.toLowerCase()} price?`))
               void send(null, `Removed the ${r.partLabel.toLowerCase()} price.`);
           }}
         >

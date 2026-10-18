@@ -19,12 +19,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </div>
         <div className="max-w-md">
           <h1 className="text-[40px] leading-[1.08] font-[780] tracking-tight">Repair it, or swap up?</h1>
-          <p className="mt-4 text-[17px] text-white/75 leading-relaxed">
-            The counter desk for SwapUp Experience Centers: the repair quote and the trade-in value side by side, an honest
-            recommendation, and an upgrade bonus — with every store&apos;s trade-in credit kept inside its limit until the buyback partner collects.
-          </p>
+          <p className="mt-4 text-[17px] text-white/75 leading-relaxed">Repair quote vs trade-in + bonus, side by side.</p>
         </div>
-        <p className="text-white/50 text-sm">Trade-in pricing and buyback by the programme&apos;s partner.</p>
+        <p className="text-white/50 text-sm">Buyback by the programme&apos;s partner.</p>
       </div>
       <div className="flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
@@ -32,7 +29,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <BrandMark size={18} />
           </div>
           <h2 className="text-2xl font-bold tracking-tight">Sign in</h2>
-          <p className="hint mt-1 mb-6">Use the account your store or programme admin gave you.</p>
+          <p className="hint mt-1 mb-6">Use your store login.</p>
           <LoginForm next={safeNext(next)} />
         </div>
       </div>

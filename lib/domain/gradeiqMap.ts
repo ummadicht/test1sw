@@ -56,7 +56,8 @@ export type GiqFinding = {
   uncorroborated: boolean;
 };
 
-export type GiqComponent = { id: GiqComponentId; name: string; grade: string; confidence: number | null; findings: GiqFinding[] };
+/** `note`: the specialist's one short sentence about the part ("" when it wrote none). */
+export type GiqComponent = { id: GiqComponentId; name: string; grade: string; confidence: number | null; findings: GiqFinding[]; note: string };
 
 export type GiqCapture = { verdict: string; code: string | null; reasons: string[]; attempt: number };
 
@@ -64,8 +65,13 @@ export type GiqDisplayCheck = {
   verdict: "pass" | "fail" | "unknown";
   confidence: number | null;
   note: string;
-  /** severity: GradeIQ's minor | moderate | severe (it defaults a missing one to minor); null on snapshots stored before 2026-10-17. */
-  findings: { type: string; label: string; confidence: number | null; pattern: string | null; severity: string | null }[];
+  /**
+   * severity: GradeIQ's minor | moderate | severe (it defaults a missing one to minor); null on snapshots stored before 2026-10-17.
+   * box: where on that colour's frame, [ymin, xmin, ymax, xmax] in 0..1 — absent on older snapshots.
+   */
+  findings: { type: string; label: string; confidence: number | null; pattern: string | null; severity: string | null; box?: GiqBox | null }[];
+  /** "gemini" = its AI reader judged the frames; "stub" = the reader was off or its call failed (the frames are still kept). null on older snapshots. */
+  source?: "gemini" | "stub" | null;
   patterns: string[];
   captures: { pattern: string; photo: string }[];
   requested: string[];
@@ -107,13 +113,21 @@ export type GradeiqSnapshot = {
   components: GiqComponent[];
   obstruction: { present: boolean; type: string; note: string } | null;
   oem: { verdict: string; confidence: number | null; evidence: string[] } | null;
-  device: { make: string; model: string; match: string; reason: string } | null;
+  /** colour: the body colour as PHOTOGRAPHED ("" / null when the body wasn't visible or on older snapshots). */
+  device: { make: string; model: string; match: string; reason: string; colour?: string | null } | null;
   capture: GiqCapture | null;
   displayCheck: GiqDisplayCheck | null;
   /** GradeIQ's identity check. Missing → "unverified", never a pass. */
   identity: { verdict: IdentityVerdict; flags: string[] };
   /** Public photo URLs (GRADEIQ_PUBLIC_URL), in GradeIQ's photo-index order. */
   photos: string[];
+  /** The angle each photo was taken at, in the same order ("Front glass", "Back", …) — absent on older snapshots. */
+  angleLabels?: string[];
+  /**
+   * GradeIQ's stand-in grade (its "Pro busy → Flash stands in" rule): the letter is a placeholder
+   * awaiting a full re-grade — shown as PROVISIONAL, never final, never applied. Absent = false.
+   */
+  pendingVerification?: boolean;
 };
 
 /* ─────────────────────────── reading GradeIQ defensively ─────────────────────────── */
@@ -195,7 +209,15 @@ function readDisplayCheck(v: unknown, publicUrl: string): GiqDisplayCheck | null
     note: text(d.note, 300),
     findings: arr(d.findings)
       .slice(0, 20)
-      .map((f) => ({ type: text(obj(f).type, 40), label: text(obj(f).label, 160), confidence: numOrNull(obj(f).confidence), pattern: text(obj(f).pattern, 20) || null, severity: text(obj(f).severity, 12) || null })),
+      .map((f) => ({
+        type: text(obj(f).type, 40),
+        label: text(obj(f).label, 160),
+        confidence: numOrNull(obj(f).confidence),
+        pattern: text(obj(f).pattern, 20) || null,
+        severity: text(obj(f).severity, 12) || null,
+        box: readBox(obj(f).box),
+      })),
+    source: text(d.source, 10) === "gemini" ? "gemini" : text(d.source, 10) === "stub" ? "stub" : null,
     patterns: arr(d.patterns).map((p) => text(p, 20)).filter(Boolean),
     captures,
     requested: arr(d.requested).map((p) => text(p, 20)).filter(Boolean),
@@ -220,10 +242,15 @@ export function readSnapshot(raw: unknown, publicUrl: string, fetchedAt: string)
   const oem = obj(cos.oem);
   const device = obj(cos.device);
   const identVerdict = text(ident.verdict, 12);
+  // A stand-in grade (cosmetic.pendingVerification): GradeIQ may leave cosmetic_grade empty and keep
+  // the letter in cosmetic.grade. It is read — as a provisional grade only (finality never makes it final).
+  const pv = cos.pendingVerification;
+  const pending = pv === true || pv === 1 || (!!pv && typeof pv === "object");
+  const standIn = pending ? text(obj(pv).grade, 10) || text(cos.grade, 10) : "";
   return {
     fetchedAt,
     client: text(s.client_id, 40),
-    cosmeticGrade: text(s.cosmetic_grade, 10),
+    cosmeticGrade: text(s.cosmetic_grade, 10) || standIn,
     functionalGrade: text(s.functional_grade, 10),
     overallGrade: text(s.overall_grade, 30),
     tierUsed: tier === "stub" || tier === "flash" || tier === "pro" ? tier : null,
@@ -239,12 +266,14 @@ export function readSnapshot(raw: unknown, publicUrl: string, fetchedAt: string)
         const c = obj(x);
         const id = text(c.id, 12) as GiqComponentId;
         if (!COMPONENT_IDS.includes(id)) return null;
-        return { id, name: text(c.name, 60), grade: text(c.grade, 10), confidence: numOrNull(c.confidence), findings: arr(c.findings).slice(0, 40).map(readFinding) };
+        return { id, name: text(c.name, 60), grade: text(c.grade, 10), confidence: numOrNull(c.confidence), findings: arr(c.findings).slice(0, 40).map(readFinding), note: text(c.notes, 240) };
       })
       .filter((c): c is GiqComponent => !!c),
     obstruction: Object.keys(obstruction).length ? { present: obstruction.present === true, type: text(obstruction.type, 40), note: text(obstruction.note, 200) } : null,
     oem: text(oem.verdict, 30) ? { verdict: text(oem.verdict, 30), confidence: numOrNull(oem.confidence), evidence: arr(oem.evidence).map((e) => text(e, 200)).filter(Boolean).slice(0, 8) } : null,
-    device: text(device.match, 12) ? { make: text(device.make, 40), model: text(device.model, 80), match: text(device.match, 12), reason: text(device.reason, 300) } : null,
+    device: text(device.match, 12)
+      ? { make: text(device.make, 40), model: text(device.model, 80), match: text(device.match, 12), reason: text(device.reason, 300), colour: text(device.colour, 24) || null }
+      : null,
     capture: readCapture(obj(s.capture).verdict ? s.capture : screen.capture),
     displayCheck: readDisplayCheck(screen.displayCheck, publicUrl),
     identity: {
@@ -252,6 +281,8 @@ export function readSnapshot(raw: unknown, publicUrl: string, fetchedAt: string)
       flags: arr(ident.flags).map((f) => text(f, 300)).filter(Boolean).slice(0, 10),
     },
     photos: arr(s.photos).map((p) => publicPhotoUrl(p, publicUrl)).filter((p): p is string => !!p),
+    angleLabels: arr(screen.angleLabels).map((a) => text(a, 40)).slice(0, 12),
+    ...(pending ? { pendingVerification: true } : {}),
   };
 }
 
@@ -277,19 +308,21 @@ export type Finality = {
 export function finality(s: GradeiqSnapshot | null, opts: { timedOut: boolean } = { timedOut: false }): Finality {
   const out = (status: Finality["status"], reasons: string[]): Finality => ({ status, final: status === "final", provisional: status === "provisional", reasons });
   if (!s) return out("none", ["Not camera-graded yet."]);
-  if (s.tierUsed === "stub") return out("failed", ["Camera grading failed. Check condition by eye."]);
+  if (s.tierUsed === "stub") return out("failed", ["Camera grading failed — check by eye."]);
   const reasons: string[] = [];
-  if (s.capture?.verdict === "retake") reasons.push(`The camera's photos were rejected${s.capture.reasons.length ? `: ${s.capture.reasons.join("; ")}` : ""}. Retake them.`);
-  if (s.obstruction?.present) reasons.push(`A ${s.obstruction.type || "case or cover"} was on the phone. Remove it and retake — the grade is not used.`);
+  if (s.capture?.verdict === "retake") reasons.push(`Photos rejected${s.capture.reasons.length ? ` (${s.capture.reasons.join("; ")})` : ""} — retake them.`);
+  if (s.obstruction?.present) reasons.push(`A ${s.obstruction.type || "case or cover"} was on — remove it and retake.`);
   if (!s.cosmeticGrade) {
-    if (s.refining && !opts.timedOut) return out("grading", ["The camera grade is still being worked out."]);
-    if (s.coverage !== null && s.coverage < 0.5 && s.tierUsed) return out("failed", ["Not enough of the phone was visible. Retake."]);
-    if (opts.timedOut) return out("failed", ["No camera grade came back. Check condition by eye."]);
+    if (s.refining && !opts.timedOut) return out("grading", ["Camera grade coming."]);
+    if (s.coverage !== null && s.coverage < 0.5 && s.tierUsed) return out("failed", ["Too little of the phone visible — retake."]);
+    if (opts.timedOut) return out("failed", ["No camera grade — check by eye."]);
     return out(reasons.length ? "provisional" : "grading", reasons.length ? reasons : ["Waiting for the camera grade."]);
   }
-  if (!s.tierUsed) reasons.push("GradeIQ did not say which model graded it, so the grade is not used.");
-  if (s.refining) reasons.push(opts.timedOut ? "Provisional grade (final check did not finish). Confirm by eye." : "Provisional grade — the final check is still running.");
-  if (s.capture?.verdict !== "ok" && s.capture?.verdict !== "retake") reasons.push("The camera's photos were not accepted yet.");
+  if (!s.tierUsed) reasons.push("Grader unknown — grade not used.");
+  // GradeIQ's stand-in for a full pass that didn't answer: a placeholder until it is re-graded.
+  if (s.pendingVerification) reasons.push("Stand-in grade, pending verification — not used yet.");
+  if (s.refining) reasons.push(opts.timedOut ? "Final check didn't finish — confirm by eye." : "Final check still running.");
+  if (s.capture?.verdict !== "ok" && s.capture?.verdict !== "retake") reasons.push("Photos not accepted yet.");
   return reasons.length ? out("provisional", reasons) : out("final", []);
 }
 
@@ -391,6 +424,11 @@ export type LcdCheck = {
   confirmed?: boolean;
   /** Why a "fail" was not confirmed (minor marks only / low confidence), for the advisor. */
   doubt?: string | null;
+  /** How many colours the sweep photographed, of how many it asked for. Absent before 2026-10-17. */
+  captured?: number;
+  requested?: number;
+  /** The colours were photographed but GradeIQ's AI reader was off or its call failed: a person checks the frames. */
+  aiOff?: boolean;
 };
 
 export type CameraMapping = {
@@ -413,8 +451,9 @@ export type CameraOverrideInfo = { by: string; reason: string; at: string } | nu
 
 /**
  * GradeIQ's result → what SwapUp records. `lcdOverride`: staff unlocked the
- * camera without the customer's phone echoing patterns, so whatever the sweep
- * says, the LCD was not checked by the camera in a closed loop.
+ * camera without the customer's phone echoing patterns. That never erases a
+ * sweep that did run (its frames prove the loop); when none ran, it is the
+ * reason the LCD was not camera-checked.
  */
 export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdOverride?: CameraOverrideInfo } = {}): CameraMapping {
   const faults: CameraFault[] = [];
@@ -455,7 +494,7 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
             if (confirmed && (t === "crack" || notMinor)) {
               fault("screen_cracked", faults, "fault");
               worseScreen("cracked");
-            } else flag(`Camera may have seen a ${t} on the screen glass (${pct(f.confidence)}${photoRef(f.photoIndex)}). Look at the photo.`);
+            } else flag(`Camera may have seen a ${t} on the screen (${pct(f.confidence)}${photoRef(f.photoIndex)}) — check the photo.`);
           } else if (WEAR.has(t)) {
             meaning = SCREEN_LABEL.scratched;
             // GradeIQ's A means faint micro-scratches: A and Premium stay flawless.
@@ -471,7 +510,7 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
             else if (confirmed) {
               fault("display_lines", faults, "fault");
               worseScreen("lines_or_spots");
-            } else flag(`Camera may have seen ${f.label || t} on the lit screen (${pct(f.confidence)}${photoRef(f.photoIndex)}). Check the display by eye.`);
+            } else flag(`Camera may have seen ${f.label || t} on the lit screen (${pct(f.confidence)}${photoRef(f.photoIndex)}) — check by eye.`);
           }
         } else if (c.id === "back") {
           if (t === "crack" || t === "chip") {
@@ -479,7 +518,7 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
             if (confirmed && (t === "crack" || notMinor)) {
               fault("back_cracked", faults, "fault");
               worseBody("back_cracked");
-            } else flag(`Camera may have seen a ${t} on the back (${pct(f.confidence)}${photoRef(f.photoIndex)}). Look at the photo.`);
+            } else flag(`Camera may have seen a ${t} on the back (${pct(f.confidence)}${photoRef(f.photoIndex)}) — check the photo.`);
           } else if (WEAR.has(t)) {
             meaning = BODY_LABEL.scuffed;
             if (confirmed && notMinor) {
@@ -496,10 +535,10 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
             if (confirmed) {
               fault("frame_damage", suggested, "suggested");
               worseBody("bent");
-            } else flag(`Camera may have seen a bent or broken frame (${pct(f.confidence)}${photoRef(f.photoIndex)}). Inspect the frame.`);
+            } else flag(`Camera may have seen a bent or broken frame (${pct(f.confidence)}${photoRef(f.photoIndex)}) — inspect it.`);
           } else if (t === "crack") {
             meaning = BODY_LABEL.bent;
-            flag(`Camera saw a ${f.severity} crack on the frame (${pct(f.confidence)}${photoRef(f.photoIndex)}). Inspect it — only a severe one counts as a broken frame.`);
+            flag(`Camera saw a ${f.severity} frame crack (${pct(f.confidence)}${photoRef(f.photoIndex)}) — inspect it.`);
           } else if (t === "dent") {
             meaning = BODY_LABEL.dented;
             if (confirmed) {
@@ -518,7 +557,7 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
             const side: FaultId = /\b(front|selfie)\b/i.test(`${f.label} ${f.location ?? ""}`) ? "front_camera" : "rear_camera";
             meaning = FAULT_BY_ID[side].label;
             if (confirmed) fault(side, suggested, "suggested");
-            else flag(`Camera may have seen ${t === "crack" ? "a cracked" : "a chipped"} camera lens (${pct(f.confidence)}${photoRef(f.photoIndex)}). Look at the lens.`);
+            else flag(`Camera may have seen ${t === "crack" ? "a cracked" : "a chipped"} lens (${pct(f.confidence)}${photoRef(f.photoIndex)}) — check it.`);
           }
         }
         findings.push({
@@ -541,11 +580,11 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
     }
 
     if (s.cosmeticGrade) {
-      if (s.conclusive === false) flags.push(`Camera grade ${s.gradeRange ? `${s.gradeRange.best}–${s.gradeRange.worst}` : s.cosmeticGrade}, not conclusive. Confirm by eye.`);
-      if (s.needsHumanReview) flags.push("GradeIQ asks for a person to review this grade.");
-      if (s.cosmeticGrade === "D" && !faults.length && !suggested.length) flags.push("Camera grade D with no confirmed crack or break. Needs a person to look.");
+      if (s.conclusive === false) flags.push(`Camera grade ${s.gradeRange ? `${s.gradeRange.best}–${s.gradeRange.worst}` : s.cosmeticGrade} not conclusive — confirm by eye.`);
+      if (s.needsHumanReview) flags.push("Camera grade needs a person's review.");
+      if (s.cosmeticGrade === "D" && !faults.length && !suggested.length) flags.push("Camera grade D, no confirmed damage — needs a look.");
     }
-    if (s.oem?.verdict === "suspect_aftermarket") flags.push(`Possible non-original part${s.oem.evidence.length ? `: ${s.oem.evidence[0]}` : ""}. SwapUp has no field for it — tell the partner.`);
+    if (s.oem?.verdict === "suspect_aftermarket") flags.push(`Possible non-original part${s.oem.evidence.length ? ` (${s.oem.evidence[0]})` : ""} — tell the partner.`);
   }
 
   // A provisional grade is shown, never applied: its faults and floor are
@@ -555,7 +594,7 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
   const outSuggested = usable ? suggested : [];
   if (!usable) {
     floor = { ...NO_FLOOR };
-    for (const f of [...faults, ...suggested]) flags.push(`Not final, so not added: ${f.because}. Check it by eye.`);
+    for (const f of [...faults, ...suggested]) flags.push(`Not final, not added: ${f.because} — check by eye.`);
   }
 
   // The LCD sweep is its own AI call on the lit screen — independent of the
@@ -563,15 +602,25 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
   const dc = s?.displayCheck ?? null;
   let lcd: LcdCheck;
   if (!dc) {
-    lcd = { cameraChecked: false, verdict: null, reason: "The camera's screen sweep has not run." };
+    lcd = { cameraChecked: false, verdict: null, reason: "The screen sweep hasn't run." };
   } else {
     const incomplete = dc.verdict === "unknown" || dc.missing.length > 0;
+    const requested = dc.requested.length || dc.captures.length;
+    // Frames in, but the reader that judges them was off (GradeIQ's "stub": no key, or the call failed — e.g. out of credit).
+    const aiOff = dc.verdict === "unknown" && dc.captures.length > 0 && dc.source === "stub";
     lcd = {
       cameraChecked: !incomplete,
       verdict: dc.verdict,
       confirmed: !incomplete && (dc.verdict === "pass" || displayFailConfirmed(dc)),
       doubt: displayFailDoubt(dc),
-      reason: incomplete ? dc.reason || (dc.missing.length ? `Not captured: ${dc.missing.join(", ")}.` : dc.note || "The sweep could not judge the screen.") : null,
+      captured: dc.captures.length,
+      requested,
+      ...(aiOff ? { aiOff: true } : {}),
+      reason: !incomplete
+        ? null
+        : aiOff
+          ? `captured ${dc.captures.length} of ${requested} colours, AI reader off — check by eye`
+          : dc.reason || (dc.missing.length ? `Not captured: ${dc.missing.join(", ")}.` : dc.note || "The sweep couldn't judge the screen."),
     };
     if (dc.verdict === "fail") {
       if (displayFailConfirmed(dc)) {
@@ -585,13 +634,18 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
         });
         if (SCREEN_ORDER.indexOf("lines_or_spots") > SCREEN_ORDER.indexOf(floor.screen)) floor = { ...floor, screen: "lines_or_spots" };
       } else {
-        const doubt = displayFailDoubt(dc) ?? "the camera's screen sweep was not sure";
-        flags.push(`${doubt[0].toUpperCase()}${doubt.slice(1)}. Check the display by eye.`);
+        const doubt = displayFailDoubt(dc) ?? "the screen sweep wasn't sure";
+        flags.push(`${doubt[0].toUpperCase()}${doubt.slice(1)} — check by eye.`);
       }
     }
   }
-  if (opts.lcdOverride) {
-    lcd = { cameraChecked: false, verdict: lcd.verdict, confirmed: false, reason: `the camera was unlocked by ${opts.lcdOverride.by} before the customer's phone showed the patterns: ${opts.lcdOverride.reason}` };
+  // Staff unlocked the camera without the phone echoing. A COMPLETE sweep still
+  // stands — GradeIQ captures white only after the phone confirmed it, and every
+  // other colour only once it SAW that colour in the locked screen box, so the
+  // frames themselves prove the loop. Only when the sweep never ran is the
+  // override the reason; an incomplete sweep keeps GradeIQ's own reason.
+  if (opts.lcdOverride && !dc) {
+    lcd = { ...lcd, cameraChecked: false, confirmed: false, reason: `unlocked by ${opts.lcdOverride.by} before the phone showed the colours: ${opts.lcdOverride.reason}` };
   }
   if (!lcd.cameraChecked) flags.push(`LCD not camera-checked${lcd.reason ? `: ${lcd.reason}` : "."}`);
 
@@ -616,8 +670,8 @@ export function displayFailConfirmed(dc: Pick<GiqDisplayCheck, "verdict" | "conf
 export function displayFailDoubt(dc: Pick<GiqDisplayCheck, "verdict" | "confidence" | "findings"> | null | undefined): string | null {
   if (!dc || dc.verdict !== "fail" || displayFailConfirmed(dc)) return null;
   return (dc.confidence ?? 0) >= CONFIRMED_CONFIDENCE
-    ? `the camera's screen sweep noted only minor marks${dc.findings[0]?.label ? ` (${dc.findings[0].label})` : ""}`
-    : `the camera's screen sweep failed with low confidence (${pct(dc.confidence)})`;
+    ? `the screen sweep saw only minor marks${dc.findings[0]?.label ? ` (${dc.findings[0].label})` : ""}`
+    : `the screen sweep failed with low confidence (${pct(dc.confidence)})`;
 }
 
 /**
@@ -629,7 +683,7 @@ export function identityOf(s: GradeiqSnapshot | null): { verdict: IdentityVerdic
   if (!s) return { verdict: "unverified", reasons: ["Not camera-graded."] };
   const reasons: string[] = [];
   if (s.device?.match === "mismatch") reasons.push(`The camera says this is ${[s.device.make, s.device.model].filter(Boolean).join(" ") || "a different phone"}: ${s.device.reason}`.trim());
-  if (s.identity.verdict === "mismatch") reasons.push(...(s.identity.flags.length ? s.identity.flags : ["GradeIQ's identity check says this is not the phone on the record."]));
+  if (s.identity.verdict === "mismatch") reasons.push(...(s.identity.flags.length ? s.identity.flags : ["Identity check: not the phone on record."]));
   if (reasons.length) return { verdict: "mismatch", reasons };
   if (s.identity.verdict === "match") return { verdict: "match", reasons: [] };
   return { verdict: "unverified", reasons: s.identity.flags };
@@ -743,13 +797,13 @@ export function cameraOverrideProblems(answers: ConditionAnswers | null, faults:
   if (!camera) return [];
   const out: { key: string; why: string }[] = [];
   for (const f of camera.faults) {
-    if (!faults.includes(f.id)) out.push({ key: `fault:${f.id}`, why: `The camera confirmed "${FAULT_BY_ID[f.id].label}"${photoRef(f.photoIndex)}. Removing it needs a reason.` });
+    if (!faults.includes(f.id)) out.push({ key: `fault:${f.id}`, why: `Camera confirmed "${FAULT_BY_ID[f.id].label}"${photoRef(f.photoIndex)} — removing it needs a reason.` });
   }
   if (answers) {
     if (SCREEN_ORDER.indexOf(answers.screen) < SCREEN_ORDER.indexOf(camera.floor.screen))
-      out.push({ key: `screen:${camera.floor.screen}`, why: `The camera confirmed the screen as "${SCREEN_LABEL[camera.floor.screen]}". Recording "${SCREEN_LABEL[answers.screen]}" needs a reason.` });
+      out.push({ key: `screen:${camera.floor.screen}`, why: `Camera confirmed the screen "${SCREEN_LABEL[camera.floor.screen]}" — "${SCREEN_LABEL[answers.screen]}" needs a reason.` });
     if (BODY_ORDER.indexOf(answers.body) < BODY_ORDER.indexOf(camera.floor.body))
-      out.push({ key: `body:${camera.floor.body}`, why: `The camera confirmed the body as "${BODY_LABEL[camera.floor.body]}". Recording "${BODY_LABEL[answers.body]}" needs a reason.` });
+      out.push({ key: `body:${camera.floor.body}`, why: `Camera confirmed the body "${BODY_LABEL[camera.floor.body]}" — "${BODY_LABEL[answers.body]}" needs a reason.` });
   }
   return out;
 }
@@ -821,14 +875,20 @@ export function blankCameraCheck(at: string): CaseCameraCheck {
 /** The quote is blocked while the camera says this is not the phone on the case and no manager has overridden it. */
 export function identityBlock(c: Pick<CaseCameraCheck, "identity" | "identityOverride"> | null): string | null {
   if (!c || c.identity.verdict !== "mismatch" || c.identityOverride) return null;
-  return `The camera says this may not be the phone on the case${c.identity.reasons[0] ? ` (${c.identity.reasons[0]})` : ""}. It can't be priced until a store manager checks it and records why it is the right phone.`;
+  // One fixed sentence with the make and model only — GradeIQ's own reasoning stays on the staff camera card.
+  const seen = c.identity.reasons.map((r) => /^The camera says this is (.+?):/.exec(r)?.[1]?.trim()).find((m) => !!m && m !== "a different phone" && m.length <= 40);
+  return seen ? `Camera thinks this is a ${seen} — a manager must confirm it.` : "Camera doubts this is the phone — a manager must confirm it.";
 }
 
 /* ─────────────────────────── where each fault came from ─────────────────────────── */
 
-export type FaultSource = "advisor" | "tested" | "declared" | "camera_ai";
+/**
+ * "phonecheck": a fault from a Phonecheck station's test of the phone (cable,
+ * desktop app), attached to the case by staff — lib/domain/phonecheck.ts.
+ */
+export type FaultSource = "advisor" | "tested" | "phonecheck" | "declared" | "camera_ai";
 export type FaultSources = Partial<Record<FaultId, FaultSource[]>>;
-const SOURCE_ORDER: FaultSource[] = ["tested", "declared", "camera_ai", "advisor"];
+const SOURCE_ORDER: FaultSource[] = ["tested", "phonecheck", "declared", "camera_ai", "advisor"];
 
 /** Add sources; a fault may have several (the phone's test AND the camera). */
 export function addFaultSources(prev: FaultSources, add: { id: FaultId; source: FaultSource }[]): FaultSources {
@@ -876,7 +936,7 @@ export function disagreements(declared: Declared | null, results: TestResults, s
         tested: null,
         camera: `${crackedWord} (${pct(cam.confidence)}${photoRef(cam.photoIndex)})`,
         final: crackedWord,
-        message: `Customer: not ${crackedWord} · Camera: ${crackedWord} (${pct(cam.confidence)}${photoRef(cam.photoIndex)}). The worse answer is recorded.`,
+        message: `Customer: not ${crackedWord} · Camera: ${crackedWord} (${pct(cam.confidence)}${photoRef(cam.photoIndex)}) — worse one recorded.`,
         photoIndex: cam.photoIndex,
         box: cam.box,
       });
@@ -890,7 +950,7 @@ export function disagreements(declared: Declared | null, results: TestResults, s
         tested: null,
         camera: `no ${topic === "screen" ? "crack" : "crack on the back"} seen`,
         final: crackedWord,
-        message: `Customer says ${crackedWord}; the camera did not see a crack. The customer's answer stands — check by eye.`,
+        message: `Customer says ${crackedWord}; camera saw no crack — check by eye.`,
         photoIndex: null,
         box: null,
       });
@@ -911,11 +971,9 @@ export function disagreements(declared: Declared | null, results: TestResults, s
       tested: self === "pass" ? "self-test passed" : "self-test failed",
       camera: cam === "fail" ? `screen sweep failed (${pct(s?.displayCheck?.confidence ?? null)})` : "screen sweep passed",
       final: recorded ? SCREEN_LABEL.lines_or_spots : "not recorded",
-      message: `Phone's own display test ${self === "pass" ? "passed" : "failed"}; the camera's screen sweep ${cam === "fail" ? "failed" : "passed"}. ${
-        recorded
-          ? `Recorded as "${SCREEN_LABEL.lines_or_spots}"`
-          : `Nothing is recorded: ${displayFailDoubt(s?.displayCheck) ?? "the camera's screen sweep was not sure"}`
-      } — check the screen by eye.`,
+      message: `Display self-test ${self === "pass" ? "passed" : "failed"}, screen sweep ${cam === "fail" ? "failed" : "passed"} — ${
+        recorded ? `recorded "${SCREEN_LABEL.lines_or_spots}"` : "nothing recorded"
+      }; check by eye.`,
       photoIndex: null,
       box: null,
     });
@@ -928,7 +986,7 @@ export function disagreements(declared: Declared | null, results: TestResults, s
       tested: null,
       camera: m.identity.reasons[0] ?? "a different phone",
       final: "quote blocked",
-      message: `The camera says this may not be the phone on the case. The trade-in can't be priced until it is resolved. ${m.identity.reasons.join(" ")}`.trim(),
+      message: `Camera doubts this is the phone${m.identity.reasons.length ? ` (${m.identity.reasons.join("; ")})` : ""} — no price until resolved.`,
       photoIndex: null,
       box: null,
     });

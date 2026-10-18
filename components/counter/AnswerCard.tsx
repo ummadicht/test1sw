@@ -5,24 +5,30 @@ import { ErrorText } from "@/components/ui";
 import { inr, fmtBp } from "@/lib/domain/money";
 import type { Offer } from "@/lib/domain/offer";
 import type { CaseOps } from "./ops";
-import { askControl, autoRequoteKey, requotable, swapRefusal } from "./answerAsks";
-import { CashifyQuoteEntry, IdentityOverride } from "./AnswerAskForms";
+import { CHOOSE_NEW_PHONE_LINK, askControl, autoRequoteKey, requotable, swapRefusal } from "./answerAsks";
+import { PartnerQuoteEntry, IdentityOverride } from "./AnswerAskForms";
+import { GradeRow } from "./GradeRow";
 
 /**
  * THE ANSWER, first, once the test is on the case (owner, 2026-10-17: "Why asking
  * questions when we have all tested data ... just refurb quote vs bonus + trade in price"):
  *
  *     Refurb quote          vs     Trade-in + bonus
- *     what fixing it costs         the partner's as-is price + the upgrade bonus
+ *     what fixing it costs         the as-is price + the upgrade bonus
  *
  * The same numbers and the same words as the SwapUp Store answer screen: the server
  * builds every figure and every reason (CaseView.offer, lib/domain/offer.ts) and this
  * card only lays them out. Whatever the test couldn't fill is one tap here (storage
  * chips with each size's trade-in) or a jump to the step that fills it — never a
- * guessed size. Where no step can fill it (a lapsed Cashify quote, a size not on file,
- * the camera's identity check) it is answered here (answerAsks.ts says which). An
+ * guessed size. Where no step can fill it (a lapsed partner-app quote, a size not on
+ * file, the camera's identity check) it is answered here (answerAsks.ts says which). An
  * expired quote is re-quoted once on open, as the store app does, so "re-quoting" is
  * true. The verdict is decide()'s headline; the bonus is shown, never a reason.
+ *
+ * ONE ANSWER on the page — the case page's "The answer" step (caseSteps.ts): the headline,
+ * its sentence, "Why this answer" (the server's signals and caveats, as the store app's "?"
+ * sheet), the SwapUp grade on one line (GradeRow), the asks, the two tiles and the buttons.
+ * Each ask and each "Change" goes to the step that answers it. No second money panel.
  */
 
 /** "Cover: None · change" — the store app's short names. */
@@ -56,9 +62,9 @@ function newPhoneLine(o: Offer): string | null {
 /** The swap against the repair, in what the customer pays today (+ = the swap costs more). */
 function vsRepairLine(n: number | null): string | null {
   if (n === null) return null;
-  if (n > 0) return `${inr(n)} more than repairing today`;
-  if (n < 0) return `${inr(-n)} less than repairing`;
-  return "Same as repairing";
+  if (n > 0) return `${inr(n)} more than repair`;
+  if (n < 0) return `${inr(-n)} less than repair`;
+  return "Same as repair";
 }
 
 function Small({ children, tone }: { children: ReactNode; tone?: "ink" | "warn" }) {
@@ -94,6 +100,76 @@ function Tile({ label, recommended, children }: { label: string; recommended: bo
   );
 }
 
+/**
+ * "Why this answer" — the server's signals and caveats, word for word, as the store app's
+ * "?" sheet lays them out. Closed by default; not there when the server gives none.
+ */
+function WhyThisAnswer({ o }: { o: Offer }) {
+  // The headline's own sentence is already on the card: not said twice.
+  const signals = o.signals.filter((x) => x.text !== o.reason);
+  if (!signals.length && !o.caveats.length) return null;
+  return (
+    <details className="mt-1.5 group">
+      <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer inline-block text-[13.5px] font-semibold text-fix hover:underline no-print">
+        Why this answer <span aria-hidden className="inline-block group-open:rotate-90 transition-transform">›</span>
+      </summary>
+      <div className="mt-2 space-y-2.5 rounded-[12px] bg-surface-2 px-4 py-3">
+        {signals.map((x, i) => (
+          <div key={`s${i}`}>
+            <div className={`text-[12px] font-bold uppercase tracking-wider ${x.points === "repair" ? "text-fix" : "text-ink"}`}>
+              Points to {x.points === "repair" ? "repair" : "upgrade"} · {x.strength}
+            </div>
+            <p className="text-[14px] text-ink leading-snug">{x.text}</p>
+          </div>
+        ))}
+        {o.caveats.length ? (
+          <div>
+            <div className="section-title">Good to know</div>
+            <ul className="mt-0.5 list-disc pl-5 text-[13.5px] text-ink-2 space-y-0.5">
+              {o.caveats.map((c, i) => (
+                <li key={`c${i}`}>{c}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+/**
+ * How the trade-in was reached, in the server's words (Offer.swap.tradeInDetail): its one line
+ * ("PriceIQ Good ₹51,399 − 2% − 2 defects") and, closed, each step with its % and rupees — the
+ * same as the store app's "Show details". Nothing when the quote is a single figure.
+ */
+function TradeInHow({ d }: { d: NonNullable<Offer["swap"]["tradeInDetail"]> }) {
+  if (!d.line && !d.lines.length && !d.note) return null;
+  return (
+    <>
+      {d.line ? <Small>{d.line}</Small> : null}
+      {d.lines.length || d.note ? (
+        <details className="group">
+          <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer inline-block text-[13.5px] font-semibold text-fix hover:underline">
+            Show details <span aria-hidden className="inline-block group-open:rotate-90 transition-transform">›</span>
+          </summary>
+          <ul className="mt-1.5 space-y-1 text-[13px] text-ink-2">
+            {d.lines.map((l, i) => (
+              <li key={`${l.label}-${i}`} className="flex items-baseline justify-between gap-2">
+                <span className="min-w-0">
+                  {l.label}
+                  {l.pct ? <span className="text-muted"> · {l.pct}</span> : null}
+                </span>
+                <span className="num whitespace-nowrap">{l.amount > 0 && i > 0 ? `+${inr(l.amount)}` : inr(l.amount)}</span>
+              </li>
+            ))}
+          </ul>
+          {d.note ? <p className="mt-1.5 text-[13px] text-muted leading-snug">{d.note}</p> : null}
+        </details>
+      ) : null}
+    </>
+  );
+}
+
 const FIGURE = "num text-[26px] sm:text-[36px] font-[780] leading-tight tracking-tight [overflow-wrap:anywhere]";
 
 export function AnswerCard({
@@ -101,19 +177,16 @@ export function AnswerCard({
   isManager,
   onStep,
   onSwap,
-  onWhy,
 }: {
   ops: CaseOps;
   /** The store manager: the only one who may accept a phone the camera says isn't the one on the case. */
   isManager: boolean;
-  /** Open the folded steps and scroll to one of them ("step-phone", …). */
+  /** Go to the step that answers it ("step-phone", "step-repair", … — caseSteps.ts stepFromAnchor). */
   onStep: (id: string) => void;
   /** "Swap up": show the lock form and go to it. */
   onSwap: () => void;
-  /** Below lg, where the comparison panel sits inside the folded steps. */
-  onWhy: () => void;
 }) {
-  const { view, busy, save, act } = ops;
+  const { view, busy, save, act, editable } = ops;
   const [confirm, setConfirm] = useState<null | "repair" | "walk">(null);
   const [reason, setReason] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -124,18 +197,18 @@ export function AnswerCard({
   // An expired quote is re-quoted once, quietly, the moment the answer shows it (the store app's
   // answer screen does the same): ONCE per page open, whatever comes back — a partner whose fresh
   // quote is already out of date must not be asked again and again with the IMEI. The tile's
-  // "Re-quote" is the way to ask again. Never a Cashify-app quote (autoRequoteKey).
+  // "Re-quote" is the way to ask again. Never a quote typed in from the partner's app (autoRequoteKey).
   const autoKey = autoRequoteKey(view);
   const autoTried = useRef(false);
   useEffect(() => {
-    if (!autoKey || autoTried.current) return;
+    if (!editable || !autoKey || autoTried.current) return;
     autoTried.current = true;
     setRequoting(true);
     void act("reprice").then((e) => {
       setRequoting(false);
       setRequoteErr(e);
     });
-  }, [autoKey, act]);
+  }, [editable, autoKey, act]);
 
   const o = view.offer;
   if (!o) return null;
@@ -188,13 +261,18 @@ export function AnswerCard({
           </div>
           <h2 className="text-[24px] sm:text-[28px] font-[760] leading-tight tracking-tight mt-1">{o.headline}</h2>
           {o.reason ? <p className="text-[15px] text-ink-2 leading-snug mt-1">{o.reason}</p> : null}
+          {/* A safety warning is never behind "Why this answer". */}
+          {o.safety ? <p className="text-[14px] text-warn font-semibold leading-snug mt-1.5" role="alert">{o.safety}</p> : null}
           {o.storage.note ? <p className="text-[13.5px] text-warn font-semibold leading-snug mt-1.5">{o.storage.note}</p> : null}
-          {o.signals.length || o.caveats.length ? (
-            <button type="button" className="lg:hidden mt-1.5 text-[13.5px] font-semibold text-fix hover:underline no-print" onClick={onWhy}>
-              Why this answer ›
-            </button>
-          ) : null}
+          <WhyThisAnswer o={o} />
         </div>
+
+        {/* The phone's grade: under the answer, never inside its price tiles (docs/GRADING.md). */}
+        {view.grading ? (
+          <div className="rounded-[12px] border border-line px-4 py-3">
+            <GradeRow view={view} />
+          </div>
+        ) : null}
 
         {/* What the answer still needs — one tap each. Title and text are dropped where the headline and the sentence already say them. */}
         {o.asks.map((a) => {
@@ -209,11 +287,11 @@ export function AnswerCard({
                     </button>
                   ))}
                 </div>
-                {/* "Sample price — not a real quote." for as long as the sample figures are on screen, before the tap as after it. */}
+                {/* The market data's age, or "PriceIQ unreachable, last answer …", while those chip prices are on screen. */}
                 {c.note ? <Small tone="warn">{c.note}</Small> : null}
               </>
-            ) : c.kind === "cashify" ? (
-              <CashifyQuoteEntry ops={ops} why={c.why} size={c.size} />
+            ) : c.kind === "partner_quote_entry" ? (
+              <PartnerQuoteEntry ops={ops} why={c.why} size={c.size} />
             ) : c.kind === "identity_override" ? (
               <IdentityOverride ops={ops} />
             ) : c.kind === "ask_manager" ? (
@@ -245,7 +323,7 @@ export function AnswerCard({
             )}
             {r.amount !== null && r.detail ? <Small>{r.detail}</Small> : null}
             {repairWhy ? <Small>{repairWhy}</Small> : null}
-            {repairRefusal ? <Small tone="ink">{repairRefusal}</Small> : null}
+            {editable && repairRefusal ? <Small tone="ink">{repairRefusal}</Small> : null}
             {r.amount !== null && !r.nothingToRepair ? <TileLink onClick={() => onStep("step-repair")}>Change</TileLink> : null}
             {!r.nothingToRepair ? (
               <p className="text-[13.5px] text-ink-2">
@@ -258,9 +336,10 @@ export function AnswerCard({
             <div className={`${FIGURE} ${w.total === null ? "text-muted" : ""}`}>{w.total !== null ? inr(w.total) : "—"}</div>
             {swapWhy ? <Small>{swapWhy}</Small> : null}
             {bonus ? <Small>{bonus}</Small> : null}
+            {w.tradeInDetail ? <TradeInHow d={w.tradeInDetail} /> : null}
             {w.tradeInNote ? <Small tone="warn">{w.tradeInNote}</Small> : null}
             {/* The quiet re-quote above is the usual way out; this is for when it failed or the advisor wants it now. */}
-            {requotable(view) ? (
+            {editable && requotable(view) ? (
               <>
                 <TileLink onClick={requote} disabled={requoting}>
                   {requoting ? "Re-quoting…" : "Re-quote"}
@@ -279,22 +358,23 @@ export function AnswerCard({
                 <TileLink onClick={() => onStep("step-upgrade")}>Change</TileLink>
               </div>
             ) : (
-              <TileLink onClick={() => onStep("step-upgrade")}>Choose the new phone</TileLink>
+              <TileLink onClick={() => onStep("step-upgrade")}>{CHOOSE_NEW_PHONE_LINK}</TileLink>
             )}
             {vs ? <Small>{vs}</Small> : null}
-            {swapNo ? <Small tone="ink">{swapNo}</Small> : null}
+            {editable && swapNo ? <Small tone="ink">{swapNo}</Small> : null}
           </Tile>
         </div>
       </div>
 
-      {/* What the customer chose */}
+      {/* What the customer chose — at the counter only; a closed or read-only case has nothing to choose */}
+      {editable ? (
       <div className="border-t border-line px-5 py-3 space-y-2 rounded-b-[14px] no-print">
         {confirm === "repair" ? (
           <div className="rounded-[12px] border border-line p-3 space-y-2">
-            <div className="text-[14px] font-semibold">This closes the case. Book the repair in the service centre&apos;s job system.</div>
+            <div className="text-[14px] font-semibold">Closes the case. Book the repair as usual.</div>
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn btn-fix btn-sm" disabled={acting} onClick={() => run("choose_repair")}>
-                {acting ? "Closing the case…" : "Customer will repair"}
+                {acting ? "Closing…" : "Customer will repair"}
               </button>
               <button type="button" className="btn btn-sm btn-ghost" disabled={acting} onClick={() => setConfirm(null)}>
                 Not yet
@@ -303,7 +383,7 @@ export function AnswerCard({
           </div>
         ) : confirm === "walk" ? (
           <div className="rounded-[12px] border border-line p-3 space-y-2">
-            <div className="text-[14px] font-semibold">This closes the case. Why, if the customer said:</div>
+            <div className="text-[14px] font-semibold">Closes the case. Why? (optional)</div>
             <div className="flex flex-wrap gap-2" role="group" aria-label="Why they left (optional)">
               {WALK_AWAY_REASONS.map((x) => (
                 <button key={x} type="button" className="chip" aria-pressed={reason === x} onClick={() => setReason((cur) => (cur === x ? "" : x))}>
@@ -313,7 +393,7 @@ export function AnswerCard({
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn btn-sm btn-primary" disabled={acting} onClick={() => run("walk_away", reason ? { reason } : {})}>
-                {acting ? "Closing the case…" : "Customer walked away"}
+                {acting ? "Closing…" : "Customer walked away"}
               </button>
               <button type="button" className="btn btn-sm btn-ghost" disabled={acting} onClick={() => setConfirm(null)}>
                 Not yet
@@ -356,6 +436,7 @@ export function AnswerCard({
         )}
         <ErrorText error={err} />
       </div>
+      ) : null}
     </section>
   );
 }

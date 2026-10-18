@@ -43,8 +43,7 @@ export default async function AdminCampaignsPage({ searchParams }: { searchParam
         title={title}
         intro={
           <>
-            When a customer upgrades, they get the trade-in value <em>plus</em> an upgrade bonus of {bandText(band.minBp, band.maxBp)}. The bonus is a promotion:
-            it is shown in the upgrade column and on the receipt, and never used as a reason in the repair-or-upgrade recommendation.
+            Upgrades get trade-in <em>plus</em> a {bandText(band.minBp, band.maxBp)} bonus — never a reason to upgrade.
           </>
         }
       >

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Money, SourceBadge, StatusPill } from "@/components/ui";
+import { Money, StatusPill } from "@/components/ui";
 import { fmtWhen } from "@/components/pickups/format";
 import { recommendationOf } from "@/components/counter/shared";
 import { CASE_STATUS_LABEL } from "@/lib/domain/lifecycle";
@@ -11,16 +11,12 @@ export function CasesListTable({
   cases,
   showStore,
   partnerView = false,
-  samples,
 }: {
   cases: CaseListItem[];
   showStore: boolean;
   /** The buyback partner does not need the counter's recommendation or the new phone sold. */
   partnerView?: boolean;
-  /** ids whose trade-in figure comes from a SAMPLE rate card */
-  samples: string[];
 }) {
-  const sample = new Set(samples);
   return (
     <div className="overflow-x-auto">
       <table className={`table ${partnerView ? "min-w-[720px]" : "min-w-[920px]"}`}>
@@ -57,7 +53,6 @@ export function CasesListTable({
                 <td className="text-right">
                   <div className="flex flex-col items-end gap-1">
                     <Money value={c.tradeValue} className="font-semibold" />
-                    {c.tradeValue !== null && sample.has(c.id) ? <SourceBadge kind="sample" /> : null}
                   </div>
                 </td>
                 {partnerView ? null : <td className="text-[13.5px]">{c.newDevice ?? <span className="text-muted">—</span>}</td>}

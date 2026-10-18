@@ -21,14 +21,13 @@ export function TradeModelsTab({ models, labourByTier, carePlusDefault }: { mode
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const p = Math.min(page, pages - 1);
   const rows = filtered.slice(p * PAGE, p * PAGE + PAGE);
-  const sampleCount = models.filter((m) => m.source?.kind === "sample").length;
+  const approxCount = models.filter((m) => m.source?.kind === "approximate").length;
 
   return (
     <div className="space-y-4">
       <p className="text-ink-2 text-[14.5px] max-w-[80ch]">
-        Every phone the counter can take in trade, with its release year and how long it gets security updates — the recommendation uses both. SwapUp keeps this
-        list; tell us if a model is missing.
-        {sampleCount ? ` ${sampleCount} entries come from a SAMPLE source (marked) — check them before you rely on them.` : ""}
+        Phones the counter takes in trade. Missing one? Tell us.
+        {approxCount ? ` ${approxCount} with an approximate release year.` : ""}
       </p>
       <Card pad={false}>
         <div className="flex flex-wrap items-end gap-3 px-5 pt-4 pb-3">
@@ -98,7 +97,7 @@ export function TradeModelsTab({ models, labourByTier, carePlusDefault }: { mode
                       {m.carePlusFee !== null ? (
                         <Money value={m.carePlusFee} />
                       ) : (
-                        <span className="text-muted" title="No fee recorded for this model — the counter uses the programme's default plan fee.">
+                        <span className="text-muted" title="Uses the default plan fee">
                           default {inr(carePlusDefault)}
                         </span>
                       )}
@@ -106,7 +105,7 @@ export function TradeModelsTab({ models, labourByTier, carePlusDefault }: { mode
                     <td className="max-w-[320px]">
                       {m.source ? (
                         <div className="space-y-0.5">
-                          {m.source.kind === "sample" ? <SourceBadge kind="sample" label={m.source.label} /> : null}
+                          {m.source.kind === "approximate" ? <SourceBadge kind="approximate" label={m.source.label} /> : null}
                           <div className="text-[12.5px] text-ink-2">
                             {m.source.url ? (
                               <a href={m.source.url} target="_blank" rel="noreferrer noopener">

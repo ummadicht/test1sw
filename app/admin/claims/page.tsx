@@ -24,7 +24,7 @@ export default async function AdminClaimsPage({ searchParams }: { searchParams: 
   const sp = await searchParams;
   const ctx = adminContext(u, sp.orgId);
   const intro =
-    "Every upgrade bonus a store gave, for claiming it back from whoever funds the campaign. One row per trade-in, by the date the trade-in was locked.";
+    "Bonuses given, to claim back from the funder.";
   if (!ctx.orgId) {
     return (
       <AppShell user={u} wide>
@@ -138,8 +138,7 @@ export default async function AdminClaimsPage({ searchParams }: { searchParams: 
             <strong>
               {risk.length} claim{risk.length === 1 ? " is" : "s are"} at risk
             </strong>{" "}
-            (<Money value={risk.reduce((t, r) => t + r.bonus, 0)} />): the partner rejected the trade-in phone or says it never arrived. The funder may refuse the
-            bonus on those upgrades — check before you submit the claim.
+            (<Money value={risk.reduce((t, r) => t + r.bonus, 0)} />): rejected or not received — check before claiming.
           </Banner>
         ) : null}
 
@@ -178,9 +177,7 @@ export default async function AdminClaimsPage({ searchParams }: { searchParams: 
             </Empty>
           )}
         </Card>
-        <p className="hint">
-          The CSV has the same rows, with the case status and an at-risk note per row. Cancelled trade-ins are never included — no bonus was paid on them.
-        </p>
+        <p className="hint">The CSV adds status and at-risk notes. Cancelled trade-ins are left out.</p>
       </AdminFrame>
     </AppShell>
   );

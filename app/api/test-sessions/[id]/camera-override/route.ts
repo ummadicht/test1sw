@@ -4,8 +4,10 @@ import { cameraOverride } from "@/lib/server/testSessions";
 
 /**
  * Unlock GradeIQ's camera page without the customer's phone echoing patterns.
- * { reason } — recorded with the staff member's name; the case is marked
- * "LCD not camera-checked". → TestSessionView
+ * { reason } — recorded with the staff member's name. A screen sweep that then
+ * runs to the end still counts (its frames prove the phone showed each colour);
+ * if none runs, the LCD is recorded as not camera-checked, and the advisor
+ * certifies the screen by eye. → TestSessionView
  */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   return handle(async () => {

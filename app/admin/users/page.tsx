@@ -17,7 +17,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
   const u = await requirePage(["org_admin", "platform"], "/admin/users");
   const sp = await searchParams;
   const ctx = adminContext(u, sp.orgId);
-  const intro = "Who can sign in to this programme. Programme admins see every store; store managers and advisors work at one.";
+  const intro = "Who can sign in to this programme.";
   if (!ctx.orgId) {
     return (
       <AppShell user={u}>

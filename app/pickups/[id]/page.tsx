@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { Banner, Card, Money, StatusPill, SourceBadge, Empty } from "@/components/ui";
+import { Banner, Card, Money, StatusPill, Empty } from "@/components/ui";
 import { PickupTimeline } from "@/components/pickups/PickupTimeline";
 import { ScheduleForm, HandoverForm, VerdictForm, SettleForm, RemoveItemButton, CancelPickupButton } from "@/components/pickups/PickupActions";
 import { CloseShortfall } from "@/components/pickups/CloseShortfall";
@@ -11,9 +11,9 @@ import { fmtWhen, tomorrowAt } from "@/components/pickups/format";
 import { requirePage } from "@/lib/server/page";
 import { HttpError, orgSettings } from "@/lib/server/auth";
 import { getPickup, openChargebacks, type PickupView } from "@/lib/server/pickups";
-import { tradeSources } from "@/lib/server/pickups-extra";
 import { nowIso } from "@/lib/server/db";
 import { CASE_STATUS_LABEL, OUTCOME_LABEL, PICKUP_STATUS_LABEL } from "@/lib/domain/lifecycle";
+import { LETTER_NOTE } from "@/components/counter/gradingView";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Pickup" };
@@ -29,6 +29,29 @@ function load(u: Parameters<typeof getPickup>[0], id: string): PickupView {
 
 function outcomeLabel(o: string): string {
   return (OUTCOME_LABEL as Record<string, string>)[o] ?? o;
+}
+
+type ItemGrading = PickupView["items"][number]["grading"];
+
+/**
+ * The SwapUp grade for one phone — the grade report version frozen at hand-over,
+ * linked to exactly that version (docs/GRADING.md). The partner's evidence at
+ * clearance; it never sets a price, and the link shows none. One place per
+ * phone: its row in the list below.
+ */
+function ItemGrade({ g }: { g: ItemGrading }) {
+  if (!g) return <span className="text-muted text-[13px]">No report</span>;
+  return (
+    <span className="inline-flex flex-col">
+      <a href={g.path} target="_blank" rel="noopener" className="font-semibold hover:underline">
+        {g.label}
+      </a>
+      <span className="text-[12px] text-muted">
+        report v{g.version}
+        {g.final ? ", at hand-over" : ""}
+      </span>
+    </span>
+  );
 }
 
 function Detail({ label, children }: { label: string; children: ReactNode }) {
@@ -54,9 +77,6 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
   const open = p.status === "requested" || p.status === "scheduled";
 
   const itemIds = new Set(p.items.map((i) => i.id));
-  const sources = tradeSources([...itemIds]);
-  const isSample = (caseId: string) => sources[caseId]?.kind === "sample";
-  const anySample = p.items.some((i) => isSample(i.id));
   const chargebacks = openChargebacks(u, p.storeId).filter((c) => itemIds.has(c.caseId));
   const openByCase = new Map(chargebacks.map((c) => [c.caseId, c.open]));
   const stillOpen = chargebacks.reduce((t, c) => t + c.open, 0);
@@ -67,7 +87,7 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
   );
   const partnerShortfall = p.totals.shortfall - storeShortfall;
 
-  const formItems = p.items.map((i) => ({ id: i.id, ref: i.ref, device: i.device, tradeValue: i.tradeValue, sample: isSample(i.id) }));
+  const formItems = p.items.map((i) => ({ id: i.id, ref: i.ref, device: i.device, tradeValue: i.tradeValue }));
   const awaitingVerdict = formItems.filter((i) => p.items.find((x) => x.id === i.id)?.status === "collected");
 
   const back =
@@ -126,15 +146,8 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
           </div>
         </Card>
 
-        {anySample ? (
-          <Banner tone="sample">
-            Trade-in values marked <strong>◆ SAMPLE</strong>{" "}come from an illustrative rate card, not {p.partnerName} prices. The arithmetic on this page is
-            real; the amounts are not partner prices.
-          </Banner>
-        ) : null}
-
         {/* ── the money ──────────────────────────────────── */}
-        <Card title="The store's money on this pickup">
+        <Card title="Money on this pickup">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
             <div>
               <div className="section-title">Quoted</div>
@@ -142,35 +155,35 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
                 <Money value={p.totals.quoted} />
               </div>
               <div className="hint">
-                {p.totals.devices} {p.totals.devices === 1 ? "phone" : "phones"} at the trade-in value given
+                {p.totals.devices} {p.totals.devices === 1 ? "phone" : "phones"}
               </div>
             </div>
             <div>
               <div className="section-title">Accepted</div>
               <div className={`kpi mt-1 ${p.totals.verified ? "text-up" : "text-muted"}`}>{p.totals.verified ? <Money value={p.totals.accepted} /> : "—"}</div>
               <div className="hint">
-                {p.totals.verified} of {p.totals.devices} verified by {p.partnerName}
+                {p.totals.verified} of {p.totals.devices} verified
               </div>
             </div>
             <div>
-              <div className="section-title">Shortfall the store carries</div>
+              <div className="section-title">Store shortfall</div>
               <div className={`kpi mt-1 ${storeShortfall ? "text-bad" : ""}`}>
                 <Money value={storeShortfall} />
               </div>
               <div className="hint">
                 {stillOpen ? (
                   <>
-                    <Money value={stillOpen} /> still open on the credit line
+                    <Money value={stillOpen} /> still open
                   </>
                 ) : storeShortfall ? (
-                  "Closed — nothing open on the line"
+                  "Closed"
                 ) : (
-                  "Nothing short so far"
+                  "None so far"
                 )}
                 {partnerShortfall > 0 ? (
                   <>
                     {" "}
-                    · <Money value={partnerShortfall} /> carried by {p.partnerName}
+                    · <Money value={partnerShortfall} /> on the partner
                   </>
                 ) : null}
               </div>
@@ -178,14 +191,14 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
             <div>
               <div className="section-title">Paid to the store</div>
               <div className={`kpi mt-1 ${p.settlementRef ? "text-up" : "text-muted"}`}>{p.settlementRef ? <Money value={p.settlementAmount} /> : "—"}</div>
-              <div className="hint">{p.settlementRef ? <span className="num">Ref {p.settlementRef}</span> : "Not settled yet"}</div>
+              <div className="hint">{p.settlementRef ? <span className="num">Ref {p.settlementRef}</span> : "Not yet"}</div>
             </div>
           </div>
         </Card>
 
         {/* ── what happens next ──────────────────────────── */}
         {p.status === "cancelled" ? (
-          <Banner>This pickup was cancelled. The phones on it went back to waiting at the store and can go on a new pickup.</Banner>
+          <Banner>Cancelled — the phones are back at the store.</Banner>
         ) : null}
 
         {p.status === "requested" && isPartner ? (
@@ -195,15 +208,15 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
         ) : null}
 
         {open && isManager && p.status === "requested" ? (
-          <Banner>Waiting for {p.partnerName} to book a collection slot. You can still hand the phones over if their collector arrives first.</Banner>
+          <Banner>Waiting for the partner to book a slot.</Banner>
         ) : null}
         {open && isManager && p.status === "scheduled" ? (
           <Banner tone="up">
-            {p.partnerName} will collect on <strong>{fmtWhen(p.scheduledFor)}</strong>
+            Collection <strong>{fmtWhen(p.scheduledFor)}</strong>
             {p.collectorName ? (
               <>
                 {" "}
-                — expect <strong>{p.collectorName}</strong>
+                · <strong>{p.collectorName}</strong>
               </>
             ) : null}
             .
@@ -227,8 +240,8 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
         {open && isAdmin ? (
           <Banner>
             {p.status === "scheduled"
-              ? `${p.partnerName} is booked to collect on ${fmtWhen(p.scheduledFor)}.`
-              : `Waiting for ${p.partnerName} to book a collection slot.`}
+              ? `Collection ${fmtWhen(p.scheduledFor)}.`
+              : "Waiting for the partner to book a slot."}
           </Banner>
         ) : null}
 
@@ -241,9 +254,7 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
               </span>
             }
           >
-            <p className="text-[14px] text-ink-2 mb-4">
-              Record your inspection verdict for each phone. When the last one is done the pickup moves to <strong>Verified</strong> and you can settle it.
-            </p>
+            <p className="text-[14px] text-ink-2 mb-4">Record a verdict for each phone.</p>
             <div className="grid lg:grid-cols-2 gap-4">
               {awaitingVerdict.map((i) => (
                 <VerdictForm key={i.id} pickupId={p.id} item={i} storeCarriesShortfall={liability === "store"} />
@@ -253,8 +264,7 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
         ) : null}
         {p.status === "collected" && !isPartner ? (
           <Banner>
-            With {p.partnerName} for inspection — {p.totals.verified} of {p.totals.devices} verified so far.
-            {releaseOn === "cleared" ? " Each phone frees the credit line when it is cleared." : ""}
+            With the partner for inspection.
           </Banner>
         ) : null}
 
@@ -265,27 +275,28 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
         ) : null}
         {p.status === "reconciled" && !isPartner ? (
           <Banner>
-            Every phone is verified. Waiting for {p.partnerName} to pay <strong><Money value={p.totals.accepted} /></strong> to the store.
+            All verified — waiting for the partner to pay.
           </Banner>
         ) : null}
 
         {p.status === "settled" ? (
           <Banner tone="up">
-            Settled {fmtWhen(p.settledAt)}: <strong><Money value={p.settlementAmount} /></strong> paid to {p.storeName}, reference <span className="num font-semibold">{p.settlementRef}</span>.
+            Settled {fmtWhen(p.settledAt)}.
           </Banner>
         ) : null}
 
         {/* ── the phones ─────────────────────────────────── */}
         <Card title={`Phones on this pickup (${p.items.length})`} pad={false}>
           {p.items.length === 0 ? (
-            <Empty title="No phones on this pickup">They were taken off or the pickup was cancelled.</Empty>
+            <Empty title="No phones on this pickup" />
           ) : (
             <div className="overflow-x-auto px-5 pb-3">
-              <table className="table min-w-[760px]">
+              <table className="table min-w-[880px]">
                 <thead>
                   <tr>
                     <th>Case</th>
                     <th>Phone</th>
+                    <th title={LETTER_NOTE}>SwapUp grade</th>
                     <th className="text-right!">Quoted</th>
                     <th>Verdict</th>
                     <th className="text-right!">Accepted</th>
@@ -307,12 +318,14 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
                         <td className="min-w-[170px]">
                           <div className="font-medium">{i.device ?? "—"}</div>
                           {i.customerName ? <div className="text-[12.5px] text-muted">{i.customerName}</div> : null}
-                          {i.dataClear === "due" ? <div className="text-[12.5px] text-warn font-semibold">Customer&apos;s data not cleared</div> : null}
+                          {i.dataClear === "due" ? <div className="text-[12.5px] text-warn font-semibold">Data not cleared</div> : null}
+                        </td>
+                        <td className="min-w-[130px]">
+                          <ItemGrade g={i.grading} />
                         </td>
                         <td className="text-right">
                           <div className="flex flex-col items-end gap-1">
                             <Money value={i.tradeValue} className="font-semibold" />
-                            {isSample(i.id) ? <SourceBadge kind="sample" /> : null}
                           </div>
                         </td>
                         <td className="min-w-[230px] max-w-[340px]">
@@ -353,6 +366,7 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
                   })}
                 </tbody>
               </table>
+              {p.items.some((i) => i.grading) ? <p className="hint">SwapUp grade at hand-over — it never sets the price.</p> : null}
             </div>
           )}
         </Card>
@@ -360,14 +374,7 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
         {/* ── open shortfalls ────────────────────────────── */}
         {chargebacks.length ? (
           <Card title="Open shortfalls">
-            <p className="text-[14px] text-ink-2 mb-3">
-              These amounts still count against {p.storeName}&apos;s credit line.{" "}
-              {isAdmin
-                ? "Close one once the store has made it good (or the partner has conceded it)."
-                : isPartner
-                  ? "You can close a not-received dispute once the phone is found or you accept the loss."
-                  : "Your programme admin closes these once the shortfall is settled."}
-            </p>
+            <p className="text-[14px] text-ink-2 mb-3">Still on the credit line.</p>
             <ul className="divide-y divide-[color:var(--line)]">
               {chargebacks.map((cb) => (
                 <li key={cb.caseId} className="py-3 flex flex-wrap items-start justify-between gap-3">

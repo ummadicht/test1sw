@@ -1,8 +1,10 @@
-import { db, tx, nowIso, newId, todayIso } from "./db";
-import { hashPassword, orgSettingsDefaults, type SessionUser, type Role } from "./auth";
+import { db, tx, nowIso, todayIso, newId, audit, parseJson } from "./db";
+import { hashPassword, orgSettingsDefaults, type Role } from "./auth";
+import { postEvents } from "./credit";
 import seedData from "./seed-data.json";
-import type { RateCard } from "../domain/ratecard";
 import type { Campaign } from "../domain/bonus";
+import { cancelEvents, OPEN_TRADE_STATUSES } from "../domain/lifecycle";
+import { RETIRED_QUOTE_LABEL, RETIRED_SOURCE_KIND, retiredSource } from "../domain/ratecard";
 
 /**
  * First-boot data. Two kinds, kept apart:
@@ -10,10 +12,15 @@ import type { Campaign } from "../domain/bonus";
  *   REFERENCE  Samsung India list prices for spare parts and new phones, read
  *              from samsung.com/in on 2026-10-15 and labelled as such (see
  *              scripts/build-seed-data.py and the two research CSVs beside it).
- *   DEMO       the clients, stores, people, campaign, a SAMPLE trade-in rate
- *              card and a handful of example cases, all flagged demo. The
- *              sample card is never a Cashify price, and a non-demo client
- *              cannot lock a trade-in priced from it.
+ *   TEST       the test programmes' clients, stores, people, logins and bonus
+ *              campaigns, flagged demo ("Test programme — no real money"), and a
+ *              buyback partner ("Buyback Partner (demo)", login `partner`).
+ *
+ * No prices of SwapUp's own and no example cases (owner, 2026-10-18: "Remove
+ * sample data"): a trade-in is priced by PriceIQ, the partner's uploaded rate
+ * card, or a quote staff type in — none of them → "No market price yet — enter
+ * a quote". A database seeded before that loses its example cases once
+ * (removeExampleCases); migration 15 (db.ts) removed the sample rate card.
  */
 
 type SeedData = {
@@ -32,7 +39,6 @@ type SeedData = {
     source: unknown;
   }[];
   repairBook: { modelId: string; part: string; price: number; source: unknown }[];
-  sampleRateCard: { modelId: string; variant: string; maxPrice: number }[];
   newDevices: { brand: string; model: string; series: string; variant: string; price: number; supportEndYear: number | null; sort: number; source: unknown }[];
 };
 
@@ -48,15 +54,14 @@ export function ensureSeeded(): Promise<void> {
       if (has.n === 0) seedBase();
       backfillModelCodes();
       renameDemoCentres();
-      const demoDone = db().prepare(`SELECT value FROM meta WHERE key = 'demo_cases'`).get();
-      if (!demoDone && process.env.SWAPUP_DEMO_CASES !== "0") {
-        try {
-          await seedDemoCases();
-        } catch (e) {
-          console.error("[swapup] demo cases failed (base data is fine):", e);
-        }
-        db().prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('demo_cases', ?)`).run(nowIso());
-      }
+      renameDemoPartner();
+      renameDemoPartnerIds();
+      const removed = removeExampleCases();
+      if (removed.length) console.log(`[swapup] removed ${removed.length} example cases seeded on first boot: ${removed.join(", ")}`);
+      const r = retireOldQuotes();
+      if (r.relabelled.length) console.log(`[swapup] test cases with a retired quote relabelled "${RETIRED_QUOTE_LABEL}": ${r.relabelled.join(", ")}`);
+      if (r.cancelled.length) console.log(`[swapup] locked test trade-ins on a retired quote cancelled, their holds released: ${r.cancelled.join(", ")}`);
+      if (r.history.length) console.warn(`[swapup] test trade-ins on a retired quote already in a pickup or collected — not cancelled, the owner decides: ${r.history.join(", ")}`);
     })();
   }
   return g.__swapup_seed;
@@ -98,30 +103,303 @@ function renameDemoCentres(): void {
   })();
 }
 
-export const SAMPLE_DEDUCTIONS: RateCard["deductions"] = {
-  deadBp: 7500,
-  callsBp: 2000,
-  screen: { flawless: 0, scratched: 600, lines_or_spots: 3500, cracked: 4000, not_working: 6500 },
-  body: { flawless: 0, scuffed: 300, dented: 1200, back_cracked: 1500, bent: 3500 },
-  issues: {
-    touch: 3000,
-    battery: 900,
-    charging: 1200,
-    rear_camera: 1800,
-    front_camera: 1000,
-    speaker: 700,
-    mic: 700,
-    wifi_bt: 1500,
-    fingerprint: 800,
-    buttons: 600,
-    vibration: 300,
-    liquid: 4500,
-  },
-  noChargerBp: 300,
-  noBoxBp: 200,
-  noBillBp: 300,
-  age: { lt3m: 0, "3to11m": 400, gt11m: 800 },
-};
+/**
+ * The test programmes' buyback partner, as a new database seeds it. A database seeded earlier
+ * gets these ids once (renameDemoPartnerIds); code finds the partner by its programme
+ * (demoPartnerId), never by a remembered id.
+ */
+export const DEMO_PARTNER = { orgId: "ptn_demo", name: "Buyback Partner (demo)", userId: "usr_partner", username: "partner", userName: "Partner Ops (demo)" } as const;
+
+/** The partner org of the seeded test programme (org_samsung_svc), whatever its id; null when there is none. */
+export function demoPartnerId(): string | null {
+  const r = db()
+    .prepare(`SELECT p.id FROM orgs c JOIN orgs p ON p.id = c.partner_id AND p.kind = 'partner' WHERE c.id = 'org_samsung_svc' AND c.demo = 1`)
+    .get() as { id: string } | undefined;
+  return r?.id ?? null;
+}
+
+/**
+ * Owner, 2026-10-17: don't refer to the partner's brand. A database seeded before that keeps the test
+ * programme's partner under its former brand — its name, its login, and copies of the name in
+ * the case records its quotes were written into. Rename them once. The former name is read from
+ * the partner's own row (the code never spells it), and only the sentences SwapUp itself wrote
+ * around it are swapped: never a reference, a reason or a name someone typed. Only that partner's
+ * rows, its test pickups and the cases of the programmes it serves. The login moves to `partner`
+ * only when no other user has it. Its ids move separately (renameDemoPartnerIds).
+ */
+export function renameDemoPartner(): void {
+  const d = db();
+  if (d.prepare(`SELECT 1 FROM meta WHERE key = 'renamed_demo_partner'`).get()) return;
+  const id = demoPartnerId();
+  const old = id ? (d.prepare(`SELECT name FROM orgs WHERE id = ?`).get(id) as { name: string }).name : null;
+  const P = DEMO_PARTNER;
+  d.transaction(() => {
+    if (id && old && old !== P.name) {
+      d.prepare(`UPDATE orgs SET name = ? WHERE id = ?`).run(P.name, id);
+      d.prepare(
+        `UPDATE users SET username = ? WHERE org_id = ? AND role = 'partner' AND lower(username) = lower(?) AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.username = ?)`
+      ).run(P.username, id, old, P.username);
+      d.prepare(`UPDATE users SET name = ? WHERE org_id = ? AND role = 'partner' AND name = ?`).run(P.userName, id, `${old} Ops (demo)`);
+      d.prepare(`UPDATE pickups SET collector_name = 'Sunil (partner)' WHERE demo = 1 AND partner_id = ? AND collector_name = ?`).run(id, `Sunil (${old})`);
+      renameCopies(id, old);
+    }
+    d.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('renamed_demo_partner', ?)`).run(nowIso());
+  })();
+}
+
+/** Every column that holds an org id or a user id (foreign keys, and the plain ones audit and money rows keep). */
+const ORG_ID_COLUMNS: readonly [string, string][] = [
+  ["orgs", "partner_id"],
+  ["stores", "org_id"],
+  ["users", "org_id"],
+  ["new_devices", "org_id"],
+  ["repair_book", "org_id"],
+  ["rate_cards", "partner_id"],
+  ["campaigns", "org_id"],
+  ["cases", "org_id"],
+  ["pickups", "org_id"],
+  ["pickups", "partner_id"],
+  ["test_sessions", "org_id"],
+  ["store_devices", "org_id"],
+  ["audit", "org_id"],
+];
+const USER_ID_COLUMNS: readonly [string, string][] = [
+  ["cases", "advisor_id"],
+  ["test_sessions", "created_by"],
+  ["handoff_nonces", "user_id"],
+  ["store_invites", "created_by"],
+  ["store_devices", "created_by"],
+  ["store_devices", "revoked_by"],
+  ["pin_attempts", "user_id"],
+  ["credit_ledger", "by_user"],
+  ["pickups", "requested_by"],
+  ["rate_cards", "created_by"],
+  ["grading_reports", "issued_by"],
+  ["phonecheck_records", "attached_by"],
+  ["audit", "user_id"],
+];
+
+/**
+ * Once: the test programme's partner org and its seeded login get today's ids (DEMO_PARTNER), so
+ * no id an older first boot gave them — ids reach URLs and API answers (`partner.partnerId`) —
+ * carries the partner's former brand. The old ids are read from the data (demoPartnerId, the
+ * partner's first login), never spelled here. Every column holding them moves in one transaction,
+ * foreign keys checked at commit; audit rows follow (their `entity_id` too). Skipped when the new
+ * id is already taken. Tokens issued to the old login stop working: it signs in again.
+ */
+export function renameDemoPartnerIds(): void {
+  const d = db();
+  if (d.prepare(`SELECT 1 FROM meta WHERE key = 'renamed_demo_partner_ids'`).get()) return;
+  const P = DEMO_PARTNER;
+  const oldOrg = demoPartnerId();
+  const oldUser = oldOrg
+    ? ((d.prepare(`SELECT id FROM users WHERE org_id = ? AND role = 'partner' ORDER BY created_at, id LIMIT 1`).get(oldOrg) as { id: string } | undefined)?.id ?? null)
+    : null;
+  const free = (table: string, id: string) => !d.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).get(id);
+  const move = (cols: readonly [string, string][], table: string, from: string, to: string) => {
+    for (const [t, c] of cols) d.prepare(`UPDATE ${t} SET ${c} = ? WHERE ${c} = ?`).run(to, from);
+    d.prepare(`UPDATE audit SET entity_id = ? WHERE entity_id = ?`).run(to, from);
+    d.prepare(`UPDATE audit SET detail = replace(detail, ?, ?) WHERE instr(detail, ?) > 0`).run(JSON.stringify(from), JSON.stringify(to), JSON.stringify(from));
+    d.prepare(`UPDATE ${table} SET id = ? WHERE id = ?`).run(to, from);
+  };
+  d.transaction(() => {
+    d.pragma("defer_foreign_keys = ON");
+    if (oldOrg && oldOrg !== P.orgId && free("orgs", P.orgId)) move(ORG_ID_COLUMNS, "orgs", oldOrg, P.orgId);
+    if (oldUser && oldUser !== P.userId && free("users", P.userId)) move(USER_ID_COLUMNS, "users", oldUser, P.userId);
+    d.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('renamed_demo_partner_ids', ?)`).run(nowIso());
+  })();
+}
+
+/**
+ * Copies of the former name in the case records the partner priced (its quotes, the storage chips,
+ * the flags written at Apply, its pickup verdicts): exact sentences SwapUp wrote; nothing typed.
+ */
+function renameCopies(partnerId: string, old: string): void {
+  const d = db();
+  const P = DEMO_PARTNER;
+  const pair = (k: string, a: string, b: string): [string, string] => [JSON.stringify({ [k]: a }).slice(1, -1), JSON.stringify({ [k]: b }).slice(1, -1)];
+  const swaps: [string, string][] = [
+    pair("partner", old, P.name),
+    pair("by", `${old} Ops (demo)`, P.userName),
+    [`not ${old} prices`, "not the partner's prices"],
+    [`${old} quote · ref `, `${P.name} quote · ref `],
+    [`${old} value in repaired condition`, `${P.name} value in repaired condition`],
+    [`Entered from the ${old} app`, `Entered from the ${P.name} app`],
+    [`enter the ${old} quote on the full case`, "enter the partner's quote on the full case"],
+    [
+      `The ${old} rate card has no price for this model and storage — ask the partner for a quote rather than using a similar model.`,
+      "No rate-card price for this model and storage — ask the partner.",
+    ],
+  ];
+  const wrap = (col: string) => swaps.reduce((sql) => `replace(${sql}, ?, ?)`, col);
+  const args = swaps.flat();
+  const cols = ["quote", "repaired_quote", "storage_quotes", "camera_check", "clearance"];
+  d.prepare(
+    `UPDATE cases SET ${cols.map((c) => `${c} = ${wrap(c)}`).join(", ")}
+     WHERE org_id IN (SELECT id FROM orgs WHERE partner_id = ?)
+       AND (${cols.map((c) => `instr(${c}, ?) > 0`).join(" OR ")})`
+  ).run(...cols.flatMap(() => args), partnerId, ...cols.map(() => old));
+}
+
+/**
+ * The example cases a first boot used to seed into the test programmes (seedDemoCases, removed
+ * 2026-10-18 — owner: "Remove sample data"), exactly as seeded: store, customer name and mobile.
+ * Together with `cases.demo = 1` — a flag nothing but that seeding ever set — in a demo
+ * programme, they pick out those cases and nothing else: never a case staff or a test opened.
+ */
+export const SEEDED_EXAMPLE_CASES: readonly { store: string; name: string; phone: string }[] = [
+  { store: "st_and", name: "Meera Iyer", phone: "9820012345" },
+  { store: "st_and", name: "Vikram Joshi", phone: "9867012345" },
+  { store: "st_and", name: "Farhan Shaikh", phone: "9930012345" },
+  { store: "st_and", name: "Ananya Kulkarni", phone: "9769012345" },
+  { store: "st_and", name: "Rohan Pillai", phone: "9821012345" },
+  { store: "st_and", name: "Sneha Patil", phone: "9819012345" },
+  { store: "st_and", name: "Imran Khan", phone: "9833012345" },
+  { store: "st_kor", name: "Lakshmi Narayan", phone: "9845012345" },
+  { store: "st_kor", name: "Deepak Hegde", phone: "9880012345" },
+  { store: "st_kor", name: "Pooja Reddy", phone: "9886012345" },
+  { store: "st_cpx", name: "Kabir Malhotra", phone: "9811012345" },
+];
+
+/**
+ * Once: delete the seeded example cases and everything that hangs off them — their credit-ledger
+ * rows (the holds were never real money, so the store's line is freed), any test sessions, grading
+ * reports or Phonecheck links, the seeded pickup once it has no case left, and the audit rows about
+ * those cases and that pickup (they describe made-up events). The removal itself is audited, with
+ * the refs. Returns the refs removed.
+ */
+export function removeExampleCases(): string[] {
+  const d = db();
+  if (d.prepare(`SELECT 1 FROM meta WHERE key = 'removed_example_cases'`).get()) return [];
+  const find = d.prepare(
+    `SELECT c.id, c.ref FROM cases c JOIN orgs o ON o.id = c.org_id
+      WHERE c.demo = 1 AND o.demo = 1 AND c.store_id = ?
+        AND json_extract(c.customer, '$.name') = ? AND json_extract(c.customer, '$.phone') = ?`
+  );
+  const hits = SEEDED_EXAMPLE_CASES.flatMap((e) => find.all(e.store, e.name, e.phone) as { id: string; ref: string }[]);
+  const refs = hits.map((h) => h.ref).sort();
+  tx(() => {
+    for (const { id } of hits) {
+      d.prepare(`DELETE FROM credit_ledger WHERE case_id = ?`).run(id);
+      d.prepare(`DELETE FROM test_sessions WHERE case_id = ?`).run(id);
+      d.prepare(`DELETE FROM grading_reports WHERE case_id = ?`).run(id);
+      d.prepare(`UPDATE phonecheck_records SET case_id = NULL, attached_at = NULL, attached_by = NULL WHERE case_id = ?`).run(id);
+      d.prepare(`DELETE FROM cases WHERE id = ?`).run(id);
+      d.prepare(`DELETE FROM audit WHERE entity = 'case' AND entity_id = ?`).run(id);
+    }
+    const pickups = d.prepare(`SELECT id, ref FROM pickups WHERE demo = 1 AND NOT EXISTS (SELECT 1 FROM cases c WHERE c.pickup_id = pickups.id)`).all() as { id: string; ref: string }[];
+    for (const p of pickups) {
+      d.prepare(`DELETE FROM pickups WHERE id = ?`).run(p.id);
+      d.prepare(`DELETE FROM audit WHERE entity = 'pickup' AND entity_id = ?`).run(p.id);
+    }
+    if (refs.length || pickups.length) audit({ action: "seed.example_cases_removed", detail: { cases: refs, pickups: pickups.map((p) => p.ref) } });
+    d.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('removed_example_cases', ?)`).run(JSON.stringify({ at: nowIso(), cases: refs }));
+  });
+  return refs;
+}
+
+/** Why a locked test trade-in priced from a retired source was cancelled (cases.closed_reason, the audit). */
+export const RETIRED_QUOTE_CANCEL_REASON = "Retired test quote — priced from a source SwapUp no longer uses. Cancelled; the store's credit line is released.";
+
+type QuoteLike = { source?: { kind?: string | null; label?: string | null } | null } & Record<string, unknown>;
+
+/** The stored quote with its retired source relabelled — still a retired kind, so it is never reused. */
+function relabelled(q: QuoteLike | null): QuoteLike | null {
+  if (!q || !q.source || !retiredSource(q.source.kind)) return q;
+  return { ...q, source: { kind: RETIRED_SOURCE_KIND, label: RETIRED_QUOTE_LABEL } };
+}
+
+/**
+ * Once (owner, 2026-10-18: "Remove sample data" — never a made-up price): the test programmes'
+ * cases still carrying a quote from a source SwapUp no longer has (retiredSource — an older
+ * build's illustrative card). An open case re-asks such a quote anyway (cases.ts treats it as
+ * lapsed); what is left is history, and it must keep neither the old words nor the old money:
+ *
+ *   • the quote and the repaired value are re-stored as RETIRED_SOURCE_KIND / RETIRED_QUOTE_LABEL
+ *     (still retired, so never reused) — the old kind, the card's own label, date and id go;
+ *   • the stored answer's caveat about that card goes (its "Why this answer" no longer says it);
+ *   • storage chips priced off that card (flagged by the older build) go — asked again when needed;
+ *   • a LOCKED one — at the store, its value held on the store's credit line — is cancelled and
+ *     what it still holds is released: a partner pickup would otherwise collect and settle it at
+ *     that price. One already in a pickup or collected can't be cancelled from here: it is
+ *     relabelled and named in the log (and the audit) for the owner to decide; one already
+ *     closed stays as history, relabelled.
+ *
+ * Test programmes only (orgs.demo = 1): a live programme's case is never touched. Each case is its
+ * own transaction, so one that can't be changed (the ledger refuses) is logged and the rest go on;
+ * this never throws (it runs on boot). Audited.
+ */
+export function retireOldQuotes(): { relabelled: string[]; cancelled: string[]; history: string[] } {
+  const out = { relabelled: [] as string[], cancelled: [] as string[], history: [] as string[] };
+  const d = db();
+  if (d.prepare(`SELECT 1 FROM meta WHERE key = 'retired_test_quotes'`).get()) return out;
+  type Row = { id: string; ref: string; status: string; org_id: string; store_id: string; quote: string | null; repaired_quote: string | null; decision: string | null; storage_quotes: string | null; trade_value: number | null };
+  const rows = d
+    .prepare(
+      `SELECT c.id, c.ref, c.status, c.org_id, c.store_id, c.quote, c.repaired_quote, c.decision, c.storage_quotes, c.trade_value
+         FROM cases c JOIN orgs o ON o.id = c.org_id
+        WHERE o.demo = 1 AND (c.quote IS NOT NULL OR c.repaired_quote IS NOT NULL OR c.storage_quotes IS NOT NULL)
+        ORDER BY c.ref`
+    )
+    .all() as Row[];
+  const held = d.prepare(
+    `SELECT COALESCE(SUM(CASE kind WHEN 'hold' THEN amount ELSE 0 END), 0) - COALESCE(SUM(CASE kind WHEN 'release' THEN amount ELSE 0 END), 0) AS n
+       FROM credit_ledger WHERE case_id = ?`
+  );
+  for (const r of rows) {
+    const quote = parseJson<QuoteLike | null>(r.quote, null);
+    const repaired = parseJson<QuoteLike | null>(r.repaired_quote, null);
+    const chips = parseJson<Record<string, unknown>[] | null>(r.storage_quotes, null);
+    const retiredQuote = retiredSource(quote?.source?.kind);
+    const retiredRepaired = retiredSource(repaired?.source?.kind);
+    // The older build flagged a chip priced off its illustrative card; today's chips carry no such flag.
+    const retiredChips = Array.isArray(chips) && chips.some((c) => !!c && typeof c === "object" && c.sample === true);
+    if (!retiredQuote && !retiredRepaired && !retiredChips) continue;
+    try {
+      tx(() => {
+        const now = nowIso();
+        const decision = parseJson<{ caveats?: unknown } | null>(r.decision, null);
+        const caveats = decision && Array.isArray(decision.caveats) ? (decision.caveats as unknown[]) : null;
+        const keptCaveats = caveats ? caveats.filter((c) => !(typeof c === "string" && /\bsample\b/i.test(c))) : null;
+        d.prepare(`UPDATE cases SET quote = ?, repaired_quote = ?, storage_quotes = ?, decision = ?, updated_at = ? WHERE id = ?`).run(
+          quote ? JSON.stringify(relabelled(quote)) : r.quote,
+          repaired ? JSON.stringify(relabelled(repaired)) : r.repaired_quote,
+          retiredChips ? null : r.storage_quotes,
+          decision && keptCaveats && keptCaveats.length !== caveats!.length ? JSON.stringify({ ...decision, caveats: keptCaveats }) : r.decision,
+          now,
+          r.id
+        );
+        let cancelled = false;
+        if (retiredQuote && r.status === "locked") {
+          const upd = d
+            .prepare(`UPDATE cases SET status = 'cancelled', closed_reason = ?, closed_at = ?, updated_at = ? WHERE id = ? AND status = 'locked'`)
+            .run(RETIRED_QUOTE_CANCEL_REASON, now, now, r.id);
+          if (upd.changes === 1) {
+            const outstanding = (held.get(r.id) as { n: number }).n;
+            if (outstanding > 0) postEvents(r.store_id, cancelEvents(r.id, outstanding, now), null);
+            audit({ orgId: r.org_id, storeId: r.store_id, action: "case.cancel", entity: "case", entityId: r.id, detail: { reason: RETIRED_QUOTE_CANCEL_REASON, automatic: true, released: Math.max(0, outstanding), tradeValue: r.trade_value } });
+            cancelled = true;
+          }
+        }
+        if (cancelled) out.cancelled.push(r.ref);
+        // Still moving money (in a pickup, collected): the owner decides — it can't be cancelled from here.
+        else if (retiredQuote && r.status !== "locked" && (OPEN_TRADE_STATUSES as string[]).includes(r.status)) out.history.push(`${r.ref} (${r.status})`);
+        out.relabelled.push(r.ref);
+      });
+    } catch (e) {
+      console.error(`[swapup] ${r.ref}: its retired quote could not be retired — ${(e as Error).message}`);
+    }
+  }
+  try {
+    tx(() => {
+      if (out.relabelled.length) audit({ action: "seed.retired_test_quotes", detail: out });
+      d.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('retired_test_quotes', ?)`).run(JSON.stringify({ at: nowIso(), ...out }));
+    });
+  } catch (e) {
+    console.error(`[swapup] retired test quotes: not recorded — ${(e as Error).message}`);
+  }
+  return out;
+}
 
 function demoPassword(): string {
   return process.env.SWAPUP_DEMO_PASSWORD || "swapup2026";
@@ -134,11 +412,11 @@ function seedBase(): void {
     const d = db();
     const org = d.prepare(`INSERT INTO orgs (id, name, kind, client_type, target_brand, partner_id, settings, demo, created_at) VALUES (?,?,?,?,?,?,?,?,?)`);
     org.run("org_platform", "SwapUp", "platform", null, null, null, "{}", 0, now);
-    org.run("ptn_cashify", "Cashify", "partner", null, null, null, "{}", 0, now);
+    org.run(DEMO_PARTNER.orgId, DEMO_PARTNER.name, "partner", null, null, null, "{}", 0, now);
     const s1 = { ...orgSettingsDefaults(), releaseOn: "collected" };
     const s2 = { ...orgSettingsDefaults(), releaseOn: "cleared", maxAgeDays: 5 };
-    org.run("org_samsung_svc", "SwapUp Experience Centers (demo)", "client", "oem_service", "Samsung", "ptn_cashify", JSON.stringify(s1), 1, now);
-    org.run("org_xc", "Any Client — Experience Centres (demo)", "client", "experience_center", "Samsung", "ptn_cashify", JSON.stringify(s2), 1, now);
+    org.run("org_samsung_svc", "SwapUp Experience Centers (demo)", "client", "oem_service", "Samsung", DEMO_PARTNER.orgId, JSON.stringify(s1), 1, now);
+    org.run("org_xc", "Any Client — Experience Centres (demo)", "client", "experience_center", "Samsung", DEMO_PARTNER.orgId, JSON.stringify(s2), 1, now);
 
     const store = d.prepare(`INSERT INTO stores (id, org_id, name, kind, city, code, credit_limit, created_at) VALUES (?,?,?,?,?,?,?,?)`);
     store.run("st_and", "org_samsung_svc", "Andheri West Experience Center", "service_center", "Mumbai", "AND", 300_000, now);
@@ -148,7 +426,7 @@ function seedBase(): void {
     const user = d.prepare(`INSERT INTO users (id, org_id, store_id, username, name, role, password_hash, created_at) VALUES (?,?,?,?,?,?,?,?)`);
     const users: [string, string, string | null, string, string, Role][] = [
       ["usr_platform", "org_platform", null, "platform", "SwapUp Ops", "platform"],
-      ["usr_cashify", "ptn_cashify", null, "cashify", "Cashify Ops (demo)", "partner"],
+      [DEMO_PARTNER.userId, DEMO_PARTNER.orgId, null, DEMO_PARTNER.username, DEMO_PARTNER.userName, "partner"],
       ["usr_samsung", "org_samsung_svc", null, "samsung", "Programme Admin (demo)", "org_admin"],
       ["usr_mgr_and", "org_samsung_svc", "st_and", "manager", "Priya Nair", "store_manager"],
       ["usr_adv_and", "org_samsung_svc", "st_and", "advisor", "Rahul Desai", "advisor"],
@@ -172,24 +450,6 @@ function seedBase(): void {
       for (const r of DATA.repairBook) rb.run(orgId, r.modelId, r.part, r.price, JSON.stringify(r.source));
       for (const n of DATA.newDevices) nd.run(newId("nd"), orgId, n.brand, n.model, n.series, n.variant, n.price, n.supportEndYear, n.sort, JSON.stringify(n.source));
     }
-
-    const card: RateCard = {
-      id: "rc_sample",
-      partner: "Cashify",
-      source: {
-        kind: "sample",
-        label: "SAMPLE rate card — illustrative values, not Cashify prices",
-        effectiveFrom: DATA.observedAt,
-        note: "Replace by uploading the partner's own rate card on /partner/rate-cards, or connect the live API.",
-      },
-      quoteValidityDays: 3,
-      roundTo: 10,
-      maxDeductionBp: 8500,
-      floorBp: 600,
-      deductions: SAMPLE_DEDUCTIONS,
-      entries: DATA.sampleRateCard,
-    };
-    d.prepare(`INSERT INTO rate_cards (id, partner_id, data, active, created_by, created_at) VALUES (?,?,?,1,?,?)`).run("rc_sample", "ptn_cashify", JSON.stringify(card), "usr_platform", now);
 
     const start = todayIso().slice(0, 8) + "01";
     const c1: Campaign = {
@@ -222,150 +482,4 @@ function seedBase(): void {
     camp.run(c1.id, "org_samsung_svc", JSON.stringify(c1), now);
     camp.run(c2.id, "org_xc", JSON.stringify(c2), now);
   });
-}
-
-/* ── demo cases, driven through the real services so the ledger is real ── */
-
-function sessionFor(userId: string): SessionUser {
-  const u = db().prepare(`SELECT id, username, name, role, org_id, store_id FROM users WHERE id = ?`).get(userId) as {
-    id: string;
-    username: string;
-    name: string;
-    role: Role;
-    org_id: string;
-    store_id: string | null;
-  };
-  return { id: u.id, username: u.username, name: u.name, role: u.role, orgId: u.org_id, storeId: u.store_id, exp: Date.now() + 3_600_000 };
-}
-
-function deviceId(orgId: string, model: string, variant: string): string {
-  const r = db().prepare(`SELECT id FROM new_devices WHERE org_id = ? AND model = ? AND variant = ?`).get(orgId, model, variant) as { id: string } | undefined;
-  if (!r) throw new Error(`demo seed: no new device ${model} ${variant}`);
-  return r.id;
-}
-
-const CHECKS = {
-  ownership: true,
-  simRemoved: true,
-  imeiMatches: true,
-  noFinanceLock: true,
-  kym: { status: "clear" as const, reference: "KYM SMS reply (demo)" },
-};
-
-function backdate(caseId: string, days: number): void {
-  const at = new Date(Date.now() - days * 86_400_000).toISOString();
-  db().prepare(`UPDATE cases SET created_at = ?, locked_at = CASE WHEN locked_at IS NULL THEN NULL ELSE ? END, updated_at = ? WHERE id = ?`).run(at, at, at, caseId);
-  db().prepare(`UPDATE credit_ledger SET at = ? WHERE case_id = ? AND kind = 'hold'`).run(at, caseId);
-}
-
-async function seedDemoCases(): Promise<void> {
-  const cases = await import("./cases");
-  const pickups = await import("./pickups");
-  const adv = sessionFor("usr_adv_and");
-  const mgr = sessionFor("usr_mgr_and");
-  const ptn = sessionFor("usr_cashify");
-  const acc = (charger: boolean, box: boolean, bill: boolean, age: "lt3m" | "3to11m" | "gt11m") => ({ accessories: { charger, box, bill }, age });
-
-  type Spec = {
-    who: SessionUser;
-    name: string;
-    phone: string;
-    model: string;
-    variant: string;
-    imei: string;
-    faults: string[];
-    coverage?: "none" | "warranty" | "care_plus";
-    extra?: { body?: string; issues?: string[] };
-    accessories: ReturnType<typeof acc>;
-    upgrade?: [string, string];
-  };
-  const make = async (s: Spec) => {
-    const c = cases.createCase(s.who, { customerName: s.name, customerPhone: s.phone, demo: true });
-    await cases.updateCase(s.who, c.id, { modelId: s.model, variant: s.variant, imei: s.imei, faults: s.faults, coverage: s.coverage ?? "none" });
-    const v1 = await cases.updateCase(s.who, c.id, { conditionFromFaults: true });
-    const cond = { ...v1.condition!, ...acc(s.accessories.accessories.charger, s.accessories.accessories.box, s.accessories.accessories.bill, s.accessories.age) };
-    if (s.extra?.body) cond.body = s.extra.body as typeof cond.body;
-    if (s.extra?.issues) cond.issues = [...new Set([...cond.issues, ...s.extra.issues])].sort() as typeof cond.issues;
-    await cases.updateCase(s.who, c.id, { condition: cond });
-    if (s.upgrade) await cases.updateCase(s.who, c.id, { upgradeDeviceId: deviceId(s.who.orgId, s.upgrade[0], s.upgrade[1]) });
-    return c.id;
-  };
-  const lock = (who: SessionUser, id: string, name: string, phone: string, idType = "aadhaar", last4 = "4821") =>
-    cases.lockTradeIn(who, id, { customer: { name, phone, idType, idLast4: last4 }, checks: CHECKS });
-  // The customer reset the phone after accepting; the store saw the setup screen.
-  const cleared = (who: SessionUser, id: string) =>
-    cases.recordDataClear(who, id, { accountsSignedOut: true, resetDone: true, setupScreenSeen: true, noPreviousAccount: true });
-
-  // Andheri — the full journey.
-  const a1 = await make({ who: adv, name: "Meera Iyer", phone: "9820012345", model: "galaxy-s22", variant: "128GB", imei: "35278912345678", faults: ["screen_cracked", "battery_drain"], accessories: acc(true, false, true, "gt11m"), upgrade: ["Galaxy S25", "256GB"] });
-  lock(adv, a1, "Meera Iyer", "9820012345");
-  cleared(adv, a1);
-  backdate(a1, 6);
-
-  const a2 = await make({ who: adv, name: "Vikram Joshi", phone: "9867012345", model: "galaxy-a54-5g", variant: "128GB", imei: "35412309876543", faults: ["battery_drain"], accessories: acc(true, true, true, "gt11m"), upgrade: ["Galaxy A56 5G", "8GB+256GB"] });
-  cases.chooseRepair(adv, a2);
-
-  const a3 = await make({ who: adv, name: "Farhan Shaikh", phone: "9930012345", model: "galaxy-s21-fe", variant: "128GB", imei: "35999912345670", faults: ["back_cracked"], extra: { body: "back_cracked" }, accessories: acc(false, false, false, "gt11m"), upgrade: ["Galaxy S25 FE", "256GB"] });
-  lock(adv, a3, "Farhan Shaikh", "9930012345", "pan", "123F");
-  backdate(a3, 4);
-
-  const a4 = await make({ who: adv, name: "Ananya Kulkarni", phone: "9769012345", model: "iphone-13", variant: "128GB", imei: "35345612345678", faults: [], extra: { body: "scuffed" }, accessories: acc(true, true, true, "gt11m"), upgrade: ["Galaxy S26", "256GB"] });
-  lock(adv, a4, "Ananya Kulkarni", "9769012345");
-  const a5 = await make({ who: adv, name: "Rohan Pillai", phone: "9821012345", model: "galaxy-z-flip5", variant: "256GB", imei: "35123498765432", faults: ["display_lines"], accessories: acc(true, true, false, "gt11m"), upgrade: ["Galaxy Z Flip7", "256GB"] });
-  lock(adv, a5, "Rohan Pillai", "9821012345", "driving_licence", "0042");
-  cleared(adv, a4);
-  cleared(adv, a5);
-  backdate(a4, 12);
-  backdate(a5, 11);
-
-  // A completed pickup: requested → scheduled → collected → verified (one regrade) → settled.
-  const p1 = pickups.requestPickup(mgr, { caseIds: [a4, a5], demo: true });
-  pickups.schedulePickup(ptn, p1.id, { scheduledFor: new Date(Date.now() - 9 * 86_400_000).toISOString(), collectorName: "Sunil (Cashify)" });
-  pickups.collectPickup(ptn, p1.id, { collectedCaseIds: [a4, a5], collectorName: "Sunil (Cashify)", handoverBy: "Priya Nair" });
-  pickups.clearItem(ptn, p1.id, { caseId: a4, outcome: "cleared" });
-  const a5v = cases.getCase(mgr, a5);
-  pickups.clearItem(ptn, p1.id, { caseId: a5, outcome: "regraded", accepted: Math.floor(((a5v.tradeValue ?? 0) * 0.8) / 10) * 10, reason: "Hinge creaks and a pressure mark on the inner display not declared at the counter" });
-  pickups.settlePickup(ptn, p1.id, { reference: "UTR-DEMO-0001" });
-  db().prepare(`UPDATE pickups SET requested_at = ?, collected_at = ?, reconciled_at = ?, settled_at = ? WHERE id = ?`).run(
-    new Date(Date.now() - 10 * 86_400_000).toISOString(),
-    new Date(Date.now() - 9 * 86_400_000).toISOString(),
-    new Date(Date.now() - 7 * 86_400_000).toISOString(),
-    new Date(Date.now() - 5 * 86_400_000).toISOString(),
-    p1.id
-  );
-  // Keep each phone's own timeline in step with the backdated pickup: verdicts on
-  // the verification day, payment on the settlement day (not "now", after both).
-  db().prepare(`UPDATE cases SET clearance = json_set(clearance, '$.at', ?), closed_at = ?, settled_at = ? WHERE pickup_id = ?`).run(
-    new Date(Date.now() - 7 * 86_400_000).toISOString(),
-    new Date(Date.now() - 7 * 86_400_000).toISOString(),
-    new Date(Date.now() - 5 * 86_400_000).toISOString(),
-    p1.id
-  );
-
-  // In progress at the counter right now.
-  await make({ who: adv, name: "Sneha Patil", phone: "9819012345", model: "galaxy-s23", variant: "128GB", imei: "35000011112222", faults: ["screen_cracked"], accessories: acc(true, false, true, "gt11m") });
-  const w = await make({ who: adv, name: "Imran Khan", phone: "9833012345", model: "galaxy-m32", variant: "128GB", imei: "35987600011122", faults: ["charging_issue"], accessories: acc(true, false, false, "gt11m") });
-  cases.walkAway(adv, w, "Wanted to think about it");
-
-  // Koramangala — a line close to its limit, so the warning shows.
-  const advK = sessionFor("usr_adv_kor");
-  for (const [name, phone, model, variant, imei, faults, up] of [
-    ["Lakshmi Narayan", "9845012345", "galaxy-s23-ultra", "256GB", "35201911112223", ["screen_cracked"], ["Galaxy S26 Ultra", "256GB"]],
-    ["Deepak Hegde", "9880012345", "galaxy-z-fold5", "256GB", "35201911112231", ["display_lines"], ["Galaxy Z Fold7", "256GB"]],
-    ["Pooja Reddy", "9886012345", "galaxy-s24", "128GB", "35201911112249", [], ["Galaxy S26", "256GB"]],
-  ] as [string, string, string, string, string, string[], [string, string]][]) {
-    const id = await make({ who: advK, name, phone, model, variant, imei, faults, accessories: acc(true, true, true, "gt11m"), upgrade: up });
-    try {
-      lock(advK, id, name, phone);
-      backdate(id, 3);
-    } catch {
-      /* a demo device that would breach the line just stays quoted — which is the point of the line */
-    }
-  }
-
-  // Connaught Place — any-brand experience centre.
-  const advX = sessionFor("usr_xc_adv");
-  const x1 = await make({ who: advX, name: "Kabir Malhotra", phone: "9811012345", model: "oneplus-11", variant: "256GB", imei: "35776611223344", faults: [], extra: { body: "scuffed" }, accessories: acc(true, true, true, "gt11m"), upgrade: ["Galaxy S25 Ultra", "256GB"] });
-  lock(advX, x1, "Kabir Malhotra", "9811012345", "voter_id", "7731");
-  backdate(x1, 2);
 }

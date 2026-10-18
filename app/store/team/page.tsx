@@ -23,7 +23,7 @@ export default async function StoreTeamPage() {
         stores={store ? [{ id: store.id, name: store.name, orgId: store.org_id }] : []}
         meId={u.id}
         fixedOrgId={u.orgId}
-        intro={<>You can add counter advisors, reset their passwords and deactivate them. Store managers are added by your programme admin.</>}
+        intro={<>Add, reset and deactivate advisors.</>}
       />
     </AppShell>
   );

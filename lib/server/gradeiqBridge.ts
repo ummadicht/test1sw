@@ -3,7 +3,7 @@ import { db, nowIso, parseJson, audit } from "./db";
 import * as giq from "./gradeiq";
 import { GradeiqError } from "./gradeiq";
 import { matchModel, type DeviceReport, type Declared, type TestResults, type TradeModelRef } from "../domain/diagnostics";
-import { scanFirstApp, scanFirstLock, scanFirstMessage, readPhase } from "../domain/phoneLed";
+import { coloursApp, scanFirstApp, scanFirstLock, scanFirstMessage, readPhase } from "../domain/phoneLed";
 import {
   finality,
   mapCamera,
@@ -49,7 +49,15 @@ export type GradeiqState = "disabled" | "pending" | "ready" | "failed";
 
 const SYNC_STATUSES = ["joined", "testing", "complete"];
 const SCREEN_EVERY_MS = 2_000;
-const DEVICE_SCREEN_EVERY_MS = 500;
+/**
+ * The customer's phone reads GradeIQ's /screen FRESH on every poll: GradeIQ's
+ * camera page gives the phone 4 s to confirm white, and a reading reused from
+ * up to half a second ago was one more delay in a relay that already has two
+ * hops each way. A read already in flight is shared only if it started within
+ * DEVICE_SCREEN_SHARE_MS — never an older one.
+ */
+const DEVICE_SCREEN_EVERY_MS = 0;
+const DEVICE_SCREEN_SHARE_MS = 120;
 const PULL_EVERY_MS = 5_000;
 const MAX_AUTO_CREATES = 3;
 
@@ -81,6 +89,8 @@ export type GiqRow = {
   gradeiq_devicefax: string | null;
   /** Where SwapUp Check ≥ 0.6.0 says it is (POST /api/device/phase). */
   phone_phase?: string | null;
+  /** The advisor let the phone go on from Scan without the camera ({by, userId, at}). */
+  scan_release?: string | null;
 };
 
 /** What the last /screen read and the last session pull said (gradeiq_screen). */
@@ -95,7 +105,7 @@ type Mem = {
   creating: Map<string, Promise<void>>;
   createTimers: Map<string, ReturnType<typeof setTimeout>>;
   sync: Map<string, { running: boolean; again: boolean; timer: ReturnType<typeof setTimeout> | null; failures: number }>;
-  screen: Map<string, { at: number; promise: Promise<void> | null }>;
+  screen: Map<string, { at: number; promise: Promise<void> | null; startedAt?: number; savedFrom?: number }>;
   pulling: Map<string, Promise<void>>;
 };
 const g = globalThis as typeof globalThis & { __swapup_giq?: Mem };
@@ -346,12 +356,19 @@ function syncStatus(r: GiqRow): { state: "idle" | "in_sync" | "sending" | "retry
 
 /* ─────────────────────────── pull (calls 4 + 5) ─────────────────────────── */
 
-/** Read GradeIQ's /screen unless a read newer than maxAgeMs exists; persist what changed. */
+/**
+ * Read GradeIQ's /screen unless a read newer than maxAgeMs exists; persist what
+ * changed. A read in flight is shared when it started recently enough for the
+ * caller (maxAgeMs, or DEVICE_SCREEN_SHARE_MS for the phone's maxAge of 0);
+ * otherwise a new read starts beside it, and whichever STARTED last is the one
+ * kept — an older read that finishes late never overwrites a newer one.
+ */
 function refreshScreen(id: string, gradeiqId: string, maxAgeMs: number): Promise<void> {
   const c = mem.screen.get(id);
-  if (c?.promise) return c.promise;
-  if (c && Date.now() - c.at < maxAgeMs) return Promise.resolve();
-  const entry = { at: Date.now(), promise: null as Promise<void> | null };
+  const started = Date.now();
+  if (c?.promise && started - (c.startedAt ?? 0) <= Math.max(maxAgeMs, DEVICE_SCREEN_SHARE_MS)) return c.promise;
+  if (c && !c.promise && started - c.at < maxAgeMs) return Promise.resolve();
+  const entry: { at: number; promise: Promise<void> | null; startedAt: number; savedFrom: number } = { at: started, promise: null, startedAt: started, savedFrom: c?.savedFrom ?? 0 };
   entry.promise = (async () => {
     let screen: GiqScreen | null = null;
     let err: string | null = null;
@@ -362,6 +379,10 @@ function refreshScreen(id: string, gradeiqId: string, maxAgeMs: number): Promise
     }
     const r = row(id);
     if (!r) return;
+    // A read that started before the newest one saved has nothing newer to say.
+    const cur = mem.screen.get(id);
+    if ((cur?.savedFrom ?? 0) > started) return;
+    if (cur) cur.savedFrom = started;
     const prev = live(r);
     const now = nowIso();
     const next: Live = {
@@ -379,8 +400,12 @@ function refreshScreen(id: string, gradeiqId: string, maxAgeMs: number): Promise
       if (!screen.cosmeticDone && r.gradeiq_cosmetic_done_at) db().prepare(`UPDATE test_sessions SET gradeiq_cosmetic_done_at = NULL WHERE id = ?`).run(id);
     }
   })().finally(() => {
-    entry.promise = null;
-    entry.at = Date.now();
+    const cur = mem.screen.get(id);
+    // Only the newest read's finish moves the cache; an older one may still be finishing beside it.
+    if (cur === entry) {
+      entry.promise = null;
+      entry.at = Date.now();
+    }
   });
   mem.screen.set(id, entry);
   return entry.promise;
@@ -495,19 +520,41 @@ export type DeviceScreen = {
   capture: { verdict: string; code: string | null; reasons: string[]; attempt: number } | null;
   /** When GradeIQ's camera page first opened for this session — lets the phone tell "camera on its way" from "nobody there". */
   connectedAt: string | null;
+  /**
+   * The advisor let the phone go on from its Scan step without the camera (POST
+   * /api/test-sessions/<id>/release-scan). The phone never offers the customer a
+   * skip: it stays on Scan until the camera finishes (handoffDone) or this is true.
+   */
+  released: boolean;
+  /**
+   * SwapUp Check ≥ 0.8.0 only: GradeIQ can't be read right now. Sent as a normal answer (not a
+   * 503) so the phone still learns `released` — it says "busy" and keeps polling, and the
+   * customer is never offered a skip; the advisor can let it go on from SwapUp Store.
+   */
+  unreachable?: true;
 };
 
 export class DeviceScreenUnavailable extends Error {}
 
+/** What the customer's phone echoes when it leaves its Scan step: never a colour GradeIQ could wait for. */
+export const SHOWN_OFF = "off";
+
 /** GET /api/device/screen — never carries the GradeIQ id. */
 export async function deviceScreen(r: GiqRow): Promise<DeviceScreen> {
-  const idle: DeviceScreen = { state: r.gradeiq_state, pattern: "idle", shown: null, cosmeticDone: false, handoffDone: false, capture: null, connectedAt: null };
+  const released = !!r.scan_release;
+  const idle: DeviceScreen = { state: r.gradeiq_state, pattern: "idle", shown: null, cosmeticDone: false, handoffDone: false, capture: null, connectedAt: null, released };
   if (!giq.gradeiqConfig().enabled) return { ...idle, state: "disabled" };
   if (r.gradeiq_state === "pending" && !mem.creating.has(r.id) && !mem.createTimers.has(r.id)) void ensureCreated(r.id);
   if (r.gradeiq_state !== "ready" || !r.gradeiq_id) return idle;
   await refreshScreen(r.id, r.gradeiq_id, DEVICE_SCREEN_EVERY_MS);
   const l = live(row(r.id) ?? r);
-  if (l.screenError || !l.screen) throw new DeviceScreenUnavailable(l.screenError ?? "The photo check has not started yet.");
+  if (l.screenError || !l.screen) {
+    // Released by the advisor: the phone goes on whatever GradeIQ says — a camera service that
+    // can't be read must not keep it on Scan (it would only ever see the 503).
+    if (released) return { ...idle, ...(l.screen ? { cosmeticDone: l.screen.cosmeticDone, handoffDone: l.screen.handoffDone, connectedAt: l.screen.connectedAt ?? null } : null) };
+    if (coloursApp(parseJson<DeviceReport | null>(r.device, null))) return { ...idle, unreachable: true };
+    throw new DeviceScreenUnavailable(l.screenError ?? "The photo check has not started yet.");
+  }
   const s = l.screen;
   const hideStale = checkBefore050(r.device) && !s.handoffDone;
   return {
@@ -518,6 +565,7 @@ export async function deviceScreen(r: GiqRow): Promise<DeviceScreen> {
     handoffDone: s.handoffDone,
     capture: hideStale ? null : s.capture,
     connectedAt: s.connectedAt ?? null,
+    released,
   };
 }
 
@@ -547,6 +595,9 @@ export async function deviceScreenShown(r: GiqRow, shown: string): Promise<void>
   const l = live(fresh);
   const screen: GiqScreen = { ...(l.screen ?? { pattern: "idle", shown: null, cosmeticDone: false, handoffDone: false, capture: null, connectedAt: null }), shown };
   saveLive(r.id, { ...l, screen, screenError: null }, nowIso());
+  // A /screen read that started before this echo would bring back the old `shown`: it is dropped.
+  const m = mem.screen.get(r.id);
+  if (m) m.savedFrom = Date.now();
 }
 
 /* ─────────────────────────── what staff see ─────────────────────────── */
@@ -557,7 +608,7 @@ export type GradingView = {
   message: string;
   error: string | null;
   canRetry: boolean;
-  /** The customer's phone is echoing screen patterns (GradeIQ /screen `shown` is a string). */
+  /** The customer's phone is echoing screen patterns (GradeIQ /screen `shown` is a pattern — not "off"). */
   deviceReady: boolean;
   cameraConnected: boolean;
   /**
@@ -580,6 +631,10 @@ export type GradingView = {
   cameraLocked: string | null;
   canOverride: boolean;
   override: CameraOverrideInfo;
+  /** The advisor let the phone go on from Scan without the camera — who and when. */
+  released: { by: string; at: string } | null;
+  /** "Go on without the camera" may be offered: a scan-first phone waiting on its Scan step, the camera not finished. */
+  canRelease: boolean;
   screenReadable: boolean;
   pattern: string | null;
   cosmeticDone: boolean;
@@ -680,7 +735,9 @@ export function gradingView(r: GiqRow): GradingView {
   // keep counting as "ready".
   const resultsNow = parseJson<TestResults>(r.results, {});
   const photosEnded = ["skipped", "unavailable"].includes(String((resultsNow.display?.detail as Record<string, unknown> | null | undefined)?.photos ?? ""));
-  const deviceReady = state === "ready" && open && !l.screenError && typeof screen?.shown === "string" && !photosEnded;
+  // "off" = the phone said it left its Scan step (SwapUp Check ≥ 0.8.0): no longer showing anything.
+  const echoing = typeof screen?.shown === "string" && screen.shown !== SHOWN_OFF;
+  const deviceReady = state === "ready" && open && !l.screenError && echoing && !photosEnded;
   const sync = syncStatus(r);
   // Two camera passes (docs/TWO-PASS-CAMERA.md): the photos can be in before the
   // customer's phone has even joined, and the screen check comes after its tests.
@@ -695,13 +752,14 @@ export function gradingView(r: GiqRow): GradingView {
 
   let cameraLocked: string | null = null;
   let canOverride = false;
-  if (state !== "ready" || !r.gradeiq_id) cameraLocked = "Camera grading is not available for this session.";
-  else if (!open) cameraLocked = ["waiting", "opened"].includes(r.status) ? "Open SwapUp Check on the customer's phone first — it has to show the screen patterns the camera asks for." : "This session is closed.";
+  if (state !== "ready" || !r.gradeiq_id) cameraLocked = "No camera grading for this session.";
+  else if (!open) cameraLocked = ["waiting", "opened"].includes(r.status) ? "Open SwapUp Check on the phone first." : "This session is closed.";
   else if (l.screenError) {
-    cameraLocked = `Can't confirm the customer's phone is ready (${l.screenError}). An override needs your name and a reason, and the LCD is then recorded as not camera-checked.`;
+    // The store's camera service didn't answer — not the phone. Its raw error stays in the logs.
+    cameraLocked = "Camera service not answering — override with your name and a reason.";
     canOverride = true;
-  } else if (!screen) cameraLocked = "Checking whether the customer's phone is ready…";
-  else if (typeof screen.shown !== "string" || photosEnded) {
+  } else if (!screen) cameraLocked = "Checking the phone…";
+  else if (!echoing || photosEnded) {
     // Once the photos are in (pass 1), only the screen check is left behind this
     // lock — say that, not "photos". The single pass never gets here with photos
     // done: it takes them with the phone already echoing.
@@ -709,15 +767,15 @@ export function gradingView(r: GiqRow): GradingView {
       ? scanFirstLock(phase, photosEnded, r.status === "complete")
       : r.status === "complete" || photosEnded
         ? photosDone
-          ? "The customer's phone finished without showing the photo screen. The screen check now needs an override with your name and a reason (the LCD is then not camera-checked)."
-          : "The customer's phone finished without showing the photo screen. Photos now need an override with your name and a reason (the LCD is then not camera-checked)."
+          ? "Phone finished without the photo screen — screen check needs an override."
+          : "Phone finished without the photo screen — photos need an override."
         : photosLastApp(r.device)
-          ? "The customer's phone shows the photo screen when its tests finish — the camera unlocks by itself then."
+          ? "Camera unlocks when the phone's tests finish."
           : isBrowserCheck(r.device)
             ? photosDone
-              ? "A browser check can't show the photo screen. The screen check needs an override with your name and a reason — the LCD is then not camera-checked."
-              : "A browser check can't show the photo screen. Use \"Take photos anyway\" with a reason — the LCD is then not camera-checked."
-            : "Open SwapUp Check on the customer's phone and keep it on the photo screen — it has to show the patterns the camera asks for.";
+              ? "Browser check: no photo screen — screen check needs an override."
+              : "Browser check: no photo screen — use \"Take photos anyway\"."
+            : "Keep SwapUp Check on its photo screen.";
     canOverride = true;
   }
   const unlocked = state === "ready" && !!r.gradeiq_id && open && (deviceReady || !!override);
@@ -735,7 +793,7 @@ export function gradingView(r: GiqRow): GradingView {
   const gradeLine = fin.final
     ? `Camera grade ${snap?.cosmeticGrade} (final).`
     : fin.provisional
-      ? `Camera grade ${snap?.cosmeticGrade || ""} is provisional. ${fin.reasons[0] ?? ""}`.trim()
+      ? `Camera grade ${snap?.cosmeticGrade || ""} provisional${fin.reasons[0] ? ` — ${fin.reasons[0].charAt(0).toLowerCase()}${fin.reasons[0].slice(1)}` : "."}`
       : fin.status === "failed"
         ? fin.reasons[0]
         : null;
@@ -745,19 +803,19 @@ export function gradingView(r: GiqRow): GradingView {
   if (state === "ready" && photosDone && !screenDone) {
     if (unlocked)
       next = override
-        ? "Check the screen on this device. It was unlocked by override, so the LCD will be recorded as not camera-checked."
-        : "The customer's phone is on its photo screen. Check its screen on this device.";
-    else if (r.status === "waiting" || r.status === "opened") next = "Next, connect the customer's phone. The screen check comes after its tests.";
+        ? "Check the screen here — unlocked by override."
+        : "Phone on its photo screen — check the screen here.";
+    else if (r.status === "waiting" || r.status === "opened") next = "Next, connect the phone — screen check after its tests.";
     else if ((r.status === "joined" || r.status === "testing") && !l.screenError && !photosEnded && photosLastApp(r.device))
-      next = "The customer's phone is testing itself. The screen check comes after its tests.";
+      next = "Phone testing — screen check after its tests.";
     else next = cameraLocked;
   }
 
   let msg: string;
-  if (!cfg.enabled) msg = "Camera grading is switched off. Check the condition by eye.";
-  else if (state === "disabled") msg = "This session started without camera grading. Press Retry to add it, or check the condition by eye.";
-  else if (state === "pending") msg = r.gradeiq_error ? `Setting up camera grading… ${r.gradeiq_error}` : "Setting up camera grading…";
-  else if (state === "failed") msg = `Camera grading unavailable. Check the condition by eye. ${r.gradeiq_error ?? ""}`.trim();
+  if (!cfg.enabled) msg = "Camera grading off — check by eye.";
+  else if (state === "disabled") msg = "No camera grading — press Retry, or check by eye.";
+  else if (state === "pending") msg = r.gradeiq_error ? "Setting up camera grading… retrying." : "Setting up camera grading…";
+  else if (state === "failed") msg = "Camera grading unavailable — check by eye.";
   else if (scanFirst && open)
     msg = scanFirstMessage({
       phase,
@@ -771,10 +829,10 @@ export function gradingView(r: GiqRow): GradingView {
       gradeSettled: fin.final || fin.status === "failed" || (fin.status === "provisional" && !snap?.refining),
     });
   else if (gradeLine) msg = next ? `${gradeLine} ${next}` : gradeLine;
-  else if (next) msg = `Photos accepted — ${next.charAt(0).toLowerCase()}${next.slice(1)}`;
-  else if (photosDone) msg = screenDone ? "Photos and screen checked — the camera grade is being worked out." : "Photos accepted — the camera grade is being worked out.";
-  else if (screenDone) msg = "Screen checked. No photos were accepted, so there is no camera grade — check the condition by eye.";
-  else if (unlocked) msg = override ? "Camera unlocked by override — the LCD will be recorded as not camera-checked." : "The customer's phone is ready. Take the photos on this device.";
+  else if (next) msg = `Photos in — ${next.charAt(0).toLowerCase()}${next.slice(1)}`;
+  else if (photosDone) msg = screenDone ? "Photos and screen done — grade coming." : "Photos in — grade coming.";
+  else if (screenDone) msg = "Screen checked, no photos — check by eye.";
+  else if (unlocked) msg = override ? "Camera unlocked by override." : "Phone ready — take the photos here.";
   else msg = cameraLocked ?? "";
 
   const results = parseJson<TestResults>(r.results, {});
@@ -795,6 +853,8 @@ export function gradingView(r: GiqRow): GradingView {
     cameraLocked,
     canOverride,
     override,
+    released: releasedOf(r),
+    canRelease: open && scanFirst && phase === "scan" && !r.scan_release && !l.handoffAt && state !== "disabled" && state !== "failed",
     screenReadable: !!screen && !l.screenError,
     pattern: screen?.pattern ?? null,
     cosmeticDone: !!screen?.cosmeticDone,
@@ -810,6 +870,11 @@ export function gradingView(r: GiqRow): GradingView {
     gradePending: cameraGradePending(r),
     syncedAt: r.gradeiq_synced_at,
   };
+}
+
+function releasedOf(r: GiqRow): { by: string; at: string } | null {
+  const v = parseJson<{ by?: unknown; at?: unknown } | null>(r.scan_release ?? null, null);
+  return v && typeof v.by === "string" && typeof v.at === "string" ? { by: v.by, at: v.at } : null;
 }
 
 /* ─────────────────────────── staff override + apply ─────────────────────────── */
@@ -849,7 +914,7 @@ export async function evidenceForApply(id: string): Promise<ApplyEvidence> {
     // else may have polled it since.
     await refreshScreen(id, r.gradeiq_id, 0).catch(() => {});
     const snap = await pullSnapshot(id);
-    if (!snap) notes.push("GradeIQ could not be read at Apply; the last camera result was used only if it was final.");
+    if (!snap) notes.push("Camera unreadable at Apply — only a final result was used.");
     const now = row(id)!;
     if (cameraGradePending(now)) {
       const ev = cameraEvidence(now);

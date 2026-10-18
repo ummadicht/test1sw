@@ -56,10 +56,7 @@ export function InviteStaff({ storeId, storeName }: { storeId: string; storeName
 
   return (
     <Card title="Invite staff to sign up" className="mb-5">
-      <p className="hint !mt-0 mb-3 text-[14px]">
-        New advisors can sign themselves up in the SwapUp Store app (Android or browser) with an invite code — they choose their own username and password.
-        A code joins {storeName} only, works for 7 days and for up to 5 people.
-      </p>
+      <p className="hint !mt-0 mb-3 text-[14px]">Advisors sign up in SwapUp Store with a code for {storeName}.</p>
       {created ? (
         <div className="flex flex-wrap items-center gap-5 rounded-[12px] bg-up-bg p-4 mb-3">
           {qr ? <img src={qr} alt="Invite QR code" width={140} height={140} className="rounded-[8px] bg-white p-1" /> : null}
@@ -69,7 +66,7 @@ export function InviteStaff({ storeId, storeName }: { storeId: string; storeName
             <div className="text-[13.5px] text-ink-2 break-all">
               Or open: <a href={created.url}>{created.url}</a>
             </div>
-            <div className="hint">Valid until {fmtDate(created.expiresAt)} · up to {created.maxUses} people. Shown once — copy it now.</div>
+            <div className="hint">Valid until {fmtDate(created.expiresAt)} · up to {created.maxUses} people · shown once</div>
           </div>
         </div>
       ) : null}

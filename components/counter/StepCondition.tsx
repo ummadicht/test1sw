@@ -15,15 +15,49 @@ import {
   type IssueId,
   type AgeBand,
 } from "@/lib/domain/condition";
-import { StepCard, ChipGroup } from "./StepCard";
+import { ChipGroup } from "./StepCard";
 import { alignToFloor } from "./shared";
 import type { CaseOps } from "./ops";
 
 const ISSUES = Object.keys(ISSUE_LABEL) as IssueId[];
 const AGES = Object.keys(AGE_LABEL) as AgeBand[];
 
-/** ③ The trade-in condition — what the buyback partner prices. Prefilled from the faults; never better than them. */
-export function StepCondition({ ops }: { ops: CaseOps }) {
+/**
+ * The condition is recorded better than the faults allow: the trade-in can't be priced until it
+ * matches. Shown on the step itself (not behind "Show details"), with the one-tap fix.
+ */
+export function ConditionProblems({ ops }: { ops: CaseOps }) {
+  const { view, editable, save } = ops;
+  const [err, setErr] = useState<string | null>(null);
+  const c = view.condition;
+  if (!c || !view.conditionProblems.length) return null;
+  async function align() {
+    const next = alignToFloor(c!, view.faults);
+    setErr(await save({ condition: next }, { condition: next, conditionProblems: conditionFloor(next, view.faults) }));
+  }
+  return (
+    <Banner tone="bad">
+      <div className="font-semibold">Condition is better than the faults allow.</div>
+      <ul className="list-disc pl-4 mt-1 space-y-0.5">
+        {view.conditionProblems.map((p) => (
+          <li key={p}>{p}</li>
+        ))}
+      </ul>
+      {editable ? (
+        <button type="button" className="btn btn-sm mt-2" onClick={align}>
+          Match the faults
+        </button>
+      ) : null}
+      <ErrorText error={err} />
+    </Banner>
+  );
+}
+
+/**
+ * The trade-in condition — what the buyback partner prices. Filled in from the faults, never
+ * better than them; on the "What's wrong" step, behind "Show details" (StepFaults).
+ */
+export function ConditionEditor({ ops }: { ops: CaseOps }) {
   const { view, editable, save } = ops;
   const [err, setErr] = useState<string | null>(null);
   const c = view.condition;
@@ -34,63 +68,42 @@ export function StepCondition({ ops }: { ops: CaseOps }) {
 
   if (!c) {
     return (
-      <StepCard n={3} id="step-condition" title="Condition for the trade-in">
-        <p className="text-[14px] text-ink-2">
-          Record what&apos;s wrong in step 2 first — these answers are filled in from the faults, then you check the phone and correct anything
-          that is worse.
-        </p>
+      <div>
+        <div className="section-title">Trade-in condition</div>
+        <p className="text-[14px] text-ink-2 mt-1">Tick the faults first.</p>
         {editable ? (
           <button type="button" className="btn btn-sm mt-3" onClick={async () => setErr(await save({ conditionFromFaults: true }))}>
-            Fill in from the faults now
+            Fill from faults
           </button>
         ) : null}
         <ErrorText error={err} />
-      </StepCard>
+      </div>
     );
   }
 
   const floor = conditionFromFaults(view.faults, c);
   const floorScreen = SCREEN_ORDER.indexOf(floor.screen);
   const floorBody = BODY_ORDER.indexOf(floor.body);
-  const done = view.conditionProblems.length === 0;
 
   return (
-    <StepCard n={3} id="step-condition" title="Condition for the trade-in" done={done}>
-      <p className="text-[14px] text-ink-2 mb-4">
-        Filled in from the faults. Check the phone in hand and make anything <strong>worse</strong> that you can see — a scuff, a missing
-        charger. It can&apos;t be recorded better than the faults allow.
+    <div>
+      <div className="section-title">Trade-in condition</div>
+      <p className="text-[14px] text-ink-2 mt-1 mb-4">
+        Filled from the faults. You can only make it <strong>worse</strong>.
       </p>
-
-      {view.conditionProblems.length ? (
-        <div className="mb-4">
-          <Banner tone="bad">
-            <div className="font-semibold">The condition is recorded better than the faults allow — the trade-in can&apos;t be priced until it matches.</div>
-            <ul className="list-disc pl-4 mt-1 space-y-0.5">
-              {view.conditionProblems.map((p) => (
-                <li key={p}>{p}</li>
-              ))}
-            </ul>
-            {editable ? (
-              <button type="button" className="btn btn-sm mt-2" onClick={() => put(alignToFloor(c, view.faults))}>
-                Bring it in line with the faults
-              </button>
-            ) : null}
-          </Banner>
-        </div>
-      ) : null}
 
       <div className="space-y-5">
         <div className="grid sm:grid-cols-2 gap-4">
-          <ChipGroup label="Does it switch on?">
-            <button type="button" className="chip" aria-pressed={c.powersOn} disabled={!editable || floor.powersOn === false} onClick={() => put({ ...c, powersOn: true })} title={floor.powersOn === false ? "A recorded fault says it does not switch on" : undefined}>
+          <ChipGroup label="Switches on?">
+            <button type="button" className="chip" aria-pressed={c.powersOn} disabled={!editable || floor.powersOn === false} onClick={() => put({ ...c, powersOn: true })} title={floor.powersOn === false ? "A fault says it doesn't" : undefined}>
               Yes
             </button>
             <button type="button" className="chip" aria-pressed={!c.powersOn} disabled={!editable} onClick={() => put({ ...c, powersOn: false })}>
               No
             </button>
           </ChipGroup>
-          <ChipGroup label="Can it make calls?">
-            <button type="button" className="chip" aria-pressed={c.calls} disabled={!editable || floor.calls === false} onClick={() => put({ ...c, calls: true })} title={floor.calls === false ? "A recorded fault says calls fail" : undefined}>
+          <ChipGroup label="Makes calls?">
+            <button type="button" className="chip" aria-pressed={c.calls} disabled={!editable || floor.calls === false} onClick={() => put({ ...c, calls: true })} title={floor.calls === false ? "A fault says calls fail" : undefined}>
               Yes
             </button>
             <button type="button" className="chip" aria-pressed={!c.calls} disabled={!editable} onClick={() => put({ ...c, calls: false })}>
@@ -99,12 +112,12 @@ export function StepCondition({ ops }: { ops: CaseOps }) {
           </ChipGroup>
         </div>
         {!c.powersOn ? (
-          <Banner>A phone that won&apos;t switch on is priced as non-working — the screen and body answers below don&apos;t change its trade-in value.</Banner>
+          <Banner>Priced as non-working.</Banner>
         ) : null}
 
         <ChipGroup
           label="Screen"
-          hint={floorScreen > 0 ? `A recorded fault means the screen is at least “${SCREEN_LABEL[floor.screen]}” — better options are locked.` : undefined}
+          hint={floorScreen > 0 ? `At least “${SCREEN_LABEL[floor.screen]}” — from the faults.` : undefined}
         >
           {SCREEN_ORDER.map((s, i) => {
             const locked = i < floorScreen;
@@ -115,7 +128,7 @@ export function StepCondition({ ops }: { ops: CaseOps }) {
                 className="chip"
                 aria-pressed={c.screen === s}
                 disabled={!editable || locked}
-                title={locked ? `Not possible with the recorded faults (at least “${SCREEN_LABEL[floor.screen]}”)` : undefined}
+                title={locked ? `Faults say at least “${SCREEN_LABEL[floor.screen]}”` : undefined}
                 onClick={() => put({ ...c, screen: s })}
               >
                 {SCREEN_LABEL[s]}
@@ -126,7 +139,7 @@ export function StepCondition({ ops }: { ops: CaseOps }) {
 
         <ChipGroup
           label="Body and back"
-          hint={floorBody > 0 ? `A recorded fault means the body is at least “${BODY_LABEL[floor.body]}” — better options are locked.` : undefined}
+          hint={floorBody > 0 ? `At least “${BODY_LABEL[floor.body]}” — from the faults.` : undefined}
         >
           {BODY_ORDER.map((b, i) => {
             const locked = i < floorBody;
@@ -137,7 +150,7 @@ export function StepCondition({ ops }: { ops: CaseOps }) {
                 className="chip"
                 aria-pressed={c.body === b}
                 disabled={!editable || locked}
-                title={locked ? `Not possible with the recorded faults (at least “${BODY_LABEL[floor.body]}”)` : undefined}
+                title={locked ? `Faults say at least “${BODY_LABEL[floor.body]}”` : undefined}
                 onClick={() => put({ ...c, body: b })}
               >
                 {BODY_LABEL[b]}
@@ -146,7 +159,7 @@ export function StepCondition({ ops }: { ops: CaseOps }) {
           })}
         </ChipGroup>
 
-        <ChipGroup label="Anything else not working?" hint={floor.issues.length ? "Issues that come from a recorded fault stay ticked." : "Tick only what you have checked."}>
+        <ChipGroup label="Other issues" hint={floor.issues.length ? "Fault issues stay ticked." : "Only what you checked."}>
           {ISSUES.map((i) => {
             const fromFault = floor.issues.includes(i);
             const on = c.issues.includes(i);
@@ -157,7 +170,7 @@ export function StepCondition({ ops }: { ops: CaseOps }) {
                 className="chip"
                 aria-pressed={on}
                 disabled={!editable || (fromFault && on)}
-                title={fromFault ? "Recorded as a fault in step 2" : undefined}
+                title={fromFault ? "From a fault" : undefined}
                 onClick={() => put({ ...c, issues: (on ? c.issues.filter((x) => x !== i) : [...c.issues, i]).sort() as IssueId[] })}
               >
                 {ISSUE_LABEL[i]}
@@ -166,7 +179,7 @@ export function StepCondition({ ops }: { ops: CaseOps }) {
           })}
         </ChipGroup>
 
-        <ChipGroup label="What comes with it" hint="Original items only. Missing ones lower the partner's price.">
+        <ChipGroup label="Comes with" hint="Originals only.">
           {(
             [
               ["charger", "Original charger"],
@@ -188,7 +201,7 @@ export function StepCondition({ ops }: { ops: CaseOps }) {
           ))}
         </ChipGroup>
 
-        <ChipGroup label="How old is it?" hint="From the purchase bill. Without a bill, use the launch year above.">
+        <ChipGroup label="Age" hint="From the bill, else the launch year.">
           {AGES.map((a) => (
             <button key={a} type="button" className="chip" aria-pressed={c.age === a} disabled={!editable} onClick={() => put({ ...c, age: a })}>
               {AGE_LABEL[a]}
@@ -197,6 +210,6 @@ export function StepCondition({ ops }: { ops: CaseOps }) {
         </ChipGroup>
       </div>
       <ErrorText error={err} />
-    </StepCard>
+    </div>
   );
 }

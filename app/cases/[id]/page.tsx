@@ -29,7 +29,7 @@ export default async function CasePage({ params, searchParams }: { params: Promi
         <AppShell user={u}>
           <Card>
             <Empty title="Case not found">
-              It may belong to another store, or the link is wrong.{" "}
+              Wrong link, or another store&apos;s case.{" "}
               <Link href={u.role === "advisor" || u.role === "store_manager" ? "/desk" : "/cases"}>Back</Link>
             </Empty>
           </Card>

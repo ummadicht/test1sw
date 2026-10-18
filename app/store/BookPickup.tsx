@@ -3,16 +3,16 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/client/api";
-import { ErrorText, Field, Money, SourceBadge } from "@/components/ui";
+import { ErrorText, Field, Money } from "@/components/ui";
 import { inr } from "@/lib/domain/money";
 
-export type BookableDevice = { caseId: string; ref: string; label: string; value: number; days: number; sample: boolean; dataDue: boolean };
+export type BookableDevice = { caseId: string; ref: string; label: string; value: number; days: number; dataDue: boolean };
 
 /**
  * "Book a pickup": pick which waiting phones go on it (all by default), then
  * ask the partner to come. Lands on the new pickup.
  */
-export function BookPickup({ devices, maxAgeDays, partnerName, primary }: { devices: BookableDevice[]; maxAgeDays: number; partnerName: string; primary: boolean }) {
+export function BookPickup({ devices, maxAgeDays, primary }: { devices: BookableDevice[]; maxAgeDays: number; partnerName: string; primary: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [ticked, setTicked] = useState<Set<string>>(() => new Set(devices.map((d) => d.caseId)));
@@ -55,7 +55,7 @@ export function BookPickup({ devices, maxAgeDays, partnerName, primary }: { devi
   return (
     <form onSubmit={submit} className="card p-4 sm:p-5 space-y-4 w-full mt-3" aria-label="Book a pickup">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-[16px] font-bold">Which phones should {partnerName} collect?</h3>
+        <h3 className="text-[16px] font-bold">Phones to collect</h3>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTicked(allOn ? new Set() : new Set(devices.map((d) => d.caseId)))}>
           {allOn ? "Untick all" : "Tick all"}
         </button>
@@ -72,14 +72,13 @@ export function BookPickup({ devices, maxAgeDays, partnerName, primary }: { devi
                 <span className="block text-[12.5px] text-muted">
                   <span className="num">{d.ref}</span> ·{" "}
                   <span className={old ? "text-warn font-semibold" : undefined}>
-                    {d.days === 0 ? "taken in today" : `${d.days} ${d.days === 1 ? "day" : "days"} at the store`}
+                    {d.days === 0 ? "today" : `${d.days} ${d.days === 1 ? "day" : "days"}`}
                     {old ? ` (over ${maxAgeDays})` : ""}
                   </span>
                 </span>
               </span>
               <span className="flex flex-col items-end gap-1 shrink-0">
                 <Money value={d.value} className="font-semibold" />
-                {d.sample ? <SourceBadge kind="sample" /> : null}
                 {d.dataDue ? <span className="pill pill-warn">Data not cleared</span> : null}
               </span>
             </label>
@@ -89,13 +88,10 @@ export function BookPickup({ devices, maxAgeDays, partnerName, primary }: { devi
       {chosenDue ? (
         <p className="banner banner-warn text-[14px]">
           <span aria-hidden>⚠</span>
-          <span>
-            {chosenDue === 1 ? "One phone has" : `${chosenDue} phones have`} no data-clearing record. A phone that still asks for the customer&apos;s account
-            can&apos;t be set up by anyone else, and {partnerName} may reject it — call the customer back to reset it, or record it on the case if it was done.
-          </span>
+          <span>{chosenDue === 1 ? "One phone" : `${chosenDue} phones`} not cleared — the partner may reject it.</span>
         </p>
       ) : null}
-      <Field label="Note for the collector (optional)" hint="e.g. Collect after 2 pm; ask for the service desk.">
+      <Field label="Note (optional)" hint="e.g. Collect after 2 pm.">
         <input className="input" maxLength={300} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </Field>
       <div className="flex flex-wrap items-center gap-3">
@@ -106,7 +102,6 @@ export function BookPickup({ devices, maxAgeDays, partnerName, primary }: { devi
           Not now
         </button>
       </div>
-      <p className="hint mt-0!">Phones you leave unticked stay waiting at the store and can go on a later pickup.</p>
       <ErrorText error={error} />
     </form>
   );

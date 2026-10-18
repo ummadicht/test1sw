@@ -17,6 +17,10 @@ Server: the SwapUp Next.js app (`~/projects/swapup`). Production base URL
 
 All bodies are JSON. Errors are `{ "error": "<sentence a person can read>" }` with a 4xx/5xx.
 
+**Words on screens.** Every sentence the server sends for a screen — errors, asks, reasons, notes,
+flags — is ONE short sentence (≤ 15 words; a title ≤ 6), with the number carrying the meaning, and it
+names no buyback partner. The apps print them as sent; shorten them at the source.
+
 ---
 
 ## 1. Staff authentication (store app)
@@ -43,9 +47,13 @@ other roles get `403 "The store app is for store staff."`.
 `next`. Load that URL in the WebView.
 
 Since 2026-10-17 the store app hands off with **`?view=answer`**: the desk's case page then opens on
-the same answer the app shows (§3c) — refurb quote vs trade-in + bonus — with steps 1–6 folded
-under it. A `#step-…` anchor is optional (`#step-phone`, `#step-repair`, `#step-tradein`,
-`#step-upgrade`, `#step-lock`); `/cases/<id>` alone still works and lays the page out as before.
+the same answer the app shows (§3c) — refurb quote vs trade-in + bonus. The case page shows one step
+at a time, in the store app's order — Phone → What's wrong → The answer (→ Take the trade-in, after
+"Swap up") — with Back / Next at the bottom; the Repair quote and the Trade-in are the answer's own
+pages, opened from its asks and "Change" links (Back returns to the answer). A `#step-…` anchor opens
+that step or page instead: `#step-phone`, `#step-faults`, `#step-repair`, `#step-tradein` (also
+`#step-upgrade`), `#answer`, `#step-lock`. Without one, a tested case (SwapUp Check or an attached
+Phonecheck report) and `?view=answer` open on the answer; an untested one on its first unanswered step.
 
 ## 1b. Store tablet (signed in for the store, advisor by name + PIN)
 
@@ -144,10 +152,30 @@ dead code. `/j/<counter code>` shows the store's name and no case (there is none
 ```
 
 `GET /api/test-sessions/<id>` (Bearer) → `TestSessionView` (poll every 2 s while open). This
-poll also drives the camera-grading pulls from GradeIQ (§8) — throttled on the server.
+poll also drives the camera-grading pulls from GradeIQ (§8) — throttled on the server — and **the
+answer by itself** (below): when the session is `complete` and everything is in, this read puts the
+results on the case first (as the polling advisor; it waits up to 4 s) and already answers `applied`.
+
+**The answer, by itself** (owner, 2026-10-17: *"Reduce the flow"* — `lib/domain/autoApply.ts`).
+SwapUp Store never taps Apply on the way to the answer. The server applies the session — the same
+`applyTestSession`, every gate unchanged — once the phone has posted `complete`, the store camera's
+grade is no longer pending (`cameraGradePending`), and, where the camera couldn't decide the screen
+or the body, the advisor has tapped every row of "Check the phone" (§8b; applying first would end
+the phone's test colours, and the answer's numbers would move after the customer saw them). It is
+tried from the staff poll above, from `POST /api/device/complete`, and from the phone's own
+`GET /api/device/status` poll (then recorded as the advisor who started the trade-in), so the case
+is ready even with nobody on the Session screen. Audit `test_session.apply` carries `auto: true`.
+`TestSessionView.autoApply` (staff only) says where it is:
+`{state: "waiting", for: "tests"|"camera"|"certify", text}` · `{state: "ready"}` (being applied) ·
+`{state: "refused", reason}` — Apply said no (e.g. "The case is past the counter, so the results
+can't change it any more."); show the reason and a **Retry** (= `POST …/apply`); it is not tried
+again until the session or its case changes · `{state: "applied"}` → open the answer ·
+`{state: "off"}` (expired / cancelled). An older server sends no `autoApply`: show "Apply to case".
 `GET /api/test-sessions?open=1` (Bearer) → `{ sessions: TestSessionView[] }` for the store
 (grading from what is stored; no GradeIQ calls).
-`POST /api/test-sessions/<id>/apply` (Bearer) → applies the mapped model, storage, the tested
+`POST /api/test-sessions/<id>/apply` (Bearer) — the manual Apply: the Retry after a refusal, "Apply
+the results so far" for a phone that stopped mid-test (never held by "Check the phone"), or an older
+server. It applies the mapped model, storage, the tested
 faults **and the camera-confirmed faults** (§8), and a condition no better than the advisor's,
 the faults' or the camera's, to the case (through the normal case service, so it re-prices) →
 `{ session: TestSessionView, caseId }`. Since 2026-10-17 Apply also settles the storage without
@@ -159,7 +187,15 @@ session is abandoned.
 old one expired. A new code is a new GradeIQ session (the photos belong to the phone that joins).
 `POST /api/test-sessions/<id>/camera-override` (Bearer) `{ reason }` → `TestSessionView` — unlocks
 the camera page without the customer's phone echoing patterns (§8). Needs a reason (≥ 8 chars);
-recorded with the staff member's name; the case is marked "LCD not camera-checked".
+recorded with the staff member's name. A screen sweep that then runs to the end still counts (its
+frames prove the loop); if none runs, the LCD is recorded as not camera-checked at Apply. It also
+releases the phone's Scan step (as below) — the one way an older SwapUp Store with no release
+button lets a SwapUp Check ≥ 0.8.0 phone go on.
+`POST /api/test-sessions/<id>/release-scan` (Bearer, no body) → `TestSessionView` — let the
+customer's phone go on from its Scan step **without the camera**, by the signed-in staff member's
+name (audited `test_session.scan_release`). The customer is never offered a skip: the phone stays
+on Scan until the camera finishes (`handoffDone`) or this is pressed; `GET /api/device/screen` then
+says `released: true`. `409` before the phone has joined. Offer it when `grading.canRelease`.
 `POST /api/test-sessions/<id>/grading-retry` (Bearer) → `TestSessionView` — after "Camera grading
 unavailable", ask for a fresh GradeIQ session.
 
@@ -181,11 +217,20 @@ type TestSessionView = {
   summary: DiagnosticSummary | null;   // computed whenever results change
   grading: GradingView | null;         // camera grading (§8) — staff responses only
   // Phone-led flow (SwapUp Check ≥ 0.6.0, docs/PHONE-LED-FLOW.md):
-  scanFirst: boolean;                  // the joined phone is ≥ 0.6.0 (native or web-0.6.0+): Identify › Scan › Test › Result
-  phonePhase: "identify"|"scan"|"battery"|"test"|"done" | null;   // what the phone last said (POST /api/device/phase)
+  scanFirst: boolean;                  // the joined phone is ≥ 0.6.0 (native or web-0.6.0+): it leads — Scan › Test › Done
+  phonePhase: "identify"|"scan"|"battery"|"test"|"done"|"colours" | null;   // what the phone last said (POST /api/device/phase)
   phonePhaseAt: string | null;
   customerStarted: boolean;            // started from the store's counter code (§2c)
   imeiAgreement: "match"|"differs"|"unknown" | null;   // the phone's IMEI(s) vs the case's (no shared number = differs); staff only
+  certify: CertifyBlock | null;        // "Check the phone" (§8b) — staff responses only
+  autoApply: { state: "off" } | { state: "waiting"; for: "tests"|"camera"|"certify"; text: string } | { state: "ready" }
+           | { state: "refused"; reason: string } | { state: "applied" } | null;   // the answer by itself (above) — staff only
+};
+type CertifyBlock = {
+  needed: ("screen"|"body"|"liquid")[];   // the rows to show: screen when the camera's sweep didn't check it or its grade isn't final; body when it isn't final; liquid on that same card. [] when the camera decided both — no card
+  rows: Record<"screen"|"body"|"liquid", { value: string; label: string; by: string; at: string; withColours: boolean } | null>;   // certified so far (the case's)
+  choices: Record<"screen"|"body"|"liquid", { value: string; label: string }[]>;   // each row's chips, word for word, in order
+  colours: "showing" | "waiting" | "old_app" | "off";   // the test colours on the customer's phone: showing now / waiting for the phone (≥ 0.8.0 shows them on its result screen) / an app before 0.8.0 can't / not needed
 };
 type DiagnosticSummary = {
   model: { modelId: string|null; label: string|null; variant: string|null; match: "exact"|"family"|"none"; why: string };
@@ -205,7 +250,8 @@ joining.
 ## 3b. Refurb cost quote and BUY vs SELL (store side)
 
 After the test is applied, the advisor enters the refurb cost and the trade-in is shown as
-buy vs sell — the same four lines on the desk's case page (step 5) and in the store app
+buy vs sell — the same four lines on the desk's case page ("Store margin · staff only", under the
+answer) and in the store app
 (`lib/domain/buySell.ts` is the reference implementation).
 
 **Since 2026-10-17 this is the store's margin, staff only.** In the store app the card sits in a
@@ -216,17 +262,30 @@ quote** — the CUSTOMER's repair price. The figures and the logic below are unc
 
 | Line | From the case (`GET /api/cases/<id>`) |
 | --- | --- |
-| Buy — pay the customer | `quote.amount` when `quote.status === "priced"` |
+| Buy — pay the customer | `quote.amount` when `quote.status === "priced"` — the case quote, whichever source priced it (§3c "Where the trade-in comes from") |
 | Store's refurb cost | `refurbCost.amount`, else `repair.listTotal ?? repair.customerPays` when `repair.status === "quoted"`, else ₹0 when `faults` is empty |
-| Sell — after refurb | `marketSell.amount` (PriceIQ's Cashify refurbished listing less 2–5%), else `repairedQuote.amount` when `repairedQuote.status === "priced"` |
+| Sell — after refurb | `marketSell.amount` (PriceIQ's refurbished-market listing less 2–5%), else `repairedQuote.amount` when `repairedQuote.status === "priced"` |
 | Margin | Sell − Buy − Refurb, only when all three are known (negative = a loss) |
 
-`marketSell` is `{ amount, listing, markdownBp, grade, gradeWanted, listings, week, why: null, source }`
-or `{ amount: null, why, source }`. `listing` is the lowest Cashify refurbished ask at `grade` for
-that model + storage (PriceIQ leaf `cashify/sell`); the markdown is 5% up to ₹15,000, 4% up to
-₹30,000, 3% up to ₹50,000, 2% above (`lib/domain/marketSell.ts`). `grade` is the Cashify grade
-the phone comes out at after refurb (`gradeAfterRefurb`); when Cashify lists none at it, the next
-lower listed grade is used and `gradeWanted` keeps the one it should have been.
+`marketSell` is `{ amount, listing, markdownBp, grade, gradeWanted, listings, week, ageDays, stale, note, why: null, source }`
+or `{ amount: null, why, source }` (`source: "PriceIQ · refurbished market"`). `listing` is the
+lowest refurbished-market listing at `grade` for that model + storage, from PriceIQ's live
+`/api/market-grades` (server to server; the app never talks to PriceIQ); the markdown is 5% up to
+₹15,000, 4% up to ₹30,000, 3% up to ₹50,000, 2% above (`lib/domain/marketSell.ts`). Market data over
+14 days old is priced with `stale: true` and `note` "Refurbished market price, week 2026-W35, 52 days
+old."; over 90 days old there is no price; PriceIQ unreachable → the last good answer with `note`
+"PriceIQ unreachable, last answer 2026-10-18 08:30 UTC.". `grade` is the grade the phone comes out at after
+refurb (`gradeAfterRefurb`); when the market lists none at it, the next lower listed grade is used
+and `gradeWanted` keeps the one it should have been. Show it in one line under the sell price, the
+same on the desk and the tablet (`lib/domain/buySell.ts` `marketSource`): "Refurbished market price
+₹21,999 (Good) − 4% · PriceIQ", plus " · none at Superb" when a lower grade was used; the partner's
+repaired price is "Partner's repaired price". The refurb box's reasons are the same words in both
+apps: "Needs a look on the bench — enter your refurb cost.", "No repair price for this phone — enter
+your refurb cost.", "No repair estimate yet — enter your refurb cost."
+
+**Screens never name the buyback partner company** (owner, 2026-10-17): they say "the partner" or
+print the partner's name the server sends (`quote.partner`; the demo programme's is "Buyback
+Partner (demo)").
 
 A missing number is shown as "—" with why (no quote yet; PriceIQ has no listing and the
 partner gave no repaired price; the repair needs a bench quote) — never guessed.
@@ -251,10 +310,65 @@ strings and owns only its labels.
 | Label | Figure |
 | --- | --- |
 | **Refurb quote** | What the CUSTOMER pays to fix it: `repair.customerPays` from the price book, or the bench / service-centre quote (`manualRepair`), or ₹0 when covered. The figure `decide()` compares and the bonus's repair-ratio rule reads. **Never** the store's `refurbCost` (§3b). |
-| **Trade-in + bonus** | The partner's as-is price + the upgrade bonus for the new phone. |
+| **Trade-in + bonus** | The as-is price (the case quote — below) + the upgrade bonus for the new phone. |
 
 The verdict is `decision.headline`, unchanged (`decide()`, its thresholds and `RULESET_VERSION` did
 not move); the bonus is shown and never a reason.
+
+### Where the trade-in comes from (`quote.source.kind`, since 2026-10-18)
+
+Owner: *"price compare from price iq based on grade ...deduct based on % of failure or defects."*
+2026-10-18: PriceIQ live, one 5%→2% markdown everywhere, SwapUp's % per defect, no sample prices,
+never a made-up price. `reprice` asks in this order (`lib/server/tradeIn.ts`); the first that prices
+is the case `quote`, and the lock holds exactly that amount on the store's credit line:
+
+1. `partner_manual` — a quote typed in from the partner's app (`PATCH {partnerQuote}`), as entered.
+2. `priceiq` — PriceIQ's lowest refurbished-market listing for the model + storage at the phone's
+   grade (rule G1 on the screen and body; none at it → the next LOWER grade, named), less the
+   markdown (5% up to ₹15,000, 4% to ₹30,000, 3% to ₹50,000, 2% above — the sell price's own), less
+   SwapUp's % for each defect (`DEFECT_DEDUCTIONS`), combined as a rate card combines them: each % of
+   the listing, floored; capped at 85%; never below 6%; rounded down to ₹10. Asked live
+   (`GET /api/market-grades`, cached an hour; a quote waits ≤ 6 s). Data over 14 days old prices with
+   its age (`priceiq.stale`, `priceiq.note`); over 90 days old is no price; PriceIQ unreachable → the
+   last good answer, `priceiq.note` "PriceIQ unreachable, last answer …". Scratches, scuffs, dents
+   and a bent frame are the grade's — never deducted again. Defects: lines / cracked / dead screen,
+   cracked back, won't switch on (priced on that alone), no calls, and each failed function (touch,
+   battery, charging, cameras, speaker, mic, Wi-Fi/Bluetooth, fingerprint, buttons, vibration,
+   liquid). Accessories and age are not defects. Full rules: `docs/GRADING.md` §6.
+3. `partner_ratecard` — the partner's uploaded rate card. When PriceIQ was asked first and had no
+   price, the quote says why in `priceiqWhy`.
+4. `none` — nothing priced it: `status: "unpriced"`, `reason` "No market price yet — enter a quote."
+   (and `priceiqWhy`).
+
+A quote stored by an older build from a source that no longer exists is treated as expired on an
+open case (`quoteExpired: true`) and re-asked.
+
+```ts
+type PartnerQuote = {
+  status: "priced" | "unpriced" | "error"; amount: number | null;
+  lines: { label: string; bp?: number; amount: number }[];   // they sum to amount
+  source: { kind: "partner_manual" | "priceiq" | "partner_ratecard" | "none"; label: string; rateCardId?: string; effectiveFrom?: string };
+  partner: string; partnerRef: string | null; quotedAt: string; validUntil: string | null; reason?: string;
+  priceiq?: {                         // source.kind "priceiq"
+    grade: "Superb" | "Good" | "Fair" | "Best Value"; gradeWanted: same;   // differ when a lower grade was used
+    listing: number; markdownBp: number; defects: number;
+    deductions: string | null;        // "SwapUp's % per defect" (null on a repaired value with none)
+    week: string; listings: number;   // listings = PriceIQ's distinct prices at that grade
+    ageDays?: number; stale?: boolean; // the market data's age when priced; stale = over 14 days
+    note?: string | null;             // its age and/or "PriceIQ unreachable, last answer …"
+  };
+  priceiqWhy?: string;                // PriceIQ was asked first and had no price: why
+};
+```
+
+A `priceiq` quote's `source.label` is "PriceIQ · Good − defects" ("PriceIQ · Good" with none); its
+`lines` are the base ("Refurbished market price (Good) · PriceIQ"), "Below the market price" with its
+bp, one line per defect (its name and bp), then any "Deductions capped" / "Raised to the card's
+minimum for this model" / "Rounded down to ₹10". Beside it, `repairedQuote` is PriceIQ at the grade
+after refurb less the same markdown and any defect the repair doesn't explain ("PriceIQ · Good after
+refurb"). A partner gets a PriceIQ quote as one "Trade-in" line (no
+`priceiq`, no `priceiqWhy`) and no PriceIQ `repairedQuote`, no `decision`, no `repair`. It is valid for 3 days (or the programme's `quoteValidityDays`), re-quoted
+on expiry like a rate-card quote; storage chips are priced the same way, asked together.
 
 ### CaseView additions (`GET`/`PATCH /api/cases/<id>` and every `/action` response)
 
@@ -278,8 +392,8 @@ type OfferAsk =
   | { kind: "blocked";       title: string; text: string }
   | { kind: "model";         title: string; text: string }
   | { kind: "storage";       title: string; text: string;
-      options: { variant: string; tradeIn: number | null; sample: boolean }[];   // [] = no chip can be right (below)
-      note: string | null }                                                      // "Sample price — not a real quote." | null
+      options: { variant: string; tradeIn: number | null }[];   // [] = no chip can be right (below)
+      note: string | null }                                     // the chips' market data age / "PriceIQ unreachable, …" | null
   | { kind: "partner_quote"; title: string; text: string }
   | { kind: "repair_quote";  title: string; text: string }
   | { kind: "new_phone";     title: string; text: string };
@@ -302,6 +416,14 @@ type Offer = {
     bonus: number | null; bonusBp: number | null; bonusWhy: string | null;
     total: number | null;                 // tradeIn + (bonus ?? 0); null when tradeIn is null
     why: string | null;                   // why tradeIn is null
+    tradeInDetail: {                      // how the trade-in was reached; null when tradeIn is null
+      line: string | null;                // PriceIQ only, under the figure: "Refurbished market price ₹51,399 (Good) − 2% − 2 defects · PriceIQ 2026-W35" (+ ", 52 days old" over 14 days)
+                                          //   (+ " · none at Superb" when a lower grade was used)
+      lines: { label: string; pct: string | null; amount: number }[];   // behind a closed "Show details":
+                                          //   PriceIQ from the markdown on (its base is in `line`); a rate card
+                                          //   from its best-condition price; [] for a single-figure quote
+      note: string | null;                // priceiqWhy — why PriceIQ didn't price it
+    } | null;
     newPhone: { deviceId: string; label: string; price: number; suggested: boolean; why: string | null } | null;
                                           // label = model + storage, no brand ("Galaxy S26 Ultra 256GB");
                                           // the CaseView's upgrade.label keeps the brand
@@ -325,50 +447,55 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
 | Kind | Title | Text | When |
 | --- | --- | --- | --- |
 | `blocked` | "Check this is the right phone" | `quoteBlocked` | the camera says this may not be the phone on the case |
-| `model` | "Which phone is it?" | "The test couldn't tell the model. Choose it on the full case." (no test was applied to the case: "No model on the case yet. Choose it on the full case.") | no model on the case |
-| `storage` | "Which storage is it?" | "The phone couldn't measure its storage. Settings › About phone › Storage shows it." — only when a test ran and the phone read nothing. No test applied (a desk-only case), or the phone measured a size on the list that is no longer on the case: "No storage on the case yet. Settings › About phone › Storage shows it." The phone measured a size that ISN'T on the model's list (`measuredStorage`, e.g. a 1TB Ultra on file as 256/512GB): "The phone measures 1TB, which isn't a size on file. Check Settings › About phone, and enter the Cashify quote on the full case if it's really 1TB." | a model, no storage. `options`: the what-if trade-in for each size, smallest size first (`tradeIn: null` when the partner has no price for that size, or none could be asked yet — e.g. the condition is incomplete). `sample: true` on a chip whose price comes from the SAMPLE rate card (a chip with no price is `false`; so are the model's bare sizes); `note` is "Sample price — not a real quote." while any chip is a sample, else null — show it under the chips. **`options: []` when the phone measured an off-list size:** every listed size is one the phone has ruled out, so none is offered (and no what-if prices are asked) — show the text and the way to the full case. |
-| `partner_quote` | "Enter the Cashify quote" | `quote.reason` ?? "The partner has no price for this phone." A quote typed in from the Cashify app that has lapsed: "Cashify quote (ref CF-88421) expired — enter today's quote." | model + storage, not blocked, the partner's quote is unpriced or errored — or it is a lapsed Cashify-app quote (`partner_manual` + `quoteExpired`, open case): SwapUp never re-quotes those, so only today's quote from the app (`PATCH {partnerQuote}`) replaces it |
-| `repair_quote` | "The repair needs a quote" | the first `repair.notes` entry, or `repairNotServiced` (fallback "The price book can't price this repair — enter the service centre's quote.") | a model, something to repair, and the book can't price it (`needs_inspection` / `unpriced` / brand not serviced) |
-| `new_phone` | "Choose the new phone" | "No new phone in the catalogue matches this one — choose it to see the bonus." (the catalogue does have one — staff cleared the suggestion, or none ran on a desk-only case: "Choose the new phone to see the bonus.") | a model and no new phone (the suggestion found none: e.g. an iPhone at a Samsung centre) |
+| `model` | "Which phone is it?" | "The test couldn't tell — choose it on the full case." (no test was applied to the case: "Choose it on the full case.") | no model on the case |
+| `storage` | "Which storage is it?" | "The phone couldn't measure it — see Settings › About phone." — only when a test ran and the phone read nothing. No test applied (a desk-only case), or the phone measured a size on the list that is no longer on the case: "See Settings › About phone › Storage." The phone measured a size that ISN'T on the model's list (`measuredStorage`, e.g. a 1TB Ultra on file as 256/512GB): "Phone measures 1TB, not on file — check Settings, then enter the partner's quote." | a model, no storage. `options`: the what-if trade-in for each size, smallest size first, priced the way the trade-in itself will be (PriceIQ less defects, else the rate card — so the chip and the answer agree) (`tradeIn: null` when nothing prices that size, or none could be asked yet — e.g. the condition is incomplete). `note` is the first priced chip's market-data note (its age over 14 days, or "PriceIQ unreachable, last answer …"), else null — show it under the chips. **`options: []` when the phone measured an off-list size:** every listed size is one the phone has ruled out, so none is offered (and no what-if prices are asked) — show the text and the way to the full case. |
+| `partner_quote` | "Enter the partner's quote" | `quote.reason` ?? "No market price yet — enter a quote." A quote typed in from the partner's app that has lapsed: "Partner quote (ref CF-88421) expired — enter today's quote." | model + storage, not blocked, the partner's quote is unpriced or errored — or it is a lapsed partner-app quote (`partner_manual` + `quoteExpired`, open case): SwapUp never re-quotes those, so only today's quote from the app (`PATCH {partnerQuote}`) replaces it |
+| `repair_quote` | "The repair needs a quote" | the first `repair.notes` entry, or `repairNotServiced` (fallback "No book price — enter the service centre's quote.") | a model, something to repair, and the book can't price it (`needs_inspection` / `unpriced` / brand not serviced) |
+| `new_phone` | "Choose the new phone" | "No catalogue match — choose one to see the bonus." (the catalogue does have one — staff cleared the suggestion, or none ran on a desk-only case: "Choose the new phone to see the bonus.") | a model and no new phone (the suggestion found none: e.g. an iPhone at a Samsung centre) |
 
 - **`headline`:** the title of the first ask that isn't `new_phone`; else `decision.headline`; else
   "Not enough to compare yet".
 - **`reason`:** the first that applies — that ask's text; the first strong signal pointing the way of
-  the recommendation; the first signal; for `no_repair` with no signals "The test found nothing wrong
-  with the phone." (no test applied to the case: "No faults are recorded on the case."); `cannot_say` with nothing to ask → the first `decision.missing` entry (e.g. "No buyback value for this phone once repaired."); else null.
+  the recommendation; the first signal; for `no_repair` with no signals "The test found nothing
+  wrong." (no test applied to the case: "No faults on the case."); `cannot_say` with nothing to ask → the first `decision.missing` entry (e.g. "No repaired value yet."); else null.
 - **`storage`:** `source` and `note` are null whenever `variant` is null. `note`, when the source is
-  `customer`: "The customer typed this — the phone couldn't measure it. Check Settings › About phone
-  before the trade-in."
+  `customer`: "Customer typed this — check Settings › About phone."
 - **`repair.detail`:** covered → "Covered by warranty" / "Covered by Care+"; a manual quote →
   `Quote: ${reason}`; a book estimate → every line label joined with " + ", then "+ labour" if
   labour > 0, "+ GST" if GST > 0, "+ Care+ fee" if that fee > 0 (e.g. "Display assembly + labour + GST").
 - **`repair.why`** (only when `amount` is null): "Nothing to repair."; "Choose the phone first.";
-  otherwise the repair note, or `repairNotServiced`, else "The price book can't price this repair —
-  enter the service centre's quote."
+  otherwise the repair note, or `repairNotServiced`, else "No book price — enter the
+  service centre's quote."
 - **`swap.tradeIn`** is null whenever the trade-in can't be trusted — the camera blocks it, there is
   no model, or no storage — even if an older priced quote is still stored.
-- **`swap.tradeInNote`:** sample → "Sample price — not a real quote."; read off the partner's app
-  (`partner_manual`) and lapsed, on an open case → "Cashify quote (ref ${partnerRef}) expired — enter today's
+- **`swap.tradeInDetail`:** show `line` (when there is one) under the trade-in, then a closed "Show
+  details" listing `lines` as "label · pct" and the rupees (`−₹9,251`; a give-back after the first row
+  `+₹16,048`), then `note`. Never a partner's name: the labels are SwapUp's. The desk's answer card and
+  the store app's answer screen show the same.
+- **`swap.tradeInNote`:** a PriceIQ quote on market data over 14 days old → "Refurbished market price,
+  week 2026-W35, 52 days old." (with " · PriceIQ unreachable, last answer …" when PriceIQ didn't answer
+  and the last good answer priced it; that alone when the data is fresh); read off the partner's app
+  (`partner_manual`) and lapsed, on an open case → "Partner quote (ref ${partnerRef}) expired — enter today's
   quote." (the figure stays on screen for reference, marked; the same sentence is the `partner_quote` ask and
-  `actions.swap`); read off the partner's app → `Cashify ref ${partnerRef}` (SwapUp never re-quotes those, so
+  `actions.swap`); read off the partner's app → `Partner ref ${partnerRef}` (SwapUp never re-quotes those, so
   it is never "re-quoting"); expired on an open case → "Quote expired — re-quoting." (a closed case's quote
   running out after the lock is no news: no note).
 - **`swap.why`**, in order: `quoteBlocked`; "Choose the phone first."; "Tap the storage to see the
-  trade-in." (the phone measured an off-list size: the storage ask's text — there is nothing to tap); `quote.reason` (fallback "The partner has no price for this phone."); the first
-  `conditionProblems` entry; "Answer the condition questions." (no condition); "No trade-in price
-  from the partner yet."
+  trade-in." (the phone measured an off-list size: the storage ask's text — there is nothing to tap); `quote.reason` (fallback "No market price yet — enter a quote."); the first
+  `conditionProblems` entry; "Record the condition." (no condition); "No trade-in price
+  yet."
 - **`bonusWhy`:** no new phone → "Choose the new phone to see the bonus."; a new phone but no bonus →
-  "No upgrade-bonus campaign applies to this phone today." `bonus` / `bonusBp` are a manager's
+  "No bonus campaign today." `bonus` / `bonusBp` are a manager's
   override when there is one (`override.amount` / `override.bp`).
 - **`actions.repair`:** closed → "This case is closed."; nothing to repair → "Nothing to repair.";
   no refurb quote → `repair.why`; draft → "Not priced yet."; else null.
-- **`actions.swap`:** closed → "This case is closed."; no trade-in → `swap.why`; a lapsed Cashify-app quote →
-  "Cashify quote (ref …) expired — enter today's quote."; no new phone → "Choose the new phone." (the lock
+- **`actions.swap`:** closed → "This case is closed."; no trade-in → `swap.why`; a lapsed partner-app quote →
+  "Partner quote (ref …) expired — enter today's quote."; no new phone → "Choose the new phone." (the lock
   blocker's own words); not quoted → "Not priced yet."; else null. A swap the Lock screen is certain to refuse
-  for a reason it can't fix there is refused here, with that reason. The IMEI, sample-card, credit and
-  rate-card/live expiry blockers stay on the Lock screen (`lockBlockers`) — an expired rate-card or live quote
+  for a reason it can't fix there is refused here, with that reason. The IMEI, credit and
+  PriceIQ / rate-card expiry blockers stay on the Lock screen (`lockBlockers`) — an expired PriceIQ or rate-card quote
   IS re-quoted by `reprice`. The lock's expired-quote blocker is "The partner's quote has expired — re-quote."
-  for those, and the same "Cashify quote (ref …) expired — enter today's quote." for a Cashify-app quote
+  for those, and the same "Partner quote (ref …) expired — enter today's quote." for a partner-app quote
   (`expiredQuoteBlocker`), so the Lock screen never asks for a re-quote that can't happen.
 - **`actions.walkAway`:** closed → "This case is closed."; else null.
 
@@ -377,11 +504,11 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
 - **Storage** — at Apply (§4): the phone's measurement; else the model's only size (`catalogue`);
   else the size the customer picked on their own phone (`customer` — a claim, see the lock below). A
   measured size that isn't on the model's list fills nothing and is kept as `measuredStorage`; the answer
-  says so and offers no chip. **Entering the Cashify quote for that phone (`PATCH {partnerQuote}` while the
+  says so and offers no chip. **Entering the partner's quote for that phone (`PATCH {partnerQuote}` while the
   case has no storage) settles the storage at the measured size** (`variant: "1TB"`, `variantSource:
   "measured"`): the partner's app priced that phone. `PATCH {variant: "1TB"}` stays refused (not on file).
   Still unknown → the `storage` ask: one row of chips, each with that size's trade-in. Those are
-  partner **what-if** quotes (`whatIf: true`, never binding), asked by the re-price for each of the
+  **what-if** trade-in quotes (PriceIQ less defects, else the partner's rate card) (`whatIf: true`, never binding), asked by the re-price for each of the
   model's sizes while the storage is unknown and the condition is complete, consistent and not
   camera-blocked — again only when the description changed or there are none yet — and dropped the
   moment a size is set. One tap: `PATCH {variant}`. Never a guessed size.
@@ -415,8 +542,8 @@ All exist and accept Bearer:
   Apply can record `measured` / `catalogue` / `customer` (the public PATCH can't say where a size came from).
   **Re-saving the size already on the case changes nothing** (since the 2026-10-17 review): it keeps its
   `variantSource` — a size the customer typed stays `customer`, so the lock still asks for `storageSeen` —
-  and the partner is not re-asked and a Cashify-app quote is not cleared. Only a different size is the
-  advisor's word (re-quoted, Cashify-app quote cleared). Apply's own word still counts on the same size: a
+  and the partner is not re-asked and a partner-app quote is not cleared. Only a different size is the
+  advisor's word (re-quoted, partner-app quote cleared). Apply's own word still counts on the same size: a
   measurement turns the customer's claim into `measured`.
 - `POST /api/cases/<id>/action` with `{action: "reprice"}`, `{action: "choose_repair"}`,
   `{action: "walk_away", reason?}` or `{action: "lock", customer, checks}` (below).
@@ -429,26 +556,44 @@ All exist and accept Bearer:
 `{ action: "lock", customer: { name, phone, idType, idLast4 }, checks: { ownership, simRemoved,
 imeiMatches, noFinanceLock, kym: { status, reference? }, imeiCheckAck?, storageSeen? } }`
 
+**One hand-over confirm, four flags** (owner, 2026-10-17: *"Reduce the flow"*). SwapUp Store and the
+desk show the four hand-over checks as ONE tick — "Owner confirmed · SIM out · IMEI matches · no
+EMI/lock", with what each means under it — and send it as all four flags (`ownership`, `simRemoved`,
+`imeiMatches`, `noFinanceLock`; `handoverChecks()` in the store app's `src/store/lock.ts` and the
+desk's `components/counter/handover.ts`). The server is unchanged: each flag is still required, and
+a lock missing any of them is `400 "Confirm first: owner confirmed, SIM and card out, …"`. A changed IMEI unticks the confirm (it covered "IMEI
+matches"). The screen shows no money — the answer showed it.
+
 **`checks.storageSeen: boolean`** (since 2026-10-17) — required when `variantSource === "customer"`:
 the advisor saw the storage in Settings › About phone. Without it →
-`400 "Confirm before taking the phone: Settings › About phone shows 512GB (the customer typed it — the phone couldn't measure it)."`
+`400 "Confirm Settings › About phone shows 512GB."`
 A claimed size is enough to SHOW a price; moving money needs it seen — the same rule as the IMEI, one
 tick, only when the phone couldn't measure it. It is stored with the checks (`checks.storageSeen: true`)
 and in the `case.lock` audit (`storage: {variant, source, seen}`). It is checked right after the
 status (only a `quoted` case locks) and before the IMEI check digit and the lock blockers.
 
-### Worked example (local seed: `org_samsung_svc`, sample card, S23 Ultra, `screen_cracked`)
+### Worked example (local seed: `org_samsung_svc`, PriceIQ answering the contract's figures for the Galaxy S23 Ultra 256GB, week 2026-W35, 52 days old)
 
-Storage unknown after Apply: status `quoted` (the repair is priced); `asks[0]` storage with 256GB →
-₹18,800 and 512GB → ₹20,300; `swap.tradeIn` null, why "Tap the storage to see the trade-in.";
-`repair.amount` 34096 (display 28,470 + labour 425 + GST 5,201); new phone S26 Ultra 256GB, suggested.
+**A tested Galaxy S23 Ultra 256GB.** SwapUp Check (SM-S918B, 256 GB measured) with the rear camera
+failed; screen OK, body scuffs, liquid clean (rule G1: Good); battery health 76 %. Faults
+`rear_camera`, `battery_drain`; grade "Needs repair", after repair Good. `GET /api/cases/<id>`:
 
-After `PATCH {variant: "256GB"}`: Refurb quote ₹34,096 · new phone Galaxy S26 Ultra 256GB ₹1,54,999
-(suggested, "Newest Galaxy S Ultra, same storage (256GB).") · trade-in ₹18,800 · bonus 400 bp = ₹6,199
-(base 200 + S series 100 + repair ≥ 50% of the repaired value ₹34,800 100) · **trade-in + bonus
-₹24,999** · customer pays ₹1,30,000 · vsRepair +95,904 · `either`, "Either is reasonable — it's the
-customer's choice", three soft signals · `tradeInNote` "Sample price — not a real quote." (Checked
-end to end on the local server, 2026-10-17.)
+- `quote.source` `{kind: "priceiq", label: "PriceIQ · Good − defects"}`, `quote.amount` **36490**,
+  lines: Refurbished market price (Good) · PriceIQ 51,399 · Below the market price 200 bp −1,028 ·
+  Battery drains / swollen 900 bp −4,625 · Rear camera faulty 1,800 bp −9,251 · Rounded down to ₹10 −5.
+  `quote.priceiq` `{deductions: "SwapUp's % per defect", stale: true, ageDays: 52, note: "Refurbished
+  market price, week 2026-W35, 52 days old."}`.
+- `repairedQuote.amount` 50370 ("PriceIQ · Good after refurb"); `marketSell.amount` 50371.
+- `offer.swap`: tradeIn 36490 · `tradeInDetail.line` "Refurbished market price ₹51,399 (Good) − 2% − 2
+  defects · PriceIQ 2026-W35, 52 days old" · `tradeInNote` "Refurbished market price, week 2026-W35, 52
+  days old."
+- A flawless one: ₹53,499 (Superb) − 2% = ₹52,420.
+
+**A model PriceIQ has no price for** (Galaxy Z Fold6 256GB) and no partner rate card:
+`quote.status` "unpriced", `quote.source.kind` "none", `quote.reason` "No market price yet — enter a
+quote.", `quote.priceiqWhy` "PriceIQ has no refurbished market price for the Galaxy Z Fold6 256GB.";
+the answer asks for the partner's quote with that sentence. With the partner's rate card listing it,
+`quote.source.kind` "partner_ratecard" and `tradeInDetail.note` says why PriceIQ didn't price it.
 
 ## 4. Customer test app (device side)
 
@@ -472,7 +617,8 @@ can open.
 - `code` may be a session's code, the demo code, or a store's counter code (§2c).
 - `session.identity` (since 2026-10-17): `{ label, match: "exact"|"family"|"none", reason, variant, modelId, variants }`
   — SwapUp's `matchModel` on the phone's own model code ("Samsung Galaxy S22", "128GB"), for the
-  Identify card. `reason` is the matcher's explanation. Never a price. `match: "none"` → the picker.
+  Identify card. `reason` is the matcher's explanation. Never a price. `match: "exact"` → nothing is
+  asked; `"family"` (a regional version) → the one-tap "Is this your phone?"; `"none"` → the picker.
   `variants` (since 2026-10-17, the answer screen): the matched model's storage sizes, e.g.
   `["256GB","512GB"]` — always present, `[]` when no model matched (an older server sends none: read
   that as `[]`), and `[]` whenever the phone reported its disk size — even a size that isn't on the
@@ -484,7 +630,9 @@ can open.
   mobile number and name (both optional) and sends them with `declare`.
 - `session.plan` depends on the app: SwapUp Check ≥ 0.6.0 (native, or `web-0.6.0`+) gets
   `battery_health` (after `battery`; not critical); an older app's plan has it taken out, so it sees
-  exactly the 18 tests it always had.
+  exactly the 18 tests it always had. It is also left out when the case already has a battery-health %
+  from another source — an attached Phonecheck report (since 2026-10-17: the screenshot is asked only
+  when nothing else read the battery; the phone lets the customer skip it either way).
 - `installId`: a random id the app generates once and keeps; the session binds to the first
   installId that joins. A different installId on the same code → `409 "This code is already
   being used on another phone."` The same installId re-joining (app restarted) gets a fresh
@@ -521,10 +669,10 @@ At **Apply** (`POST /api/test-sessions/<id>/apply`):
 - **Storage** (`lib/domain/phoneLed.ts` `storageFromTest`; first match wins; audit `storage: {variant, source, measured}`):
   1. **measured** — the phone read its own disk, a size on the model's list: always used, however the
      model was named (code match or the customer's pick). A customer who picked the same model in another
-     size gets the flag "Storage: the customer said X, the phone measures Y. The measurement is used."
+     size gets the flag "Storage: customer said X, phone measures Y — measurement used."
   1b. the phone read a size that ISN'T on the model's list → nothing is patched, and no pick, single
      size or guess is used against the reading. Flag: "Storage: the phone measures 1TB, which isn't a size
-     on file (the customer said 512GB — not used). Check Settings › About phone, and enter the Cashify quote
+     on file (the customer said 512GB — not used). Check Settings › About phone, and enter the partner's quote
      on the full case if it's really 1TB." The reading is kept as `measuredStorage` (§3c).
   2. the case already has a size for that model → nothing is patched (a claim never overwrites).
   3. **catalogue** — the model comes in one size only.
@@ -541,16 +689,33 @@ its queue until acknowledged → `{ ok: true, received: n, progress }`.
 
 `POST /api/device/complete` `{}` → `{ ok: true, summary }`.
 
-`GET /api/device/status` → `{ status, progress, storeName, caseRef }` (lets the app show
-"The store has your results").
+`GET /api/device/status` → `{ status, progress, storeName, caseRef, reportPath, grading, colours }` (lets the
+app show "The store has your results"; `colours: true` = show the test colours on the result screen
+for the advisor — "The test colours for the advisor", below). Since 2026-10-17, once the session is `applied`:
+`reportPath` = the path of the phone's public grade report, `"/r/<token>"` — open it on the
+session's `server` origin ("See your phone's report", §9); `grading` = `{ status, label, grade,
+letter, final }` of the version that link opens on (the latest issued one, never the live grade) —
+the customer's "Grade: Good (B)". No reasons and never a price. Both `null` before Apply, or when
+nothing was reported. The app reads them through `src/check/report.ts` `customerReport`; after a
+restart on the "store has your results" screen it reads the status once more for them.
 
 ### Phone-led flow (SwapUp Check ≥ 0.6.0 — `docs/PHONE-LED-FLOW.md`)
 
-Identify › Scan › Test › Result, the phone moving itself. All Ticket-authenticated.
+Scan › Test › Done (with "Is this your phone?" first only when the match isn't exact), the phone moving itself. All Ticket-authenticated.
 
-`POST /api/device/phase` `{ phase: "identify" | "scan" | "battery" | "test" | "done" }` → `{ ok: true }`
+`POST /api/device/phase` `{ phase: "identify" | "scan" | "battery" | "test" | "done" | "colours" }` → `{ ok: true }`
 on each step change. Only the store's screen reads it (`TestSessionView.phonePhase`, the camera
-card's line); anything else → `400`.
+card's line); anything else → `400`. `colours` (≥ 0.8.0): the phone is showing the test colours on
+its result screen for the advisor (below) — a certification tapped then records `withColours`.
+
+**The test colours for the advisor (SwapUp Check ≥ 0.8.0).** The customer is never asked about
+condition. When the store camera's colour sweep didn't check the screen, the advisor certifies it in
+SwapUp Store while the phone shows the colours: `GET /api/device/status` says **`colours: true`**
+once the phone's phase is `done` (or `colours`), the session isn't applied, and the screen is still
+to certify. Then, on the result screen: white → black → red → green → blue → stripes, full-screen,
+about 2.5 s each, looping, brightness up, caption "The advisor is checking your screen — keep it
+face up"; poll the status about every 1.5 s, post phase `colours` while showing and `done` when
+`colours` turns false (the advisor tapped Screen, or Apply). The customer taps nothing.
 
 `GET /api/device/models` → `{ brands: string[] }` (most models first); `?brand=Samsung` (any case) →
 `{ models: [{ id, brand, model, variants }] }`, newest first. SwapUp's own model list, no prices.
@@ -565,7 +730,10 @@ grade) and open GradeIQ's `/report`, which shows GradeIQ's own price. Audited on
 (`test_session.camera_link`). Older apps never call it.
 
 `POST /api/device/battery` `{ image: "data:image/png|jpeg|webp|heic;base64,…" }` (≤ 3 MB as a data
-URL, else `413`) → `{ healthPct: number | null, outcome: "pass" | "fail" | "skip" }`. The server
+URL, else `413`) → `{ healthPct: number | null, outcome: "pass" | "fail" | "skip" }`. **`409` "Battery
+reader isn't available — skip; the advisor checks it."**
+also when GradeIQ answers that its reader is off (no AI key, or its AI refused the call — e.g. out of prepaid
+credit): not the customer's screenshot, so never "try a clearer screenshot". The server
 forwards it to GradeIQ's `/ocr` (call 7, `GRADEIQ-INTEGRATION.md`), reads `ocr.batteryHealth`, and
 records the `battery_health` result itself: **≥ 80 % pass, below 80 % fail** (the `battery_drain`
 fault — "Battery health 72 % (screenshot)" — which prices), nothing legible → `skip` (untested,
@@ -589,13 +757,27 @@ screen FIRST, as its Scan step (after Identify), showing the camera-link QR whil
 `idle` — same two endpoints, same escapes.
 
 `GET /api/device/screen` →
-`{ state, pattern, shown, cosmeticDone, handoffDone, capture: { verdict, code, reasons[], attempt } | null }`
+`{ state, pattern, shown, cosmeticDone, handoffDone, capture: { verdict, code, reasons[], attempt } | null, connectedAt, released, unreachable? }`
+- `released` reaches the phone even when GradeIQ can't be read. For SwapUp Check ≥ 0.8.0 an
+  unreadable GradeIQ is a normal answer with `unreachable: true` (pattern `idle`, `released` as it
+  is) instead of a `503` — the phone says "busy" and keeps polling, never offers the customer a skip,
+  and the advisor can still release it. Older apps keep the `503`.
+- Read FRESH from GradeIQ on every call (2026-10-17): GradeIQ's camera page waits only 4 s for the
+  phone to confirm white, so poll about every 350 ms once a camera page is connected, echo two frames
+  after the colour is drawn, and re-send a lost echo after 600 ms.
+- **No customer skip** (2026-10-17): stay on Scan until `handoffDone`, or until **`released`** is true
+  (the advisor pressed "Go on without the camera", `POST /api/test-sessions/<id>/release-scan`, or
+  overrode the camera). A camera page that never connects in **5 minutes** lets the phone go on by
+  itself (no button; the advisor checks the screen by eye). Once the camera page is connected the
+  phone shows no scan code — the front-glass photo must never carry it.
+  Leaving Scan for any reason, echo `{ shown: "off" }` once — never leave a colour behind as the last
+  echo (GradeIQ keeps it, and the next camera page would take it for the phone showing white).
 - `state`: `disabled` or `failed` → skip the photo check and run the tests; `pending` → wait;
   `ready` → show `pattern` (`idle` | `white` | `black` | `red` | `green` | `blue` | `stripes`).
 - `capture.verdict = "retake"` → the store's photos were rejected (show `reasons`; stay on the
   screen — the store retakes).
-- Leave (to Done) when `handoffDone` is true, or 30 s after `cosmeticDone`; "Finish without photos"
-  after 90 s with no store camera page (a NEW `connectedAt` — a page loaded after the screen mounted —
+- Leave (to Done) when `handoffDone` is true, or 30 s after `cosmeticDone`; apps before 0.8.0 also
+  offer "Finish without photos" after 90 s with no store camera page (a NEW `connectedAt` — a page loaded after the screen mounted —
   a pattern request or a capture verdict counts as connected), or over a pattern left unchanged for 90 s.
 - Two camera passes (2026-10-17, §8): the store's photos (pass 1) are usually taken BEFORE the phone
   joins, so `cosmeticDone: true` and a `capture` verdict may already be there when this screen mounts.
@@ -610,7 +792,7 @@ screen FIRST, as its Scan step (after Identify), showing the camera-link QR whil
   `GET /api/device/camera-link` instead).
 
 `POST /api/device/screen` `{ shown: "<pattern actually on screen>" }` → `{ ok: true }`. The first
-echo is what unlocks the store's camera button.
+echo is what unlocks the store's camera button. `shown: "off"` = the phone left its Scan step.
 
 ## 4b. Data clearing after acceptance (store side, via the desk case page)
 
@@ -622,7 +804,7 @@ the customer factory-resets their own phone from its Settings and the store reco
 Advisor / store manager only (403 otherwise); 400 lists unconfirmed steps; 409 if the case is not at the store
 after acceptance or the record already exists. `dataClearState` is `done | attested | due | not_applicable`
 (`attested` = an older case where the reset was ticked at hand-over). The record is always labelled
-"Factory reset by the customer, seen by the store — not a certified erasure". The customer app only
+"Customer's factory reset, seen by the store — not a certified erasure". The customer app only
 shows the steps and opens Settings (Android `Linking.sendIntent`); nothing resets a phone remotely.
 
 ## 5. Downloads
@@ -708,9 +890,8 @@ itself. For such a session (`TestSessionView.scanFirst`):
 - `grading.photosUrl` is **null** — no photos before the phone joins. `cameraUrl` is the "Take photos"
   fallback on the tablet, behind the same fail-closed lock (the phone echoes `idle` while it shows
   its QR, so it unlocks then).
-- `grading.message` follows `phonePhase`: "The customer's phone is identifying itself…", "…is showing
-  its scan code — scan it with your camera, or Take photos.", "…is testing itself — the camera grade
-  is being worked out." (or the grade, once settled). `cameraLocked` says why in the same terms.
+- `grading.message` follows `phonePhase`: "Phone identifying itself — scan code next.", "Scan the
+  phone's code, or Take photos.", "Phone testing — grade coming." (or the grade, once settled). `cameraLocked` says why in the same terms.
 - Before the phone has joined nothing is known about it, so the view is today's (`photosUrl` may be
   offered). A SwapUp Store ≤ 0.5 tablet with a ≥ 0.6.0 phone gets no `photosUrl` after the join and
   must use `cameraUrl` / `screenUrl`.
@@ -734,6 +915,8 @@ type GradingView = {
   cameraLocked: string | null;     // why cameraUrl / screenUrl are locked
   canOverride: boolean;            // offer "Start without the customer's phone" → …/camera-override {reason}
   override: { by: string; reason: string; at: string } | null;
+  released: { by: string; at: string } | null;   // the advisor let the phone go on from Scan without the camera
+  canRelease: boolean;             // offer "Go on without the camera" → …/release-scan (a scan-first phone on Scan, the camera not finished)
   screenReadable: boolean;
   pattern: string | null; cosmeticDone: boolean; handoffDone: boolean;
   photosDone: boolean;             // the photos were accepted (pass 1, or the single pass's photos)
@@ -763,8 +946,11 @@ type AssessmentView = {
   suggested: { id: FaultId; because: string; … }[];   // shown, never added (frame_damage, cracked lens)
   floor: { screen: ScreenState; body: BodyState };   // the condition may be recorded worse, never better
   flags: string[];                                    // weaker sightings, "LCD not camera-checked", review notes
-  displayCheck: { verdict: "pass"|"fail"|"unknown"; confidence; note; findings[]; patterns[]; captures[]; requested[]; missing[]; reason } | null;
-  lcd: { cameraChecked: boolean; verdict: "pass"|"fail"|"unknown"|null; reason: string|null };
+  displayCheck: { verdict: "pass"|"fail"|"unknown"; confidence; note; findings[] /* each with box when GradeIQ gave one */; patterns[]; captures[]; requested[]; missing[]; reason;
+                  source: "gemini"|"stub"|null /* stub = its AI reader was off or failed; the frames are still kept */ } | null;
+  lcd: { cameraChecked: boolean; verdict: "pass"|"fail"|"unknown"|null; reason: string|null;
+         captured?: number; requested?: number;   // colours photographed, of how many asked
+         aiOff?: true };                           // frames in, reader off: reason "captured N of M colours, AI reader off — check by eye"
   obstruction: { present: boolean; type: string; note: string } | null;   // a case on the phone → grade not used
   oem: { verdict: string; confidence: number|null; evidence: string[] } | null;
   identity: { verdict: "match"|"mismatch"|"unverified"; reasons: string[]; device: { make, model, match, reason } | null };
@@ -775,7 +961,8 @@ type AssessmentView = {
 Rules the server enforces:
 - **Camera lock fails closed.** `cameraUrl` and `screenUrl` are null until GradeIQ's `/screen`
   reports the customer's phone echoing (`shown` is a string). Unreadable `/screen` → `cameraLocked`
-  says so; only `camera-override` with a reason unlocks them, and the LCD is then "not
+  says so; only `camera-override` with a reason unlocks them. A sweep that then runs to the end still
+  counts — its frames prove the phone showed each colour; with no sweep the LCD is "not
   camera-checked". `photosUrl` has no such lock: the photos need nothing on the phone.
 - **The pull window** (the session pulled every 5 s for a final grade and the LCD verdict) runs
   180 s from the LATER of the photos being accepted and the screen check finishing — with the photos
@@ -794,5 +981,216 @@ Rules the server enforces:
 
 Case fields (`GET /api/cases/<id>`): `faultSources` (`{ [faultId]: ("tested"|"declared"|"camera_ai"|"advisor")[] }`),
 `camera` (what the camera saw, written at Apply: grade, final, floor, faults, suggested, flags, lcd,
-lcdOverride, identity, identityOverride, overrides, devicefax), `quoteBlocked`. The DeviceFax JSON
-(photo URLs on the public GradeIQ origin) is kept on the test session for staff only.
+lcdOverride, identity, identityOverride, overrides, devicefax), `certification` (§8b), `quoteBlocked`.
+The DeviceFax JSON (photo URLs on the public GradeIQ origin) is kept on the test session for staff only.
+
+## 8b. Check the phone — the advisor certifies (store side)
+
+Owner, 2026-10-17: *"advisor certify lcd in its app instead of asking"*. The customer is never asked
+about condition: the store camera tests it, and where the camera can't decide — no screen sweep, its
+AI off, a grade that isn't final — the advisor looks and taps what they see, **by name**, on one card
+in SwapUp Store ("Check the phone", **inside the camera step** of the Session screen, only when the
+camera couldn't decide — the body and liquid rows as soon as the scan is over, the screen once the
+phone's tests are done and it shows the colours). One tap per row; no forms, no confirm dialog;
+tapping another chip replaces the earlier one. The **automatic** apply waits for every row on the
+card (above, "The answer, by itself") while it can still be tapped (`canEdit`); a **manual** Apply is
+never blocked: a row left untapped keeps the grade provisional, and the answer screen then shows the
+card until it is tapped. Once every row is tapped the answer keeps it **closed, one tap away** —
+"Checked by Asha · change" — until the trade-in is locked, so a wrong last tap (the answer opens
+half a second after it) is put right on SwapUp Store's answer screen. (The desk has no certify
+control: change a row there.)
+
+Which rows (`needed`) follow exactly what the SwapUp grade can only settle with a look
+(`certifySignals` in `lib/domain/certify.ts`): the screen when the cosmetic grade isn't final, the
+sweep didn't check the screen, or it failed it without being sure; the body when the grade isn't
+final; both when the grade isn't conclusive or GradeIQ asks for a review; the screen / the body for
+a part a final grade rated C or D (front / back or frame); the body for a cracked back or bent frame
+the camera saw that isn't on the case. The Screen row **waits while the phone is still testing**
+(the colours come after the tests): SwapUp Store holds its chips, and the server answers `409`
+"Wait for the test colours — the phone is still testing." A Screen tapped before the colours showed
+keeps them wanted, and the same tap again (once they show) records it on them.
+
+`TestSessionView.certify` **and `CaseView.certify`** (staff only; the same block from the same code,
+`certifyBlock` in `lib/server/cases.ts`, so the answer screen opened from Home shows the card too)
+say what to show: `needed` (the rows), `rows` (certified so far), `choices` (the chips, word for
+word), `testSessionId` (send it back with each tap), `canEdit` (false once the case is past the
+counter: show the rows, no chips), `colours` — under Screen: `showing` → "The customer's phone is
+showing the test colours", `waiting` → "Waiting for the customer's phone to show the colours…"
+(also before the phone has joined), `old_app` → the phone can't show them (certify by looking at it;
+the grade says so), `off` → nothing to wait for (certified, the camera's sweep checked it, or the
+results are applied). `CaseView.certify` is `null` for a partner, and for a case nobody tested with
+SwapUp Check and nobody certified.
+
+| Row | Chips (`value` · label) | On the case |
+|---|---|---|
+| `screen` | `ok` OK · `scratches` Scratches · `lines` Lines or spots · `cracked` Cracked | screen flawless / scratched (display test passes) · `display_lines` (display fails) · `screen_cracked` (no display result) |
+| `body` | `like_new` Like new · `scuffs` Scuffs · `dents` Dents · `back_cracked` Back cracked · `bent` Bent | body flawless / scuffed / dented · `back_cracked` · `frame_damage` |
+| `liquid` | `clean` Clean · `tripped` Tripped · `cant_see` Can't see | nothing · `water_damage` · nothing (the report says it wasn't checked) |
+
+`POST /api/cases/<id>/action` `{ "action": "certify", "row": "screen"|"body"|"liquid", "value": "<chip value>", "testSessionId": "ts_…" }`
+(`testSessionId` optional — default the case's latest session) → the CaseView, with `certification`
+`{ screen?|body?|liquid?: { value, label, by, at, withColours } }` and the new `grading`, `faults`,
+`condition` and re-priced `offer`.
+- Faults it adds carry source `advisor`; changing the row takes off only the faults that row added
+  (and only when nothing else found them). The screen and body take the certified value but never
+  better than the case's faults or what the camera confirmed — the camera's finding stands (DS10).
+- `withColours` = the phone's phase was `colours` within the last 10 minutes.
+- Works before and after Apply, until the trade-in is locked. Before Apply the case has no
+  condition yet: a tap records the row (and puts on any fault it means) but never invents the rest of
+  a condition nobody looked at — `condition` stays `null`, and Apply folds the certified screen and
+  body into the condition it makes. The same value tapped again changes
+  nothing (no audit row). Every change is audited `case.certify` `{row, value, prev, withColours,
+  testSessionId, faultsAdded, faultsRemoved}`; the grade report gets a version (`certified`).
+- Errors: `403` "Only store staff certify a phone." (not advisor / store manager) · `404` the case or
+  that session isn't in scope · `409` past the counter · `400` unknown row, or "Tap one of: OK,
+  Scratches, Lines or spots, Cracked."
+- After the last tap the answer opens by itself (the session's `autoApply` goes `ready` → `applied`),
+  recorded as whoever tapped last (else whoever released the Scan step, else who started it).
+
+## 9. The SwapUp grade and the grade report (+ Phonecheck)
+
+One grade for a tested phone, from **every** phone check SwapUp has — SwapUp Check (the customer's
+phone testing itself) and, at a store that owns one, a **Phonecheck** station — merged worse-of by
+one engine (`lib/domain/grading.ts`; rules, scales and Phonecheck set-up in `docs/GRADING.md`).
+**The grade never moves a price** and the report carries **no money**.
+
+**Both scales, always together.** The SwapUp grade (Superb > Good > Fair > Best Value) and its
+letter, a one-to-one translation: A = Superb, B = Good, C = Fair, D = Best Value (`null` whenever the
+grade is). Call it the **SwapUp grade** and the page the **grade report** — on every screen. The
+server writes the label; clients render it as sent (splitting off `" · provisional"` at most) and
+never rebuild the letter:
+
+| `status` | `label` |
+| --- | --- |
+| `graded` (final) | `"Superb (A)"`, `"Good (B)"`, `"Fair (C)"`, `"Best Value (D)"` |
+| `graded` (provisional) | `"Good (B) · provisional"` |
+| `needs_repair` | `"Needs repair"` |
+| `incomplete` | `"Not fully tested"` |
+| `cannot_grade` | `"Can't grade"` |
+| `not_tested` | `"Not tested"` |
+
+Wherever the letter shows, show this line once beside it (it is also `body.grade.letterScale`):
+"A = Superb, B = Good, C = Fair, D = Best Value — not CTIA." Never call it a CTIA grade. GradeIQ's camera letter (Premium–D) is a different thing
+and stays staff-only (§8) — never beside this grade.
+
+### `CaseView.grading` (every `GET`/`PATCH /api/cases/<id>` and `/action` response)
+
+```ts
+CaseView += {
+  grading: {
+    status: "not_tested" | "cannot_grade" | "needs_repair" | "incomplete" | "graded";
+    label: string;                 // both scales, ready to show (table above)
+    grade: "Superb" | "Good" | "Fair" | "Best Value" | null;   // only when graded
+    letter: "A" | "B" | "C" | "D" | null;                     // null whenever grade is
+    final: boolean;                // graded and nothing provisional
+    why: string | null;            // the one-line reason (reasons[0])
+    report: { path: string; version: number; sha256: string; issuedAt: string; final: boolean } | null;
+                                   // path "/r/<token>" (staff: latest) or "/r/<token>?v=<n>" (partner: frozen)
+    phonecheck: { canPull: boolean; why: string | null } | null;   // staff: show "Phonecheck results" only when canPull; why = why not
+  } | null;                        // null only for the partner when no report was issued
+};
+```
+
+Staff get the **live** grade while the case is at the counter (`draft`/`quoted`); once the trade-in
+is locked, the grade **is** the version frozen at lock (the receipt's, the pickup's and the
+partner's), with `report.path` pinned to it (`?v=<n>`). The partner gets only what the frozen
+version says, and `phonecheck: null`. Show the grade line **outside** the price tiles — the tiles
+stay partner money.
+
+**Partner fixes (2026-10-17).** For a partner viewer every case response now carries
+`refurbCost: null`, `offer: null` and `marketSell: { amount: null, why: "Not shown to the partner.",
+source }` — the PriceIQ sell price is the store's margin and used to reach the partner. Its
+`camera` also comes without the store camera's own grade: `grade: null`, `gradeRange: null`,
+`flags: []` (GradeIQ's Premium–D letter is staff-only; beside the report's A–D it would read as a
+second SwapUp grade). The camera's faults stay — they are on the case.
+
+### `GET /api/cases/<id>/grading-report` (Bearer; any role that can see the case)
+
+```ts
+{
+  live: Grading | null,           // staff only; the engine's full output (tests, battery, reasons, provisional, disclosures, repairs…)
+  issued: Envelope | null,        // staff: the latest version; partner: the lock version (else a backfill)
+  versions: { version, sha256, issuedAt, reason, final }[],   // staff: all; partner: just that one
+  path: "/r/<token>" | "/r/<token>?v=<n>" | null,
+  staff: StaffExtras | null,      // staff only
+}
+type Envelope = { schema: "swapup.grading-report/v1"; version: number; issuedAt: string; reason: Reason;
+                  final: boolean; sha256: string; body: ReportBody };     // ReportBody: lib/domain/gradingReport.ts
+type Reason = "swapup_check" | "phonecheck" | "edited" | "traded_in" | "backfill";
+type StaffExtras = {
+  imei: string | null; imei2: string | null;                                // full, staff only
+  camera: { gradeiqLetter, components[], score, flags[], disagreements[], gradeiq: { report, devicefax } | null } | null;
+  phonecheck: { recordId, source, aiRead, links: { a4, erasure, dhr }, testerGrade, imeiOverride } | null;
+  outOfDate: boolean;             // the live grade moved since the latest version
+  afterRefurb: { grade, letter, label } | null;   // the after-refurb grade the store's sell price uses
+};
+```
+
+A partner gets `404` before the trade-in is locked, like the case. **Versions:** a new one only when
+the body changes — Apply (`swapup_check`), a Phonecheck attach (`phonecheck`), any case edit
+(`edited`), and at lock the frozen one (`traded_in`, `final: true`). After lock nothing re-issues. A
+case tested before this existed gets v1 (`backfill`) on first read. Never tested → no report.
+
+### The public link (no sign-in)
+
+`GET /api/r/<token>[?v=n]` → `Envelope` (latest, or version n), `cache-control: no-store`; `404` for
+an unknown token or version; no list of versions. The body has no money, no customer and a masked
+IMEI. **Verify:** `sha256 === sha256(canonicalJson(body))` (keys sorted recursively; an integrity
+fingerprint, not a signature). `GET /api/r/<token>/photo/<n>[?v=]` → that version's photo `n`
+(`body.camera.findings[].photo`), streamed by SwapUp; `404` otherwise. The HTML page is `/r/<token>`.
+
+### Phonecheck on a case (Bearer, `advisor` / `store_manager`, case `draft`/`quoted`)
+
+`GET /api/cases/<id>/phonecheck` → `{ configured: {ok, why}, station, stationFrom: "store"|"server"|null,
+canPull, why, aiReader: {ok, why}, records: PcSummary[] }` — the records of this phone (by IMEI) this
+store may use. `aiReader.ok` false = the AI reader is off — not set up (`GEMINI_API_KEY` unset), or
+Google refused the account in the last 15 minutes (out of prepaid credit, 402; key refused, 401 /
+403: "AI reader off — out of credit; upload the Phonecheck JSON."): grey the "report PDF or photo" upload and show `why` before a file is chosen. The JSON
+upload always works. (`ok` true doesn't promise Google answers — the first refusal is a `503` on
+the upload, in words; after it the reader reports itself off and makes no call.)
+
+`POST /api/cases/<id>/phonecheck` →
+`{ case: CaseView, record: PcSummary | null, outcome: "attached" | "not_found" | "stale", note, extracted? }`
+— `note` is the server's own sentence for staff when the outcome needs one; show it when present.
+
+| Body | Does |
+| --- | --- |
+| `{ mode: "pull", imei? }` | Phonecheck's newest check of the phone (`GetDeviceInfo`), stored and attached. `409` while Phonecheck is switched off (`why` names what is missing); `not_found` = never tested on that account; `429` more than once per 15 s / 10 a day per case; `502`/`504` Phonecheck refused / was slow (the message says which). |
+| `{ mode: "upload", record }` | The Phonecheck JSON (one record or an array, ≤ 256 KB). Always provisional ("uploaded by staff"). |
+| multipart `file` (PDF, JPEG, PNG or WebP, ≤ 8 MB) | The **report itself** — read by AI (Gemini) into the same record; anything not legible stays empty. Provisional ("read by AI — check the figures"). `extracted` = what the AI read, to show staff. `503` with a clear sentence when the AI reader isn't set up or Google refuses (e.g. out of credit) — the JSON upload still works; `422` nothing usable read; `429` one read per case per 10 s. |
+| `{ mode: "upload_file", file: "data:<mime>;base64,…", name? }` | The same, for clients without multipart. |
+| `{ mode: "attach", recordId }` | A stored record (e.g. one Phonecheck pushed). |
+
+Upload / attach also take `confirmMismatch: true` + `reason` (≥ 8 chars, **store manager only**) for
+a report whose IMEI isn't the case's. Without it: `409 { error, outcome: "mismatch", record }` — the
+error names both numbers; keep `record.id` to attach with the override (the grade then says so).
+A report already on another open case → `409`. Attaching **adds** the failed tests as faults
+(source `"phonecheck"`), never removes any, only ever makes the condition worse (and never invents
+one), fills the model / storage / IMEI only where the case has none, and re-prices like any edit.
+
+```ts
+type PcSummary = {
+  id: string; source: "pull" | "webhook" | "upload"; aiRead: boolean;
+  imei: string; imei2: string | null; reportNo: string | null;
+  testedAt: string | null; testedAtWhy: string | null; receivedAt: string;
+  phone: string | null; modelNo: string | null; variant: string | null;
+  working: "yes" | "no" | "pending" | null; passed: number; failed: string[]; pending: string[];
+  batteryHealthPct: number | null;
+  testerGrade: string | null;      // as the tester chose it in Phonecheck — NEVER the grade
+  deviceLock: "on" | "off" | null; parts: "genuine" | "not_genuine" | "unknown" | null; erased: boolean | null;
+  station: string | null; tester: string | null;
+  links: { a4: string | null; erasure: string | null; dhr: string | null };   // staff only
+  attached: { caseId; caseRef; at; by; imeiOverride: boolean } | null;
+};
+```
+
+`GET`/`PUT /api/stores/<storeId>/phonecheck` `{ station: "Teja-D04" | null }` → `{ station,
+serverDefault, configured }` — the store's Phonecheck **station** login (PUT/POST: store manager of
+the store, or the programme admin; the master account name never works). Same shape as `/wifi`. On
+the desk it is the "Phonecheck station" card on `/store`.
+
+`POST /api/phonecheck/webhook` — for Phonecheck, not the apps (`docs/GRADING.md`). `GET` on it →
+`{ ok, service: "phonecheck", secured }`.
+
+Pickups (`GET /api/pickups/<id>`): `items[].grading = { label, final, version, path } | null` — the
+SwapUp grade frozen at hand-over, linked to exactly that version. It never changes a regrade.

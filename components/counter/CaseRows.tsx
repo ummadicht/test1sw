@@ -1,19 +1,17 @@
 import Link from "next/link";
 import type { CaseListItem } from "@/lib/server/cases";
-import { Money, SourceBadge, StatusPill, Empty } from "@/components/ui";
+import { Money, StatusPill, Empty } from "@/components/ui";
 import { CASE_STATUS_LABEL } from "@/lib/domain/lifecycle";
 import { recommendationOf, fmtWhen } from "./shared";
 
 /** One line per case: who, which phone, what we'd recommend, what the trade-in is worth. */
 export function CaseRows({
   cases,
-  sources,
   empty,
   emptyHint,
   mode,
 }: {
   cases: CaseListItem[];
-  sources: Record<string, string | null>;
   empty: string;
   emptyHint?: string;
   mode: "counter" | "held";
@@ -30,11 +28,11 @@ export function CaseRows({
             <Link href={`/cases/${c.id}`} className="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1.5 px-5 py-3.5 no-underline hover:bg-[color:var(--surface-2)]">
               <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-[15.5px] font-semibold truncate">{c.customerName || "Customer not named yet"}</span>
+                  <span className="text-[15.5px] font-semibold truncate">{c.customerName || "No name yet"}</span>
                   <span className="num text-[12px] text-muted shrink-0">{c.ref}</span>
                 </div>
                 <div className="text-[13.5px] text-ink-2 truncate">
-                  {c.device ?? <span className="text-muted">Phone not recorded yet</span>}
+                  {c.device ?? <span className="text-muted">No phone yet</span>}
                   {mode === "held" && c.newDevice ? <span className="text-muted"> → {c.newDevice}</span> : null}
                 </div>
               </div>
@@ -47,7 +45,6 @@ export function CaseRows({
               </div>
               <div className="ml-auto text-right shrink-0">
                 <div className="flex items-center justify-end gap-2">
-                  {sources[c.id] === "sample" ? <SourceBadge kind="sample" /> : null}
                   <Money value={c.tradeValue} className="text-[17px] font-bold" />
                 </div>
                 <div className="text-[12px] text-muted">

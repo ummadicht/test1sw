@@ -26,8 +26,8 @@
   --bad: #c23030;
   --bad-bg: #fdecec;
   --ok: #0a7d5a;
-  --sample: #7a3fb0;
-  --sample-bg: #f3ecfa;
+  --test: #7a3fb0;
+  --test-bg: #f3ecfa;
 
   --radius: 14px;
   --radius-sm: 9px;
@@ -52,8 +52,8 @@
   --color-warn-bg: var(--warn-bg);
   --color-bad: var(--bad);
   --color-bad-bg: var(--bad-bg);
-  --color-sample: var(--sample);
-  --color-sample-bg: var(--sample-bg);
+  --color-test: var(--test);
+  --color-test-bg: var(--test-bg);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
 }
@@ -249,10 +249,10 @@ fieldset {
   color: var(--bad);
   border-color: color-mix(in srgb, var(--bad) 25%, transparent);
 }
-.pill-sample {
-  background: var(--sample-bg);
-  color: var(--sample);
-  border-color: color-mix(in srgb, var(--sample) 30%, transparent);
+.pill-test {
+  background: var(--test-bg);
+  color: var(--test);
+  border-color: color-mix(in srgb, var(--test) 30%, transparent);
 }
 
 .chip {
@@ -302,9 +302,9 @@ fieldset {
   border-color: color-mix(in srgb, var(--up) 25%, transparent);
   color: #053d2c;
 }
-.banner-sample {
-  background: var(--sample-bg);
-  border-color: color-mix(in srgb, var(--sample) 30%, transparent);
+.banner-test {
+  background: var(--test-bg);
+  border-color: color-mix(in srgb, var(--test) 30%, transparent);
   color: #4a2270;
 }
 

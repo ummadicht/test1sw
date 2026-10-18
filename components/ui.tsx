@@ -2,12 +2,13 @@
 
 /**
  * Shared UI primitives. Pages compose these; they never re-style money,
- * meters or source badges on their own, so a sample price looks the same
+ * meters or source badges on their own, so a price's source looks the same
  * everywhere and a full credit line is red everywhere.
  */
 import { headline } from "./brand";
 import type { ReactNode } from "react";
 import { inr, fmtBp } from "@/lib/domain/money";
+import { RETIRED_QUOTE_LABEL } from "@/lib/domain/ratecard";
 
 /**
  * The desk's brand: TEXT ONLY (owner, 2026-10-17 — "no logo"). "SWAPUP" in
@@ -45,9 +46,9 @@ export function Card({ title, action, children, className = "", pad = true }: { 
   );
 }
 
-export function Banner({ tone = "info", children, icon }: { tone?: "info" | "warn" | "bad" | "up" | "sample"; children: ReactNode; icon?: ReactNode }) {
+export function Banner({ tone = "info", children, icon }: { tone?: "info" | "warn" | "bad" | "up" | "test"; children: ReactNode; icon?: ReactNode }) {
   const cls = tone === "info" ? "banner" : `banner banner-${tone}`;
-  const glyph = icon ?? (tone === "bad" ? "⛔" : tone === "warn" ? "⚠" : tone === "up" ? "✓" : tone === "sample" ? "◆" : "ℹ");
+  const glyph = icon ?? (tone === "bad" ? "⛔" : tone === "warn" ? "⚠" : tone === "up" ? "✓" : tone === "test" ? "◆" : "ℹ");
   return (
     <div className={cls} role={tone === "bad" ? "alert" : undefined}>
       <span aria-hidden className="leading-5">{glyph}</span>
@@ -56,15 +57,17 @@ export function Banner({ tone = "info", children, icon }: { tone?: "info" | "war
   );
 }
 
-/** Where a price came from. A SAMPLE price is unmistakable everywhere it appears. */
+/** Where a price came from: PriceIQ, the partner's rate card, a quote typed from the partner's app, a published price. */
 export function SourceBadge({ kind, label }: { kind: string | null | undefined; label?: string | null }) {
-  if (!kind) return null;
-  if (kind === "sample") return <span className="pill pill-sample" title={label ?? undefined}>◆ SAMPLE price</span>;
-  if (kind === "partner_live") return <span className="pill pill-up" title={label ?? undefined}>● Live partner quote</span>;
+  if (!kind || kind === "none") return null;
   if (kind === "partner_ratecard") return <span className="pill pill-fix" title={label ?? undefined}>Partner rate card</span>;
+  if (kind === "partner_manual") return <span className="pill" title={label ?? undefined}>Partner's app</span>;
+  if (kind === "approximate") return <span className="pill" title={label ?? undefined}>Approximate</span>;
+  if (kind === "priceiq") return <span className="pill pill-fix" title={label ?? undefined}>PriceIQ</span>;
   if (kind === "oem_public") return <span className="pill" title={label ?? undefined}>Published price</span>;
-  if (kind === "manual") return <span className="pill pill-warn" title={label ?? undefined}>Entered by staff</span>;
-  return <span className="pill" title={label ?? undefined}>{label || kind}</span>;
+  if (kind === "manual" || kind === "client") return <span className="pill pill-warn" title={label ?? undefined}>Entered by staff</span>;
+  // Any other kind is a price source SwapUp no longer has (an older build's quote): never its stored label.
+  return <span className="pill pill-warn" title={RETIRED_QUOTE_LABEL}>{RETIRED_QUOTE_LABEL}</span>;
 }
 
 export function Meter({ value, state }: { value: number; state?: string }) {

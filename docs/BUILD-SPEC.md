@@ -3,7 +3,7 @@
 SwapUp is an in-store **repair-vs-upgrade + trade-in desk** for Samsung service centres
 (and any client's experience centres). A customer brings a phone to be repaired; the
 advisor records the faults, gets the **repair quote** (Samsung list price + labour + GST)
-and the **trade-in value** from the buyback partner (**Cashify**), and the app shows both
+and the **trade-in value** from the buyback partner, and the app shows both
 side by side with an honest recommendation. If the customer upgrades to a new Samsung,
 they get trade-in value **plus a 2–5% upgrade bonus** off the new phone. The store keeps
 the old phone and that trade-in value is **held on the store's credit line** until the
@@ -44,7 +44,7 @@ and say so in your final report.
 - UI primitives: `components/ui.tsx` — `Card, Money, Pct, Banner, SourceBadge, Meter, Stat,
   Field, Empty, StatusPill, ErrorText, fmtDate, BrandMark`. CSS classes in `app/globals.css`:
   `.btn .btn-primary .btn-up .btn-fix .btn-danger .btn-ghost .btn-sm .input .select .textarea
-  .label .hint .pill(.pill-up/-fix/-warn/-bad/-sample) .chip (aria-pressed) .banner(-warn/-bad/-up/-sample)
+  .label .hint .pill(.pill-up/-fix/-warn/-bad/-test) .chip (aria-pressed) .banner(-warn/-bad/-up/-test)
   .table .meter .kpi .section-title .num .card .card-pad .no-print`. Colour tokens as Tailwind
   colours: `text-up bg-up-bg text-fix bg-fix-bg text-warn text-bad text-muted text-ink-2 border-line bg-surface bg-canvas`.
   Use them; do not invent a second design language. Tablet-first (counter iPad / desktop),
@@ -54,9 +54,11 @@ and say so in your final report.
 
 ## Honesty rules (non-negotiable — the user has rejected "theatre" before)
 
-1. Any trade-in figure whose `source.kind === "sample"` shows `<SourceBadge kind="sample"/>`
-   next to it, and the decision area shows a `<Banner tone="sample">` saying these are sample
-   figures, not Cashify prices. Show the source label/effective date for partner prices.
+1. No made-up prices and no sample prices: a trade-in comes from PriceIQ, the partner's uploaded
+   rate card, or a quote staff typed in — none of them → "No market price yet — enter a quote".
+   Market data over 14 days old is shown with its age. Show the source label/effective date for
+   partner prices. A test programme says "Test programme — no real money" (`AppShell`).
+   Screens never name the partner company — "the partner" or the partner org's own name.
 2. Never invent a number in the UI. If the service returned null, show "—" and the reason
    it gives (`missing[]`, `reason`, `lockBlockers[]`, `notes[]`).
 3. The bonus is a promotion: show it in the upgrade column and in the receipt, never as a
@@ -74,7 +76,7 @@ and say so in your final report.
 | advisor / advisor.kor / xc.advisor | advisor | Andheri / Koramangala / Connaught Place |
 | manager / manager.kor / xc.manager | store_manager | same stores |
 | samsung / xc.admin | org_admin | the two demo clients |
-| cashify | partner | Cashify ops |
+| partner | partner | Buyback Partner (demo) ops |
 | platform | platform | SwapUp |
 
 Landing per role (`homeFor`): advisor→/desk, store_manager→/store, org_admin→/admin,

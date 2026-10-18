@@ -75,7 +75,7 @@ export async function POST(req: Request) {
       endsOn: c.endsOn ? String(c.endsOn) : null,
       rules: c.rules.map((r) => ({ id: r.id.slice(0, 40), label: r.label.trim().slice(0, 120), bp: Number(r.bp), when: r.when })),
     };
-    if (!clean.fundedBy) throw new HttpError(400, "Say who funds the bonus (it is what the claims report is grouped by).");
+    if (!clean.fundedBy) throw new HttpError(400, "Say who funds the bonus.");
     return { campaigns: saveCampaign(u, { orgId: b.orgId, campaign: clean, active: b.active !== false }) };
   });
 }

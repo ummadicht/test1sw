@@ -1,13 +1,19 @@
 import Link from "next/link";
+import { headers } from "next/headers";
+import QRCode from "qrcode";
 import { requirePage } from "@/lib/server/page";
 import { getCaseForViewer } from "@/lib/server/counter-extra";
-import { HttpError } from "@/lib/server/auth";
+import { HttpError, type SessionUser } from "@/lib/server/auth";
+import { gradingReportFor } from "@/lib/server/gradingReport";
+import { originFromHeaders } from "@/lib/server/http";
 import type { CaseView } from "@/lib/server/cases";
 import { getStore, getOrg } from "@/lib/server/scope";
 import { inr, fmtBp } from "@/lib/domain/money";
 import { maskImei } from "@/lib/domain/imei";
+import { RETIRED_QUOTE_LABEL, retiredSource } from "@/lib/domain/ratecard";
 import { PrintBar } from "@/components/counter/PrintBar";
 import { conditionSummary, faultLabels, fmtWhen, idTypeLabel, maskPhone } from "@/components/counter/shared";
+import { absoluteUrl, gradeTail, pinnedPath, shortHash, tokenOf } from "@/components/counter/gradingView";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Exchange receipt" };
@@ -24,7 +30,8 @@ function Shell({ children }: { children: React.ReactNode }) {
 function SourceLine({ v }: { v: CaseView }) {
   const q = v.quote;
   if (!q) return <>—</>;
-  if (q.source.kind === "sample") return <strong>SAMPLE — not a real quote</strong>;
+  // A quote from a source SwapUp no longer has: never its stored label or date (quoteSourceLabel).
+  if (retiredSource(q.source.kind)) return <>{RETIRED_QUOTE_LABEL}</>;
   if (q.partnerRef) return <>Ref. {q.partnerRef}</>;
   return (
     <>
@@ -32,6 +39,28 @@ function SourceLine({ v }: { v: CaseView }) {
       {q.source.effectiveFrom ? `, effective ${fmtWhen(q.source.effectiveFrom, "date")}` : ""}
     </>
   );
+}
+
+type ReportRow = { label: string; version: number; final: boolean; sha256: string; url: string; qr: string };
+
+/**
+ * The grade report this exchange was made on: the version frozen at hand-over,
+ * its SwapUp grade (with the letter), a short hash, and a QR to exactly that
+ * version. Never breaks the receipt — no report, or any failure, is no row.
+ */
+async function reportRow(u: SessionUser, caseId: string): Promise<ReportRow | null> {
+  try {
+    const r = gradingReportFor(u, caseId);
+    const env = r.issued;
+    const token = tokenOf(r.path);
+    if (!env || !token) return null;
+    const url = absoluteUrl(originFromHeaders(await headers()) ?? "", pinnedPath(`/r/${token}`, env.version));
+    const qr = await QRCode.toDataURL(url, { margin: 1, width: 220, errorCorrectionLevel: "M" });
+    return { label: `${env.body.grade.label}${gradeTail(env.body.grade)}`, version: env.version, final: env.final, sha256: env.sha256, url, qr };
+  } catch (e) {
+    console.error(`[swapup] receipt: no grade report row for ${caseId}:`, e);
+    return null;
+  }
 }
 
 export default async function ReceiptPage({ params }: { params: Promise<{ id: string }> }) {
@@ -60,9 +89,9 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
       <Shell>
         <div className="card card-pad text-center">
           <div className="text-[18px] font-semibold">Not traded in yet</div>
-          <p className="hint">The exchange receipt is printed once the trade-in is taken at the counter (step 7 on the case).</p>
+          <p className="hint">Printed once the trade-in is taken.</p>
           <Link href={`/cases/${v.id}`} className="btn btn-sm mt-4">
-            ← Back to the case
+            ← Back
           </Link>
         </div>
       </Shell>
@@ -71,20 +100,23 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
 
   const store = getStore(v.storeId);
   const org = getOrg(v.orgId);
-  const sample = v.quote?.source.kind === "sample";
+  // A test programme's receipt says so on its face: no real money changes hands.
+  const test = !!org?.demo;
+  const priceiq = v.quote?.source.kind === "priceiq";
   const partner = v.quote?.partner ?? v.partner?.partnerName ?? "the buyback partner";
   const b = v.bonus;
   const bonusBp = b ? (b.override?.bp ?? b.bp) : null;
   const cond = conditionSummary(v.condition);
+  const report = await reportRow(u, v.id);
 
   return (
     <Shell>
       <PrintBar back={`/cases/${v.id}`} label="Print receipt" />
       <article className="relative overflow-hidden bg-white border border-line rounded-[14px] print:border-0 print:rounded-none p-8 print:p-0 text-[13.5px] leading-relaxed text-ink">
-        {sample ? (
+        {test ? (
           <div aria-hidden className="pointer-events-none absolute inset-0 grid place-items-center">
-            <div className="rotate-[-24deg] text-[64px] font-[800] tracking-tight text-[color:var(--sample)] opacity-[0.10] whitespace-nowrap select-none">
-              SAMPLE — not a real quote
+            <div className="rotate-[-24deg] text-[64px] font-[800] tracking-tight text-[color:var(--test)] opacity-[0.10] whitespace-nowrap select-none">
+              TEST — no real money
             </div>
           </div>
         ) : null}
@@ -107,15 +139,10 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
 
         {v.status === "cancelled" ? (
           <div className="mt-4 rounded-[10px] border-2 border-[color:var(--bad)] text-bad font-bold text-center py-2 uppercase tracking-wide">
-            Cancelled {fmtWhen(v.closedAt, "date")} — this exchange was reversed
+            Cancelled {fmtWhen(v.closedAt, "date")} — reversed
           </div>
         ) : null}
-        {sample ? (
-          <div className="mt-4 rounded-[10px] bg-sample-bg text-[color:var(--sample)] font-semibold px-3 py-2">
-            SAMPLE — the trade-in value below comes from a sample rate card, not a real {partner} quote.
-          </div>
-        ) : null}
-        {v.demo ? <div className="mt-2 text-muted text-[12px]">Example case from the demo programme — not a real transaction.</div> : null}
+        {test ? <div className="mt-4 rounded-[10px] bg-test-bg text-[color:var(--test)] font-semibold px-3 py-2">Test programme — no real money</div> : null}
 
         <section className="grid sm:grid-cols-2 print:grid-cols-2 gap-6 mt-5">
           <div>
@@ -148,15 +175,32 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
             <div className="text-ink-2">
               Customer&apos;s data:{" "}
               {v.dataClear
-                ? `factory reset by the customer, seen by ${v.dataClear.by} on ${fmtWhen(v.dataClear.at)} (not a certified erasure)`
+                ? `reset, seen by ${v.dataClear.by}, ${fmtWhen(v.dataClear.at)} (not a certified erasure)`
                 : v.dataClearState === "attested"
-                  ? "factory reset ticked at hand-over (not a certified erasure)"
+                  ? "reset ticked at hand-over (not a certified erasure)"
                   : "not cleared yet"}
             </div>
-            <div className="text-ink-2">Faults: {v.faults.length ? faultLabels(v.faults) : "none reported"}</div>
+            <div className="text-ink-2">Faults: {v.faults.length ? faultLabels(v.faults) : "none"}</div>
             {cond.length ? <div className="text-ink-2">Declared condition: {cond.join(" · ")}</div> : null}
           </div>
         </section>
+
+        {report ? (
+          <section className="mt-5 flex gap-4 items-start rounded-[10px] border border-line px-4 py-3 print:break-inside-avoid">
+            <div className="min-w-0 flex-1">
+              <h2 className="section-title mb-1">Grade report</h2>
+              <div className="font-semibold text-[15px]">SwapUp grade: {report.label}</div>
+              <div className="text-ink-2">
+                Version {report.version}
+                {report.final ? ", frozen at hand-over" : ""} · <span className="num">#{shortHash(report.sha256)}</span>
+              </div>
+              <div className="text-[12px] text-muted mt-1">As tested at the store; it doesn&apos;t set the trade-in value.</div>
+              <div className="num text-[11px] text-muted break-all mt-0.5">{report.url}</div>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element -- a data: URL, nothing to optimise */}
+            <img src={report.qr} alt={`QR code for the grade report, version ${report.version}`} width={96} height={96} className="shrink-0 w-[96px] h-[96px]" />
+          </section>
+        ) : null}
 
         <section className="mt-6">
           <h2 className="section-title mb-1.5">The exchange</h2>
@@ -170,9 +214,10 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
               </tr>
               <tr className="border-b border-line">
                 <td className="py-2 pr-3">
-                  <div>Less trade-in value of the old phone</div>
+                  <div>Less trade-in</div>
                   <div className="text-[12px] text-muted">
-                    Quoted by {partner} · <SourceLine v={v} />
+                    {/* The customer's copy: what the trade-in is for, never the market price or a tool's name. */}
+                    {priceiq ? <>Trade-in for its condition and faults</> : <>Quoted by {partner} · <SourceLine v={v} /></>}
                   </div>
                 </td>
                 <td className="py-2 text-right num whitespace-nowrap">− {inr(v.tradeValue)}</td>
@@ -183,7 +228,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
                   {b ? (
                     <div className="text-[12px] text-muted">
                       {b.campaignName} · funded by {b.fundedBy}
-                      {b.override ? " · set by the store manager" : ""}
+                      {b.override ? " · set by the manager" : ""}
                     </div>
                   ) : null}
                 </td>
@@ -201,16 +246,13 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
           <h2 className="section-title mb-1.5">Terms</h2>
           <ol className="list-decimal pl-5 space-y-1 text-[12.5px] text-ink-2">
             <li>
-              The trade-in value is {partner}&apos;s quote for the phone in the condition declared above. If the phone is found to differ from that
-              description, the store may revise or reverse the exchange.
+              {priceiq ? "Trade-in: market price at its grade, less markdown and defects." : <>Trade-in: {partner}&apos;s quote for the condition above.</>} If the
+              phone differs, the store may revise or reverse the exchange.
             </li>
-            <li>The upgrade bonus is a promotion on this new phone. It cannot be combined with bank cashback or no-cost EMI offers.</li>
-            <li>The customer confirms they own the phone traded in, have signed out of all accounts and removed their SIM, memory card and data.</li>
-            <li>Only the last four characters of the customer&apos;s ID document are recorded.</li>
-            <li>
-              This is an exchange receipt, not a tax invoice. The new phone&apos;s GST invoice is issued at its full price, with the trade-in shown as
-              part of the settlement.
-            </li>
+            <li>The bonus is a promotion; no bank cashback or no-cost EMI with it.</li>
+            <li>The customer owns this phone and removed accounts, SIM, memory card and data.</li>
+            <li>Only the ID&apos;s last four characters are recorded.</li>
+            <li>Not a tax invoice. The GST invoice shows the new phone&apos;s full price.</li>
           </ol>
         </section>
 

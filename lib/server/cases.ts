@@ -2,9 +2,11 @@ import { db, tx, nowIso, todayIso, newId, nextSeq, parseJson, audit } from "./db
 import { HttpError, orgSettings, type SessionUser } from "./auth";
 import { getOrg, getStore, ownStore, storeInScope, canSeeStore, orgPartnerId, type StoreRow } from "./scope";
 import { partnerQuote, partnerMode, type PartnerQuote, type PartnerMode } from "./buyback";
+import { tradeInQuote, priceiqRepaired } from "./tradeIn";
 import { storeEvents, storePolicy, postEvents } from "./credit";
 import { activeCampaigns, newDevices } from "./catalog";
 import { caseMarketSell, type CaseMarketSell } from "./marketPrices";
+import { caseGrading, issueQuietly, type CaseGrading, type ReportReason } from "./gradingReport";
 import {
   type ConditionAnswers,
   type FaultId,
@@ -23,7 +25,8 @@ import { bestCampaign, type BonusResult, type Campaign } from "../domain/bonus";
 import { decide, type Decision } from "../domain/decision";
 import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
 import { buildOffer, expiredQuoteBlocker, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
-import { storageOnSave } from "../domain/phoneLed";
+import { retiredSource } from "../domain/ratecard";
+import { coloursApp, storageOnSave } from "../domain/phoneLed";
 import { canHold } from "../domain/credit";
 import { readImei } from "../domain/imei";
 import { indianMobile } from "../domain/phone";
@@ -39,6 +42,9 @@ import {
   identityBlock,
   reconcileFaultSources,
 } from "../domain/gradeiqMap";
+import { CERT_ROWS, certChoices, certifyNeeded, certifyRow, certifySignals, isCertRow, readCertification, type CertRow, type CertifySignals } from "../domain/certify";
+import { cameraEvidence, type GiqRow } from "./gradeiqBridge";
+import type { DeviceReport } from "../domain/diagnostics";
 
 /* ─────────────────────────── types ─────────────────────────── */
 
@@ -150,12 +156,124 @@ type CaseRow = {
   variant_source: string | null;
   storage_quotes: string | null;
   measured_storage: string | null;
+  certification: string | null;
 };
 
 /** The store's own cost to put the phone right (BUY vs SELL). Not the customer's repair price. */
 export type RefurbCost = { amount: number; by: string; at: string };
 
 export type Clearance = { outcome: string; accepted: number; shortfall: number; reason: string | null; by: string; at: string };
+
+/** One row the advisor certified by eye ("Check the phone" in SwapUp Store), as every view shows it. */
+export type CertifiedView = { value: string; label: string; by: string; at: string; withColours: boolean };
+export type CertificationView = Partial<Record<CertRow, CertifiedView>>;
+
+/** The stored certification → what a view shows (no staff ids, no bookkeeping). */
+export function certificationView(raw: string | null | undefined): CertificationView {
+  const c = readCertification(parseJson<unknown>(raw, null));
+  const out: CertificationView = {};
+  for (const row of CERT_ROWS) {
+    const r = c[row];
+    if (r) out[row] = { value: r.value, label: r.label, by: r.by, at: r.at, withColours: r.withColours };
+  }
+  return out;
+}
+
+/**
+ * "Check the phone" — the one card in SwapUp Store where the advisor certifies by
+ * eye what the store camera couldn't decide (lib/domain/certify.ts). Staff only;
+ * the same block on the session view and on the CaseView (docs/MOBILE-API.md §8b).
+ *   needed         the rows to show: the screen when the camera's sweep didn't check it
+ *                  or its grade isn't final; the body when it isn't final; the liquid
+ *                  indicator on that same card. [] when the camera decided both: no card
+ *   rows           what is certified so far (the case's), by name and time
+ *   choices        each row's chips, word for word
+ *   colours        the test colours on the customer's phone: "showing" now, "waiting"
+ *                  for the phone (it shows them on its result screen), "old_app" (an app
+ *                  before 0.8.0 can't), "off" (not needed: certified, the sweep checked
+ *                  it, or the results are applied)
+ *   testSessionId  the session the taps are made against (send it back with each tap)
+ *   canEdit        false once the case is past the counter: shown, not tappable
+ */
+export type CertifyBlock = {
+  needed: CertRow[];
+  rows: Record<CertRow, CertifiedView | null>;
+  choices: Record<CertRow, { value: string; label: string }[]>;
+  colours: "showing" | "waiting" | "old_app" | "off";
+  testSessionId: string | null;
+  canEdit: boolean;
+};
+
+/** A test session the customer's phone can still show the colours for (not applied, ended or expired). */
+const SESSION_LIVE = ["waiting", "opened", "joined", "testing", "complete"];
+
+/**
+ * The "Check the phone" block for a case and its (latest) test session, and
+ * whether that session's phone should show the test colours now: the screen still
+ * to certify, the camera's sweep didn't check it, and the results aren't applied.
+ * After Apply the case's own camera record says what the camera did; before it,
+ * the session's live evidence (`ce`, computed here when not passed).
+ */
+export function certifyBlock(
+  c: { status: string; camera_check: string | null; certification: string | null; faults?: string | null },
+  s: (GiqRow & { phone_phase_at?: string | null }) | null,
+  ce?: ReturnType<typeof cameraEvidence>
+): { block: CertifyBlock; coloursWanted: boolean } {
+  const cert = certificationView(c.certification);
+  const onCase = parseJson<CaseCameraCheck | null>(c.camera_check, null);
+  const caseFaults = parseJson<string[]>(c.faults ?? null, []);
+  // The same signals the SwapUp grade reads (certify.ts certifySignals), so the card asks
+  // exactly what the grade can only settle with a look.
+  let cam: CertifySignals | null = null;
+  if (onCase && onCase.by !== null && (!s || onCase.testSessionId === s.id)) {
+    const final = onCase.state === "ready" && onCase.final;
+    const snap = final && s ? (ce ?? cameraEvidence(s)).snap : null;
+    cam = certifySignals({ final, lcd: onCase.lcd, conclusive: onCase.conclusive, needsHumanReview: onCase.needsHumanReview, suggested: onCase.suggested, components: snap?.components ?? null, faults: caseFaults });
+  } else if (s) {
+    const e = ce ?? cameraEvidence(s);
+    cam = certifySignals({
+      final: e.fin.final,
+      lcd: e.mapping.lcd,
+      conclusive: e.snap?.conclusive ?? null,
+      needsHumanReview: e.snap?.needsHumanReview ?? false,
+      suggested: e.mapping.suggested,
+      components: e.fin.final ? (e.snap?.components ?? null) : null,
+      faults: caseFaults,
+    });
+  }
+  const needed = certifyNeeded(cam);
+  const rows = Object.fromEntries(CERT_ROWS.map((row) => [row, cert[row] ?? null])) as CertifyBlock["rows"];
+  const atCounter = EDITABLE.includes(c.status as CaseStatus);
+  // The colours are wanted until the screen is certified WITH them: an early tap (made before they
+  // showed) leaves them on, so the phone still shows them and the same tap again upgrades the row.
+  const coloursWanted =
+    !!s && atCounter && SESSION_LIVE.includes(s.status) && needed.includes("screen") && (!cam?.lcdChecked || !!cam.lcdDoubt) && rows.screen?.withColours !== true;
+  const showing = !!s && s.phone_phase === "colours" && !!s.phone_phase_at && Date.now() - Date.parse(s.phone_phase_at) < COLOURS_FRESH_MS;
+  const device = s ? parseJson<DeviceReport | null>(s.device, null) : null;
+  return {
+    block: {
+      needed,
+      rows,
+      choices: Object.fromEntries(CERT_ROWS.map((row) => [row, certChoices(row)])) as CertifyBlock["choices"],
+      // A phone that hasn't joined yet isn't an old app: it may well show them.
+      colours: !coloursWanted ? "off" : showing ? "showing" : !device || coloursApp(device) ? "waiting" : "old_app",
+      testSessionId: s?.id ?? null,
+      canEdit: atCounter,
+    },
+    coloursWanted,
+  };
+}
+
+/**
+ * The CaseView's "Check the phone": for a case the customer's phone tested (it has a
+ * test session) or one already certified — a case described only at the desk gets no
+ * card. Its latest session is the one the taps go against.
+ */
+function caseCertify(c: CaseRow): CertifyBlock | null {
+  const s = db().prepare(`SELECT * FROM test_sessions WHERE case_id = ? ORDER BY created_at DESC LIMIT 1`).get(c.id) as (GiqRow & { phone_phase_at?: string | null }) | undefined;
+  if (!s && !Object.keys(certificationView(c.certification)).length) return null;
+  return certifyBlock(c, s ?? null).block;
+}
 
 export type CaseView = {
   id: string;
@@ -187,12 +305,24 @@ export type CaseView = {
    * the only key to GradeIQ's anonymous writes (contract §5 #1).
    */
   camera: Omit<CaseCameraCheck, "gradeiqId"> | null;
+  /**
+   * What the advisor certified by eye where the store camera couldn't decide — screen, body, liquid
+   * indicator — each with the name, the time and whether the customer's phone showed the test colours
+   * ({} = nothing certified). Set by {action: "certify"}; it moves the faults and the condition.
+   */
+  certification: CertificationView;
+  /**
+   * "Check the phone" (certifyBlock): which rows the advisor still certifies by eye, the taps so
+   * far and the chips. Staff only (null for a partner), and null for a case nobody tested with
+   * SwapUp Check and nobody certified.
+   */
+  certify: CertifyBlock | null;
   /** Why there is no trade-in quote although the phone is described (the camera's identity check). */
   quoteBlocked: string | null;
   manualRepair: ManualQuote | null;
   /** The store's refurb cost quote (BUY vs SELL) — never read by the advice, the bonus or the partner quote. */
   refurbCost: RefurbCost | null;
-  /** SELL: what the phone sells for refurbished — PriceIQ's Cashify listing less 2–5% (lib/domain/marketSell.ts). */
+  /** SELL: what the phone sells for refurbished — PriceIQ's refurbished-market listing less 2–5% (lib/domain/marketSell.ts). */
   marketSell: CaseMarketSell;
   partnerManual: PartnerManual | null;
   /** The centre does not repair this brand — only an outside quote can be compared. */
@@ -229,11 +359,17 @@ export type CaseView = {
   /**
    * The size the phone read off its own disk at Apply, whatever the model's list says (null = it
    * didn't measure). When it isn't on the list (a 1TB Ultra on file as 256/512GB) the storage stays
-   * empty, and a Cashify quote entered for the phone settles it at this size (updateCase).
+   * empty, and a partner quote entered for the phone settles it at this size (updateCase).
    */
   measuredStorage: string | null;
   /** THE ANSWER — refurb quote vs trade-in + bonus, and the one thing still missing (lib/domain/offer.ts). null for the partner. */
   offer: Offer | null;
+  /**
+   * THE GRADE (docs/GRADING.md): one grade from every phone check — SwapUp Check and Phonecheck —
+   * as the SwapUp grade with its letter ("Good (B)"), the one-line why, and the report link. Staff: the
+   * live grade. Partner: only what the version frozen at lock says (null when there is none). Never a price.
+   */
+  grading: CaseGrading | null;
 };
 
 /* ─────────────────────────── reads ─────────────────────────── */
@@ -273,13 +409,14 @@ function withoutGradeiqId(c: CaseCameraCheck): Omit<CaseCameraCheck, "gradeiqId"
 const VARIANT_SOURCES = new Set<string>(["measured", "catalogue", "customer", "advisor"]);
 const readVariantSource = (s: string | null): VariantSource | null => (s && VARIANT_SOURCES.has(s) ? (s as VariantSource) : null);
 
-function toView(c: CaseRow, store: StoreRow): CaseView {
+function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {}): CaseView {
   const tm = getTradeModel(c.model_id);
   const advisor = db().prepare(`SELECT name FROM users WHERE id = ?`).get(c.advisor_id) as { name: string } | undefined;
   const faults = parseJson<FaultId[]>(c.faults, []);
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
   const quote = parseJson<PartnerQuote | null>(c.quote, null);
-  const quoteExpired = !!quote?.validUntil && Date.parse(quote.validUntil) < Date.now();
+  // A quote from a source SwapUp no longer has (an older build's) is treated as lapsed: re-asked, never locked on.
+  const quoteExpired = (!!quote?.validUntil && Date.parse(quote.validUntil) < Date.now()) || (!!quote && EDITABLE.includes(c.status) && retiredSource(quote.source?.kind));
   const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   const org = getOrg(c.org_id);
   const partner = org?.partner_id ? partnerMode(org.partner_id) : null;
@@ -317,12 +454,14 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
     condition,
     conditionProblems: condition ? conditionFloor(condition, faults) : [],
     camera: camera ? withoutGradeiqId(camera) : null,
+    certification: certificationView(c.certification),
+    certify: viewer.partner ? null : caseCertify(c),
     quoteBlocked: identityBlock(camera),
     manualRepair: parseJson<ManualQuote | null>(c.manual_repair, null),
     refurbCost: parseJson<RefurbCost | null>(c.refurb_cost, null),
-    marketSell: caseMarketSell({ modelId: tm?.id ?? null, variant: c.variant, model: tm?.model ?? null, condition }),
+    marketSell: caseMarketSell({ modelId: tm?.id ?? null, variant: c.variant, brand: tm?.brand ?? null, model: tm?.model ?? null, condition }),
     partnerManual: parseJson<PartnerManual | null>(c.partner_manual, null),
-    repairNotServiced: tm && org?.target_brand && tm.brand !== org.target_brand ? `This centre repairs ${org.target_brand} phones only. Enter the customer's own repair quote to compare.` : null,
+    repairNotServiced: tm && org?.target_brand && tm.brand !== org.target_brand ? `This centre repairs ${org.target_brand} only — enter the customer's outside quote.` : null,
     repair: parseJson<RepairEstimate | null>(c.repair, null),
     quote,
     quoteExpired,
@@ -350,16 +489,17 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
     variantSource: c.variant ? readVariantSource(c.variant_source) : null,
     measuredStorage: c.measured_storage ?? null,
     offer: null,
+    grading: caseGrading(c.id, viewer.partner ? "partner" : "staff"),
   };
   const legacyChecks = parseJson<Checks | null>(c.checks, null);
   view.dataClearState = dataClearState(c.status, view.dataClear, legacyChecks?.factoryReset === true);
   if (c.status === "quoted") {
-    view.lockBlockers = lockBlockers(view, !!org?.demo);
+    view.lockBlockers = lockBlockers(view);
     if (view.quoteBlocked) view.lockBlockers.unshift(view.quoteBlocked);
     // A store that registered itself has no credit line until the programme approves it.
     if (store.status === "pending")
-      view.lockBlockers.unshift(`This store is waiting for approval from ${org?.name ?? "the programme"}. Phone tests and quotes work; taking trade-ins starts once it is approved and given a credit line.`);
-    if (store.status === "rejected") view.lockBlockers.unshift("This store is closed in SwapUp, so it can't take trade-ins.");
+      view.lockBlockers.unshift(`Waiting for approval from ${org?.name ?? "the programme"} — trade-ins start then.`);
+    if (store.status === "rejected") view.lockBlockers.unshift("This store is closed — no trade-ins.");
     if (quote?.status === "priced" && quote.amount) {
       view.creditCheck = canHold(storePolicy(store), storeEvents(store.id), quote.amount);
       if (!view.creditCheck.ok) view.lockBlockers.push(view.creditCheck.reason);
@@ -397,24 +537,66 @@ function toView(c: CaseRow, store: StoreRow): CaseView {
   return view;
 }
 
-function lockBlockers(v: CaseView, orgIsDemo: boolean): string[] {
+function lockBlockers(v: CaseView): string[] {
   const out: string[] = [];
   if (!v.device || !v.device.variant) out.push("Choose the phone's model and storage.");
   if (!v.imei) out.push("Record the IMEI (dial *#06#).");
-  if (!v.condition) out.push("Answer the condition questions.");
-  if (v.conditionProblems.length) out.push("The condition is recorded better than the faults allow.");
-  if (!v.quote || v.quote.status !== "priced" || !v.quote.amount) out.push("No trade-in price from the partner.");
-  // Re-quote fixes a rate-card or live quote; one read off the Cashify app needs today's from the app.
+  if (!v.condition) out.push("Record the condition.");
+  if (v.conditionProblems.length) out.push("Condition is better than the faults allow.");
+  if (!v.quote || v.quote.status !== "priced" || !v.quote.amount) out.push("No trade-in price yet.");
+  // Re-quote fixes a rate-card or live quote; one read off the partner's app needs today's from the app.
   else if (v.quoteExpired) out.push(expiredQuoteBlocker(v.quote));
-  else if (v.quote.source.kind === "sample" && !orgIsDemo)
-    out.push("This price comes from a SAMPLE rate card. Load the partner's rate card before taking a real trade-in.");
   if (!v.upgrade) out.push("Choose the new phone.");
   return out;
 }
 
 export function getCase(u: SessionUser, id: string): CaseView {
   const { c, store } = caseInScope(u, id);
-  return toView(c, store);
+  return forViewer(u, toView(c, store, { partner: u.role === "partner" }));
+}
+
+/**
+ * What the buyback partner may see of a case. The store's own money is its
+ * business: its refurb cost, the answer it gave its customer (refurb quote vs
+ * trade-in + bonus) and its SELL price — PriceIQ's refurbished-market listing, which the
+ * store app labels "Store margin · staff only". Applied on every read path
+ * (getCase), so no list or action response can carry them to a partner.
+ *
+ * Nor does the partner get the store camera's OWN grade: GradeIQ's letter
+ * (Premium–D), its best–worst range and its flags are staff-only, never priced
+ * (lib/domain/gradeiqMap.ts) — beside the report's A–D they would read as a
+ * second SwapUp grade. The partner's grade is the report frozen at lock
+ * (`grading`). The camera's faults and findings stay: they are on the case.
+ */
+export function forViewer(u: SessionUser, view: CaseView): CaseView {
+  if (u.role !== "partner") return view;
+  return {
+    ...view,
+    refurbCost: null,
+    offer: null,
+    marketSell: { amount: null, why: "Not shown to the partner.", source: view.marketSell.source },
+    camera: view.camera ? { ...view.camera, grade: null, gradeRange: null, flags: [] } : null,
+    // The answer the store gave its customer — the decision and its repair figures — is the store's.
+    decision: null,
+    repair: null,
+    manualRepair: null,
+    quote: partnerQuoteView(view.quote),
+    // A PriceIQ "worth once repaired" is the store's own SELL price; only the partner's own repaired value is its business.
+    repairedQuote: view.repairedQuote && view.repairedQuote.source.kind !== "priceiq" ? partnerQuoteView(view.repairedQuote) : null,
+  };
+}
+
+/**
+ * A quote as the partner sees it. A PriceIQ trade-in starts from the refurbished-market
+ * listing — the store's SELL price — so its trace collapses to the one trade-in line, and
+ * PriceIQ's base and markdown never leave the server. (By design a defect-free PriceIQ
+ * trade-in IS listing − markdown, so the amount alone still implies the sell price.)
+ */
+export function partnerQuoteView(q: PartnerQuote | null): PartnerQuote | null {
+  if (!q) return null;
+  const { priceiq: _p, priceiqWhy: _w, ...rest } = q;
+  if (q.source.kind !== "priceiq") return rest;
+  return { ...rest, lines: q.amount === null ? [] : [{ label: "Trade-in", amount: q.amount }], source: { ...q.source, label: "Trade-in" } };
 }
 
 export type CaseListItem = {
@@ -497,7 +679,8 @@ export function listCases(
       tradeValue: r.trade_value ?? parseJson<PartnerQuote | null>(r.quote, null)?.amount ?? null,
       bonusValue: r.bonus_value,
       newDevice: up?.label ?? null,
-      recommendation: dec?.recommendation ?? null,
+      // The store's answer to its customer is not the partner's business.
+      recommendation: u.role === "partner" ? null : (dec?.recommendation ?? null),
       createdAt: r.created_at,
       updatedAt: r.updated_at,
       lockedAt: r.locked_at,
@@ -531,7 +714,7 @@ function requireCounter(u: SessionUser): void {
   if (!(COUNTER_ROLES as readonly string[]).includes(u.role)) throw new HttpError(403, "Only store staff work cases at the counter.");
 }
 
-export function createCase(u: SessionUser, input: { customerName?: string; customerPhone?: string; demo?: boolean; via?: "demo" | "counter" } = {}): CaseView {
+export function createCase(u: SessionUser, input: { customerName?: string; customerPhone?: string; via?: "demo" | "counter" } = {}): CaseView {
   requireCounter(u);
   const store = ownStore(u);
   const id = newId("case");
@@ -546,7 +729,7 @@ export function createCase(u: SessionUser, input: { customerName?: string; custo
       `INSERT INTO cases (id, ref, org_id, store_id, advisor_id, status, customer, faults, coverage, demo, created_at, updated_at)
        VALUES (?,?,?,?,?,'draft',?,'[]','none',?,?,?)`
     )
-    .run(id, ref, store.org_id, store.id, u.id, customer, input.demo ? 1 : 0, now, now);
+    .run(id, ref, store.org_id, store.id, u.id, customer, 0, now, now);
   // A counter-QR case is opened by the customer, under a staff member's name: say so.
   audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "case.create", entity: "case", entityId: id, ...(input.via ? { detail: { via: input.via === "counter" ? "counter code (customer-started)" : "standing demo code" } } : {}) });
   return getCase(u, id);
@@ -565,21 +748,103 @@ export function recordCameraCheck(caseId: string, check: CaseCameraCheck, source
     .run(JSON.stringify(check), JSON.stringify(sources), nowIso(), caseId);
 }
 
-/** Staff unlocked the camera without the customer's phone echoing: the case is marked "LCD not camera-checked" now, not only at Apply. */
+/**
+ * Where each fault came from, written on its own — by a Phonecheck attach,
+ * BEFORE its updateCase (which reconciles from what is stored), the same way
+ * Apply writes it with recordCameraCheck. Only while the case is at the counter.
+ */
+export function recordFaultSources(caseId: string, sources: FaultSources): void {
+  db().prepare(`UPDATE cases SET fault_sources = ?, updated_at = ? WHERE id = ? AND status IN ('draft','quoted')`).run(JSON.stringify(sources), nowIso(), caseId);
+}
+
+/**
+ * Staff unlocked the camera without the customer's phone echoing: the override is
+ * kept on the case's camera record with its name and reason. It no longer marks
+ * the LCD "not camera-checked" here — Apply decides, from what the sweep actually
+ * did (a complete sweep proves the loop by its frames; lib/domain/gradeiqMap.ts).
+ */
 export function markLcdOverride(caseId: string, info: { by: string; userId: string; reason: string; at: string; testSessionId: string }): void {
   // Only while the case is at the counter — a locked trade-in's record is not rewritten.
   const row0 = db().prepare(`SELECT camera_check FROM cases WHERE id = ? AND status IN ('draft','quoted')`).get(caseId) as { camera_check: string | null } | undefined;
   if (!row0) return;
   const prev = parseJson<CaseCameraCheck | null>(row0.camera_check, null) ?? { ...blankCameraCheck(info.at), testSessionId: info.testSessionId };
-  const reason = `the camera was unlocked by ${info.by} before the customer's phone showed the patterns: ${info.reason}`;
-  const flag = `LCD not camera-checked: ${reason}`;
-  const next: CaseCameraCheck = {
-    ...prev,
-    lcdOverride: { by: info.by, reason: info.reason, at: info.at },
-    lcd: { ...prev.lcd, cameraChecked: false, reason },
-    flags: [...prev.flags.filter((f) => !f.startsWith("LCD not camera-checked")), flag],
-  };
+  const next: CaseCameraCheck = { ...prev, lcdOverride: { by: info.by, reason: info.reason, at: info.at } };
   db().prepare(`UPDATE cases SET camera_check = ?, updated_at = ? WHERE id = ? AND status IN ('draft','quoted')`).run(JSON.stringify(next), nowIso(), caseId);
+}
+
+/** The phone's test colours count for a certification while its last word was "colours", this recently. */
+const COLOURS_FRESH_MS = 10 * 60_000;
+
+/**
+ * THE ADVISOR CERTIFIES one row of "Check the phone" (lib/domain/certify.ts) —
+ * one tap: the screen (while the customer's phone shows the test colours), the
+ * body, or the liquid indicator. By name (the signed-in staff member), with the
+ * time and whether the phone was showing the colours. The faults, their sources,
+ * the condition and the certification move in ONE transaction; then the report
+ * follows and the case is re-priced outside it, as an edit is. Tapping the same
+ * value again changes nothing. Store staff only, while the case is at the counter.
+ */
+export async function certifyCase(u: SessionUser, id: string, input: { row?: unknown; value?: unknown; testSessionId?: unknown }): Promise<CaseView> {
+  if (u.role !== "advisor" && u.role !== "store_manager") throw new HttpError(403, "Only store staff certify a phone.");
+  const { c, store } = caseInScope(u, id);
+  if (!EDITABLE.includes(c.status)) throw new HttpError(409, "The case is past the counter.");
+  if (!isCertRow(input?.row)) throw new HttpError(400, "Say which row: screen, body or liquid.");
+  const row0: CertRow = input.row;
+  const value = typeof input.value === "string" ? input.value.trim().toLowerCase() : "";
+  let session: { id: string; phone_phase: string | null; phone_phase_at: string | null } | undefined;
+  if (input.testSessionId !== undefined && input.testSessionId !== null) {
+    if (typeof input.testSessionId !== "string") throw new HttpError(400, "Send the test session's id.");
+    session = db().prepare(`SELECT id, phone_phase, phone_phase_at FROM test_sessions WHERE id = ? AND case_id = ?`).get(input.testSessionId, c.id) as typeof session;
+    if (!session) throw new HttpError(404, "Test session not found.");
+  } else {
+    session = db().prepare(`SELECT id, phone_phase, phone_phase_at FROM test_sessions WHERE case_id = ? ORDER BY created_at DESC LIMIT 1`).get(c.id) as typeof session;
+  }
+  const withColours = session?.phone_phase === "colours" && !!session.phone_phase_at && Date.now() - Date.parse(session.phone_phase_at) < COLOURS_FRESH_MS;
+  // The Screen waits while the customer's phone is still testing and will show the test colours
+  // after: a tap now would be a look at the test screens (SwapUp Store holds the row the same way).
+  if (row0 === "screen" && session && !withColours) {
+    const full = db().prepare(`SELECT * FROM test_sessions WHERE id = ?`).get(session.id) as (GiqRow & { phone_phase_at?: string | null }) | undefined;
+    if (full && ["waiting", "opened", "joined", "testing"].includes(full.status) && certifyBlock(c, full).block.colours === "waiting")
+      throw new HttpError(409, "Wait for the test colours — the phone is still testing.");
+  }
+
+  const out = tx(() => {
+    const fresh = row(id);
+    if (!fresh || !EDITABLE.includes(fresh.status)) throw new HttpError(409, "The case is past the counter.");
+    const prevFaults = parseJson<FaultId[]>(fresh.faults, []);
+    const prevCondition = parseJson<ConditionAnswers | null>(fresh.condition, null);
+    const camera = parseJson<CaseCameraCheck | null>(fresh.camera_check, null);
+    const prevCert = readCertification(parseJson<unknown>(fresh.certification, null));
+    const r = certifyRow(
+      { faults: prevFaults, sources: reconcileFaultSources(parseJson<FaultSources>(fresh.fault_sources, {}), prevFaults), condition: prevCondition, cameraFloor: camera?.floor ?? null, certification: prevCert },
+      { row: row0, value, by: u.name, userId: u.id, at: nowIso(), withColours, testSessionId: session?.id ?? null }
+    );
+    if ("error" in r) throw new HttpError(400, r.error);
+    if (!r.changed) return { changed: false, describes: false };
+    const describes = JSON.stringify(r.faults) !== JSON.stringify(prevFaults) || JSON.stringify(r.condition) !== JSON.stringify(prevCondition);
+    const now = nowIso();
+    // Before Apply the case has no condition, and a tap doesn't invent one (Apply folds it in).
+    db()
+      .prepare(
+        `UPDATE cases SET faults = ?, fault_sources = ?, condition = ?, certification = ?, partner_manual = CASE WHEN ? THEN NULL ELSE partner_manual END, updated_at = ?
+         WHERE id = ? AND status IN ('draft','quoted')`
+      )
+      .run(JSON.stringify(r.faults), JSON.stringify(r.sources), r.condition ? JSON.stringify(r.condition) : null, JSON.stringify(r.certification), describes ? 1 : 0, now, id);
+    audit({
+      userId: u.id,
+      orgId: c.org_id,
+      storeId: store.id,
+      action: "case.certify",
+      entity: "case",
+      entityId: id,
+      detail: { row: row0, value, prev: prevCert[row0]?.value ?? null, withColours, testSessionId: session?.id ?? null, faultsAdded: r.faultsAdded, faultsRemoved: r.faultsRemoved },
+    });
+    return { changed: true, describes };
+  });
+  if (!out.changed) return getCase(u, id);
+  // The report follows (a new version when its body moved), then the re-price — as updateCase does.
+  issueQuietly(id, "certified", u.id);
+  return reprice(u, id, { requote: out.describes });
 }
 
 const SCREENS = new Set<string>(SCREEN_ORDER);
@@ -641,8 +906,15 @@ const EDITABLE: CaseStatus[] = ["draft", "quoted"];
  *   autoUpgrade      suggest the new phone (Apply), unless staff already chose one.
  *   measuredStorage  the size the phone read off its own disk (Apply), or null when
  *                    it didn't measure. Left out = unchanged.
+ *   reportReason     the grading report's reason for a new version (lib/server/gradingReport.ts).
  */
-export type UpdateInternal = { variantSource?: "measured" | "catalogue" | "customer"; autoUpgrade?: boolean; measuredStorage?: string | null };
+export type UpdateInternal = {
+  variantSource?: "measured" | "catalogue" | "customer";
+  autoUpgrade?: boolean;
+  measuredStorage?: string | null;
+  /** Why the grading report gets a new version, when it does (default "edited"): Apply says "swapup_check", a Phonecheck attach "phonecheck". */
+  reportReason?: ReportReason;
+};
 
 /**
  * Save what the advisor has learned about the device, then re-price.
@@ -651,7 +923,7 @@ export type UpdateInternal = { variantSource?: "measured" | "catalogue" | "custo
 export async function updateCase(u: SessionUser, id: string, patch: CasePatch, internal: UpdateInternal = {}): Promise<CaseView> {
   requireCounter(u);
   const { c, store } = caseInScope(u, id);
-  if (!EDITABLE.includes(c.status)) throw new HttpError(409, "This case is past the counter and can no longer be edited.");
+  if (!EDITABLE.includes(c.status)) throw new HttpError(409, "The case is past the counter.");
 
   const sets: Record<string, unknown> = {};
   let pricingChanged = false;
@@ -671,7 +943,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   if (patch.variant !== undefined) {
     const tm = getTradeModel((sets.model_id as string | undefined) ?? c.model_id);
     const variants = tm ? parseJson<string[]>(tm.variants, []) : [];
-    if (patch.variant && !variants.includes(patch.variant)) throw new HttpError(400, "That storage variant does not exist for this model.");
+    if (patch.variant && !variants.includes(patch.variant)) throw new HttpError(400, "No such storage for this model.");
     // Re-saving the size already there (the pressed chip tapped again) is no news: it keeps
     // the size's source and its quote. Only Apply's word may change the source of the same
     // size — a measurement upgrades the customer's claim (lib/domain/phoneLed.ts storageOnSave).
@@ -704,7 +976,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
       const r = readImei(patch.imei2);
       if (!r.ok) throw new HttpError(400, r.reason.replace("IMEI", "second IMEI"));
       const first = (sets.imei as string | null | undefined) ?? c.imei;
-      if (first && r.imei === first) throw new HttpError(400, "The second IMEI is the same as the first — a dual-SIM phone has two different numbers.");
+      if (first && r.imei === first) throw new HttpError(400, "IMEI 2 can't be the same as IMEI 1.");
       sets.imei2 = r.imei;
       sets.imei2_check = r.checkDigit;
     }
@@ -748,13 +1020,13 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     const next: CaseCameraCheck = { ...camera, overrides: [...camera.overrides] };
     let changed = false;
     if (problems.length) {
-      if (reason.length < 8) throw new HttpError(409, `${problems[0].why} Give the reason as an override, or keep the camera's answer.`);
+      if (reason.length < 8) throw new HttpError(409, problems[0].why);
       next.overrides.push({ by: u.name, userId: u.id, reason, at: nowIso(), items: problems.map((p) => p.key) });
       changed = true;
     }
     if (patch.cameraOverride?.identity && identityBlock(camera)) {
-      if (u.role !== "store_manager") throw new HttpError(403, "Only the store manager can accept a phone the camera says is not the one on the case.");
-      if (reason.length < 8) throw new HttpError(400, "Say how you checked that this is the right phone.");
+      if (u.role !== "store_manager") throw new HttpError(403, "Only a store manager can override the camera's identity check.");
+      if (reason.length < 8) throw new HttpError(400, "Say how you checked it's this phone.");
       next.identityOverride = { by: u.name, userId: u.id, reason, at: nowIso(), items: ["identity"] } satisfies RecordedOverride;
       changed = true;
       pricingChanged = true;
@@ -781,7 +1053,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
       const amount = Number(patch.manualRepair.amount);
       const reason = String(patch.manualRepair.reason || "").trim();
       if (!Number.isInteger(amount) || amount < 0 || amount > 500_000) throw new HttpError(400, "Repair quote must be a whole rupee amount.");
-      if (reason.length < 8) throw new HttpError(400, "Say where the repair quote comes from (e.g. the job-sheet number).");
+      if (reason.length < 8) throw new HttpError(400, "Say where the quote comes from.");
       sets.manual_repair = JSON.stringify({ amount, reason, by: u.name } satisfies ManualQuote);
     }
     // The repair quote is the customer's, not the partner's: no re-quote (see cover above).
@@ -808,10 +1080,10 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
       const rep = patch.partnerQuote.repairedAmount;
       const repairedAmount = rep === null || rep === undefined || (rep as unknown) === "" ? null : Number(rep);
       if (!Number.isInteger(amount) || amount <= 0 || amount > 500_000) throw new HttpError(400, "Enter the partner's quote as a whole rupee amount.");
-      if (!/^[A-Z0-9-]{4,40}$/.test(reference)) throw new HttpError(400, "Enter the reference code the partner's app shows for this quote.");
+      if (!/^[A-Z0-9-]{4,40}$/.test(reference)) throw new HttpError(400, "Enter the partner app's quote reference.");
       if (!Number.isInteger(days) || days < 1 || days > 30) throw new HttpError(400, "Quote validity must be 1–30 days.");
       if (repairedAmount !== null && (!Number.isInteger(repairedAmount) || repairedAmount < amount))
-        throw new HttpError(400, "The repaired value must be a whole rupee amount, at least the as-is quote.");
+        throw new HttpError(400, "Repaired value must be at least the as-is quote.");
       sets.partner_manual = JSON.stringify({
         amount,
         reference,
@@ -822,7 +1094,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
       } satisfies PartnerManual);
       // The phone measured a size the model's list doesn't have (a 1TB Ultra on file as
       // 256/512GB), so no chip could be right and the answer said: check Settings, and enter
-      // the Cashify quote if it's really that size. The quote entered for it settles the
+      // the partner's quote if it's really that size. The quote entered for it settles the
       // storage at the size the phone measured — the partner's app priced that phone.
       const size = "variant" in sets ? (sets.variant as string | null) : c.variant;
       const measured = "measured_storage" in sets ? (sets.measured_storage as string | null) : c.measured_storage;
@@ -902,6 +1174,10 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
       .prepare(`UPDATE cases SET ${cols.map((k) => `${k} = ?`).join(", ")} WHERE id = ? AND status IN ('draft','quoted')`)
       .run(...cols.map((k) => sets[k]), id);
   }
+  // The grading report follows every edit (a new version only when its body moved).
+  // Nothing in it reads a price, so it is issued before the re-price; the view the
+  // re-price returns then carries the new version.
+  issueQuietly(id, internal.reportReason ?? "edited", u.id);
   return reprice(u, id, { requote: pricingChanged });
 }
 
@@ -941,12 +1217,14 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
     repair = estimateRepair({ book, modelId: tm.id, faults, coverage: c.coverage, policy, manual });
   }
 
-  // 2. Partner quotes — only with a complete, consistent description of the phone.
+  // 2. The trade-in quote and the repaired value — only with a complete, consistent description of
+  //    the phone. A quote typed from the partner's app stands; otherwise tradeIn.ts asks, best first.
   let quote = parseJson<PartnerQuote | null>(c.quote, null);
   let repairedQuote = parseJson<PartnerQuote | null>(c.repaired_quote, null);
   const pm = parseJson<PartnerManual | null>(c.partner_manual, null);
   const consistent = !!condition && conditionFloor(condition, faults).length === 0;
-  const expired = !!quote?.validUntil && Date.parse(quote.validUntil) < Date.now();
+  // A quote from a source that no longer exists (an older build's) is re-asked like a lapsed one.
+  const expired = (!!quote?.validUntil && Date.parse(quote.validUntil) < Date.now()) || (!!quote && retiredSource(quote.source?.kind));
   const partnerId = orgPartnerId(org.id);
   const partnerName = getOrg(partnerId)?.name ?? "Partner";
   // The camera says this is not the phone on the case: no price until a store manager resolves it.
@@ -971,25 +1249,35 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
     } else if (!faults.length) {
       repairedQuote = { ...quote, validUntil: null };
     } else {
-      // Only a REAL rate card may supply the repaired value next to a real quote;
-      // a sample figure beside a partner quote would be a comparison of fiction with fact.
+      // The repaired value beside a typed quote: the partner's uploaded rate card, or none.
       const what = await partnerQuote({ partnerId, modelId: tm.id, variant: c.variant, answers: healedCondition(condition, faults), whatIf: true });
-      repairedQuote = what.status === "priced" && what.source.kind !== "sample" ? what : null;
+      repairedQuote = what.status === "priced" ? what : null;
     }
   } else if (opts.requote || !quote || expired || quote.source.kind === "partner_manual") {
-    quote = await partnerQuote({
+    // PriceIQ less the markdown and defects, else the partner's rate card, else no price (tradeIn.ts).
+    quote = await tradeInQuote({
       partnerId,
       modelId: tm.id,
       variant: c.variant,
+      brand: tm.brand,
+      model: tm.model,
       answers: condition,
       imei: c.imei,
       validityDaysOverride: settings.quoteValidityDays,
     });
-    repairedQuote = faults.length
-      ? await partnerQuote({ partnerId, modelId: tm.id, variant: c.variant, answers: healedCondition(condition, faults), whatIf: true })
-      : quote.status === "priced"
-        ? { ...quote, validUntil: null }
-        : quote;
+    if (!faults.length) repairedQuote = quote.status === "priced" ? { ...quote, validUntil: null } : quote;
+    else if (quote.source.kind === "priceiq") {
+      // Beside a PriceIQ trade-in, the repaired value is PriceIQ's too: the grade after refurb, less
+      // the markdown. Where it has none, the partner's rate card may supply one, else there is none.
+      repairedQuote = priceiqRepaired({ partnerId, modelId: tm.id, variant: c.variant, brand: tm.brand, model: tm.model, answers: condition, faults }, quote);
+      if (!repairedQuote) {
+        const what = await partnerQuote({ partnerId, modelId: tm.id, variant: c.variant, answers: healedCondition(condition, faults), whatIf: true });
+        repairedQuote = what.status === "priced" ? what : null;
+      }
+    } else {
+      const what = await partnerQuote({ partnerId, modelId: tm.id, variant: c.variant, answers: healedCondition(condition, faults), whatIf: true });
+      repairedQuote = what.status === "priced" ? what : null;
+    }
   }
 
   // 2b. Storage unknown: the partner's what-if price for EACH size, so the answer
@@ -1003,12 +1291,15 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
   const measuredOffList = !!c.measured_storage && !sizes.includes(c.measured_storage);
   if (tm && !c.variant && condition && consistent && !blocked && !measuredOffList) {
     if (opts.requote || !storageQuotes) {
-      const out: StorageQuote[] = [];
-      for (const v of sizes) {
-        const w = await partnerQuote({ partnerId, modelId: tm.id, variant: v, answers: condition, whatIf: true });
-        const priced = w.status === "priced" && w.amount !== null;
-        out.push({ variant: v, amount: priced ? w.amount : null, reason: priced ? null : (w.reason ?? null), sample: w.source.kind === "sample" });
-      }
+      // Each size priced the way the trade-in itself will be, so the chip and the answer agree —
+      // asked together, so a slow PriceIQ costs the counter one wait, not one per size.
+      const out: StorageQuote[] = await Promise.all(
+        sizes.map(async (v) => {
+          const w = await tradeInQuote({ partnerId, modelId: tm.id, variant: v, brand: tm.brand, model: tm.model, answers: condition, whatIf: true });
+          const priced = w.status === "priced" && w.amount !== null;
+          return { variant: v, amount: priced ? w.amount : null, reason: priced ? null : (w.reason ?? null), ...(priced && w.priceiq?.note ? { note: w.priceiq.note } : {}) };
+        })
+      );
       storageQuotes = out.length ? out : null;
     }
   } else storageQuotes = null;
@@ -1090,7 +1381,7 @@ export async function setBonusOverride(u: SessionUser, id: string, input: { bp: 
   const { c, store } = caseInScope(u, id);
   if (c.status !== "quoted") throw new HttpError(409, "The bonus can only be changed before the trade-in is locked.");
   const bonus = parseJson<BonusApplied | null>(c.bonus, null);
-  if (!bonus) throw new HttpError(409, "Choose the new phone first — there is no bonus to change.");
+  if (!bonus) throw new HttpError(409, "Choose the new phone first.");
   const campaign = activeCampaigns(c.org_id).find((x) => x.id === bonus.campaignId);
   if (!campaign) throw new HttpError(409, "The campaign behind this bonus is no longer running.");
   if (input.bp === null) {
@@ -1168,22 +1459,22 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
   if (name.length < 2) throw new HttpError(400, "Enter the customer's name.");
   if (!/^[6-9]\d{9}$/.test(phone)) throw new HttpError(400, "Enter a 10-digit Indian mobile number.");
   if (!ID_TYPES.includes(idType)) throw new HttpError(400, "Choose the customer's ID document.");
-  if (!/^[A-Z0-9]{4}$/.test(idLast4)) throw new HttpError(400, "Enter the last 4 characters of the ID number (only those are stored).");
+  if (!/^[A-Z0-9]{4}$/.test(idLast4)) throw new HttpError(400, "Enter the ID's last 4 characters.");
   const ch = input?.checks ?? ({} as LockInput["checks"]);
   const missing = [
-    !ch.ownership && "customer confirms they own the phone",
-    !ch.simRemoved && "SIM and memory card are removed",
-    !ch.imeiMatches && "the IMEI on the phone matches the one recorded",
-    !ch.noFinanceLock && "the phone is not on an EMI / finance plan or a company lock",
-    !ch.kym?.status && "the government IMEI check (Sanchar Saathi KYM) has been done",
+    !ch.ownership && "owner confirmed",
+    !ch.simRemoved && "SIM and memory card out",
+    !ch.imeiMatches && "IMEI matches",
+    !ch.noFinanceLock && "no EMI or company lock",
+    !ch.kym?.status && "KYM IMEI check done",
   ].filter(Boolean);
-  if (missing.length) throw new HttpError(400, `Confirm before taking the phone: ${missing.join("; ")}.`);
+  if (missing.length) throw new HttpError(400, `Confirm first: ${missing.join(", ")}.`);
   // Since 22 Oct 2025 a buyer of a used phone must check the national IMEI
   // register before completing the purchase. A flagged phone is never bought.
   const kymStatus = ch.kym.status;
-  if (!(kymStatus in KYM_LABEL)) throw new HttpError(400, "Record what the government IMEI check returned.");
+  if (!(kymStatus in KYM_LABEL)) throw new HttpError(400, "Record the KYM IMEI check result.");
   if (kymStatus !== "clear")
-    throw new HttpError(409, `The government IMEI register reports this phone as "${KYM_LABEL[kymStatus]}". Do not take it — return it to the customer.`);
+    throw new HttpError(409, `IMEI register says "${KYM_LABEL[kymStatus]}" — do not take it.`);
   const kymRef = String(ch.kym.reference ?? "").trim().slice(0, 80) || null;
 
   return tx(() => {
@@ -1193,9 +1484,9 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
     // A claimed storage is enough to SHOW a price; moving money needs it seen —
     // the same rule as the IMEI, one tick, and only when the phone couldn't measure it.
     if (c.variant_source === "customer" && ch.storageSeen !== true)
-      throw new HttpError(400, `Confirm before taking the phone: Settings › About phone shows ${c.variant} (the customer typed it — the phone couldn't measure it).`);
+      throw new HttpError(400, `Confirm Settings › About phone shows ${c.variant}.`);
     if ((view.imeiCheck === "invalid" || view.imei2Check === "invalid") && !ch.imeiCheckAck)
-      throw new HttpError(400, "An IMEI fails its check digit. Re-read it from *#06#, or confirm it is correct.");
+      throw new HttpError(400, "IMEI fails its check digit — re-read *#06# or confirm it.");
     const blockers = view.lockBlockers;
     if (blockers.length) throw new HttpError(409, blockers[0]);
 
@@ -1210,7 +1501,7 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
            AND (c.imei IN (${ph}) OR c.imei2 IN (${ph})) LIMIT 1`
       )
       .get(c.id, ...OPEN_TRADE_STATUSES, ...mine, ...mine) as { ref: string; name: string } | undefined;
-    if (dup) throw new HttpError(409, `This IMEI is already traded in (${dup.ref} at ${dup.name}). One phone, one trade-in.`);
+    if (dup) throw new HttpError(409, `IMEI already traded in (${dup.ref}, ${dup.name}).`);
 
     const T = view.quote!.amount!;
     const check = canHold(storePolicy(store), storeEvents(store.id), T);
@@ -1238,8 +1529,11 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
          WHERE id = ? AND status = 'quoted'`
       )
       .run(JSON.stringify(customer), JSON.stringify(checks), T, B, payable, now, now, id);
-    if (upd.changes !== 1) throw new HttpError(409, "This case changed while you were working on it — reload.");
+    if (upd.changes !== 1) throw new HttpError(409, "This case changed — reload.");
     postEvents(store.id, [{ kind: "hold", caseId: id, amount: T, at: now, note: `Trade-in ${c.ref}` }], u.id);
+    // The report as it stands at hand-over, frozen: the partner's evidence at pickup and clearance.
+    // Inside this transaction, so it is exactly the phone that was locked (issuing reads only the database).
+    issueQuietly(id, "traded_in", u.id, { final: true });
     audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.lock", entity: "case", entityId: id, detail: { tradeValue: T, bonus: B, payable, source: view.quote!.source.kind, kym: checks.kym, storage: { variant: c.variant, source: c.variant_source, seen: checks.storageSeen === true } } });
     return getCase(u, id);
   });
@@ -1255,7 +1549,7 @@ export function cancelTradeIn(u: SessionUser, id: string, reason: string): CaseV
     const upd = db()
       .prepare(`UPDATE cases SET status = 'cancelled', closed_reason = ?, closed_at = ?, updated_at = ? WHERE id = ? AND status = 'locked'`)
       .run(reason.trim().slice(0, 200), now, now, id);
-    if (upd.changes !== 1) throw new HttpError(409, "This case changed while you were working on it — reload.");
+    if (upd.changes !== 1) throw new HttpError(409, "This case changed — reload.");
     postEvents(store.id, cancelEvents(id, c.trade_value!, now), u.id);
     audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.cancel", entity: "case", entityId: id, detail: { reason: reason.trim() } });
     return getCase(u, id);
@@ -1271,11 +1565,11 @@ export function cancelTradeIn(u: SessionUser, id: string, reason: string): CaseV
 export function recordDataClear(u: SessionUser, id: string, input: Record<string, unknown>): CaseView {
   requireCounter(u);
   const missing = missingDataClearSteps(input);
-  if (missing.length) throw new HttpError(400, `Confirm each step first: ${missing.join("; ")}.`);
+  if (missing.length) throw new HttpError(400, `Confirm first: ${missing.join("; ")}.`);
   const note = typeof input.note === "string" ? input.note.trim().slice(0, 200) || null : null;
   return tx(() => {
     const { c, store } = caseInScope(u, id);
-    if (!DATA_CLEAR_STATUSES.includes(c.status)) throw new HttpError(409, "Data clearing is recorded after the customer accepts the trade-in, while the phone is still at the store.");
+    if (!DATA_CLEAR_STATUSES.includes(c.status)) throw new HttpError(409, "Record data clearing after the trade-in, at the store.");
     if (c.data_clear) throw new HttpError(409, "Data clearing is already recorded for this phone.");
     const now = nowIso();
     const record: DataClearRecord = {
@@ -1286,7 +1580,7 @@ export function recordDataClear(u: SessionUser, id: string, input: Record<string
       at: now,
     };
     const upd = db().prepare(`UPDATE cases SET data_clear = ?, updated_at = ? WHERE id = ? AND data_clear IS NULL`).run(JSON.stringify(record), now, id);
-    if (upd.changes !== 1) throw new HttpError(409, "This case changed while you were working on it — reload.");
+    if (upd.changes !== 1) throw new HttpError(409, "This case changed — reload.");
     audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.data_clear", entity: "case", entityId: id, detail: { note } });
     return getCase(u, id);
   });

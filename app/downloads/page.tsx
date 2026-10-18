@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Download the apps" };
 
 const APPS: { app: AppId; name: string; who: string }[] = [
-  { app: "store", name: "SwapUp Store", who: "For store staff — sign in with your SwapUp account on the counter tablet, phone or computer." },
-  { app: "check", name: "SwapUp Check", who: "For customers — the store's QR code opens it on the customer's own phone." },
+  { app: "store", name: "SwapUp Store", who: "For store staff." },
+  { app: "check", name: "SwapUp Check", who: "For customers — the store's QR opens it." },
 ];
 
 export default function Downloads() {
@@ -15,11 +15,7 @@ export default function Downloads() {
       <div className="max-w-2xl mx-auto px-5 py-10">
         <Wordmark align="left" />
         <h1 className={`${headline.className} mt-4 text-[30px] leading-tight font-extrabold tracking-[-0.02em]`}>Download the apps</h1>
-        <p className="hint !mt-3 text-[14.5px]">
-          Each app comes two ways from the same code: an Android app to install, and a browser version that needs no install and works on any phone,
-          iPhones included. The Android app can run more tests; the browser marks what it cannot test as &ldquo;Can&apos;t test this in a browser&rdquo;,
-          never as passed.
-        </p>
+        <p className="hint !mt-3 text-[14.5px]">Android app, or the browser — no install.</p>
         <div className="mt-6 space-y-4">
           {APPS.map((a) => {
             const info = apkInfo(a.app);
@@ -58,7 +54,7 @@ export default function Downloads() {
                             <span>Open in your browser</span>
                             <PillArrow />
                           </a>
-                          <p className="hint">Sign in with the same username and password as this site.</p>
+                          <p className="hint">Same login as this site.</p>
                           <WebVersion version={web.version} builtAt={web.builtAt} />
                         </>
                       ) : (
@@ -66,8 +62,7 @@ export default function Downloads() {
                       )
                     ) : web ? (
                       <p className="mt-2 text-[14.5px] leading-relaxed">
-                        SwapUp Check runs in the browser from the store&apos;s QR: the customer scans it and taps{" "}
-                        <b>Test in this browser — no install</b>. It needs that QR&apos;s code, so there is no link to open here.
+                        Opens from the store&apos;s QR.
                         <WebVersion version={web.version} builtAt={web.builtAt} />
                       </p>
                     ) : (
@@ -79,11 +74,10 @@ export default function Downloads() {
             );
           })}
         </div>
-        <p className="hint mt-6 text-[14px]">
-          The Android apps are installed directly, not from the Play Store. Android will ask you to allow installs from your browser the first time:
-          Settings → Install unknown apps → your browser → Allow. Both apps are signed with the same SwapUp key, so updates install over the old version.
-          The browser versions update by themselves.
-        </p>
+        <details className="hint mt-6 text-[14px]">
+          <summary className="cursor-pointer font-semibold">Install help</summary>
+          <p className="mt-1.5">Not on the Play Store. First time: Settings → Install unknown apps → your browser → Allow.</p>
+        </details>
       </div>
     </main>
   );

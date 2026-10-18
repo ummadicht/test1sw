@@ -8,6 +8,7 @@ import {
   isConfirmed,
   mapCamera,
   identityOf,
+  identityBlock,
   worseDisplay,
   gradeiqFunctionalMap,
   applyCameraFloor,
@@ -141,13 +142,39 @@ test("finality: final only with a grade, a real tier, no refinement, capture ok 
 test("finality: a refinement still running after 180 s stays provisional, labelled as such", () => {
   const f = finality(snap({}, { refining: true }), { timedOut: true });
   assert.equal(f.status, "provisional");
-  assert.match(f.reasons.join(" "), /final check did not finish/);
+  assert.match(f.reasons.join(" "), /Final check didn't finish/);
+});
+
+test("GradeIQ's stand-in grade (Pro busy → Flash, pending verification) is read as a PROVISIONAL grade — never final, never applied", () => {
+  // As GradeIQ stores it: cosmetic_grade left empty, the letter in cosmetic.grade, pendingVerification set.
+  const s = snap({ cosmetic_grade: "" }, { grade: "C", pendingVerification: true, fellBackFrom: "pro", refining: false, specialists: [comp("front", "C", [{ type: "crack", severity: "severe", confidence: 0.95 }])] });
+  assert.equal(s.cosmeticGrade, "C", "the stand-in letter is shown");
+  assert.equal(s.pendingVerification, true);
+  const f = finality(s);
+  assert.equal(f.status, "provisional");
+  assert.equal(f.final, false);
+  assert.ok(f.reasons.includes("Stand-in grade, pending verification — not used yet."));
+  // Never applied: what it saw is a flag for a person, not a fault and not a floor.
+  const m = mapCamera(s, f);
+  assert.deepEqual(m.faults, []);
+  assert.ok(m.flags.some((x) => /^Not final, not added/.test(x)), m.flags.join(" | "));
+  // Even with the letter also in cosmetic_grade, and nothing else holding it back: still not final.
+  const both = snap({ cosmetic_grade: "B" }, { grade: "B", pendingVerification: 1 });
+  assert.equal(both.cosmeticGrade, "B");
+  assert.equal(finality(both).final, false);
+  // SQLite's json_extract hands a stored true back as 1; an object flag with its own grade is read too.
+  assert.equal(snap({ cosmetic_grade: "" }, { grade: "D", pendingVerification: { grade: "B" } }).cosmeticGrade, "B");
+  // No flag: an empty cosmetic_grade stays empty — cosmetic.grade alone is never a grade.
+  const plain = snap({ cosmetic_grade: "" }, { grade: "A", refining: true });
+  assert.equal(plain.cosmeticGrade, "");
+  assert.equal(plain.pendingVerification, undefined);
+  assert.equal(finality(plain).status, "grading");
 });
 
 test("finality: coverage under 50% with no grade is a failure to retake, not a grade", () => {
   const f = finality(snap({ cosmetic_grade: "" }, { coverage: 0.3, refining: false }));
   assert.equal(f.status, "failed");
-  assert.match(f.reasons[0], /Not enough of the phone/);
+  assert.match(f.reasons[0], /Too little of the phone/);
 });
 
 /* ─────────────────────────── the confirmed bar ─────────────────────────── */
@@ -244,7 +271,7 @@ test("map: frame — a dent is 'dented' (no fault); a severe bend is 'bent' with
   assert.deepEqual(ids(bent.suggested), ["frame_damage"]);
   const modCrack = mapCamera(snap({}, { specialists: [comp("frame", "C", [{ type: "crack", severity: "moderate" }])] }), FINAL);
   assert.equal(modCrack.floor.body, "flawless", "GradeIQ's own rule: frame damage counts only when severe");
-  assert.match(modCrack.flags.join(" "), /crack on the frame/);
+  assert.match(modCrack.flags.join(" "), /frame crack/);
 });
 
 test("map: a cracked lens is a SUGGESTED camera fault, rear unless the finding says front", () => {
@@ -263,7 +290,7 @@ test("map: a provisional grade is shown, never applied — what it would add bec
   assert.equal(m.usable, false);
   assert.deepEqual(m.faults, []);
   assert.deepEqual(m.floor, { screen: "flawless", body: "flawless" });
-  assert.match(m.flags.join(" "), /Not final, so not added/);
+  assert.match(m.flags.join(" "), /Not final, not added/);
   assert.equal(m.findings.length, 1, "the finding is still listed for staff");
 });
 
@@ -287,11 +314,11 @@ test("map: flags for what the camera could not judge", () => {
   );
   const m = mapCamera(s, finality(s));
   const all = m.flags.join(" | ");
-  assert.match(all, /B–D, not conclusive/);
-  assert.match(all, /person to review/);
+  assert.match(all, /B–D not conclusive/);
+  assert.match(all, /person's review/);
   assert.match(all, /non-original part/);
   assert.match(all, /did not see the back/);
-  assert.match(all, /grade D with no confirmed crack/);
+  assert.match(all, /grade D, no confirmed damage/);
   assert.deepEqual(m.faults, []);
 });
 
@@ -329,10 +356,65 @@ test("lcd: a weak sweep failure is a flag; unknown or incomplete is 'LCD not cam
   assert.match(none.flags.join(" "), /LCD not camera-checked/);
 });
 
-test("lcd: a staff override means the LCD was NOT camera-checked, whatever the sweep says", () => {
-  const m = mapCamera(snap(), FINAL, { lcdOverride: { by: "Asha", reason: "touch dead, can't open Check", at: AT } });
+test("lcd: a staff override never erases a sweep that ran; it is the reason only when none ran", () => {
+  const over = { lcdOverride: { by: "Asha", reason: "touch dead, can't open Check", at: AT } };
+  // A complete sweep stands: its frames prove the phone showed each colour.
+  const ran = mapCamera(snap(), FINAL, over);
+  assert.equal(ran.lcd.cameraChecked, true);
+  assert.equal(ran.lcd.verdict, "pass");
+  assert.equal(ran.lcd.reason, null);
+  assert.ok(!ran.flags.some((f) => f.startsWith("LCD not camera-checked")));
+  // No sweep at all: the override is why.
+  const none = mapCamera(snap({}, {}, { displayCheck: undefined }), FINAL, over);
+  assert.equal(none.lcd.cameraChecked, false);
+  assert.match(none.lcd.reason!, /unlocked by Asha.*touch dead/);
+  // An incomplete sweep keeps GradeIQ's own reason.
+  const short = mapCamera(snap({}, {}, { displayCheck: { verdict: "unknown", confidence: 0, reason: "the camera never got a clear view of the lit screen", requested: ["white"], missing: ["white"] } }), FINAL, over);
+  assert.equal(short.lcd.cameraChecked, false);
+  assert.match(short.lcd.reason!, /never got a clear view/);
+  assert.doesNotMatch(short.lcd.reason!, /Asha/);
+});
+
+test("lcd: colours photographed while GradeIQ's AI reader is off say so — never 'Not captured', never a pass", () => {
+  const dc = {
+    verdict: "unknown",
+    confidence: 0,
+    findings: [],
+    note: "Display validation unavailable (AI call failed) — check the screen manually.",
+    source: "stub",
+    patterns: ["white", "black", "red"],
+    captures: [
+      { pattern: "white", photo: "/api/uploads/x-disp-1-0.jpg" },
+      { pattern: "black", photo: "/api/uploads/x-disp-1-1.jpg" },
+    ],
+    requested: ["white", "black", "red"],
+    missing: ["red"],
+  };
+  const m = mapCamera(snap({}, {}, { displayCheck: dc }), FINAL);
   assert.equal(m.lcd.cameraChecked, false);
-  assert.match(m.lcd.reason!, /Asha.*touch dead/);
+  assert.equal(m.lcd.aiOff, true);
+  assert.equal(m.lcd.captured, 2);
+  assert.equal(m.lcd.requested, 3);
+  assert.equal(m.lcd.reason, "captured 2 of 3 colours, AI reader off — check by eye");
+  assert.match(m.flags.join(" "), /LCD not camera-checked: captured 2 of 3 colours, AI reader off/);
+  // The snapshot keeps the reader's word and where each mark was.
+  const s = snap({}, {}, { displayCheck: { ...dc, verdict: "fail", source: "gemini", findings: [{ pattern: "white", type: "line", label: "vertical line", severity: "moderate", box: [0.1, 0.2, 0.9, 0.25] }] } });
+  assert.equal(s.displayCheck?.source, "gemini");
+  assert.deepEqual(s.displayCheck?.findings[0].box, [0.1, 0.2, 0.9, 0.25]);
+  assert.equal(snap({}, {}, { displayCheck: { ...dc, source: undefined } }).displayCheck?.source, null);
+  // A sweep with nothing photographed is not "AI off": it is GradeIQ's own reason.
+  const empty = mapCamera(snap({}, {}, { displayCheck: { ...dc, captures: [], missing: ["white", "black", "red"], reason: "the phone never confirmed it was showing the test patterns" } }), FINAL);
+  assert.equal(empty.lcd.aiOff, undefined);
+  assert.match(empty.lcd.reason!, /never confirmed/);
+});
+
+test("snapshot: angle labels, each part's note and the photographed colour are kept for the report", () => {
+  const s = snap({}, { device: { make: "Samsung", model: "Galaxy S23", match: "match", reason: "", colour: "Lavender" }, specialists: [{ ...comp("front", "A"), notes: "Faint wear near the earpiece." }] }, { angleLabels: ["Front glass", "Back"] });
+  assert.deepEqual(s.angleLabels, ["Front glass", "Back"]);
+  assert.equal(s.components[0].note, "Faint wear near the earpiece.");
+  assert.equal(s.device?.colour, "Lavender");
+  assert.deepEqual(snap().angleLabels, []);
+  assert.equal(snap().components[0].note, "");
 });
 
 /* ─────────────────────────── identity ─────────────────────────── */
@@ -416,7 +498,7 @@ test("apply: the camera never downgrades what the customer declared", () => {
   const d = disagreements(declared, {}, s, m, finality(s));
   assert.equal(d.length, 1);
   assert.equal(d[0].final, "cracked");
-  assert.match(d[0].message, /customer's answer stands/);
+  assert.match(d[0].message, /camera saw no crack/);
 });
 
 /* ─────────────────────────── disagreements ─────────────────────────── */
@@ -427,7 +509,7 @@ test("disagreements: customer 'not cracked', camera confirmed → the worse answ
   const d = disagreements({ screenCracked: false, backCracked: false, liquid: false, imei: null }, {}, s, m, finality(s));
   assert.equal(d.length, 1);
   assert.equal(d[0].topic, "screen");
-  assert.equal(d[0].message, "Customer: not cracked · Camera: cracked (86%, photo 1). The worse answer is recorded.");
+  assert.equal(d[0].message, "Customer: not cracked · Camera: cracked (86%, photo 1) — worse one recorded.");
   assert.deepEqual(d[0].box, BOX);
 });
 
@@ -449,7 +531,7 @@ test("disagreements: a low-confidence sweep failure is shown, but never claimed 
   const d = disagreements(null, { display: { outcome: "pass", detail: null, at: AT } }, s, m, finality(s));
   assert.equal(d.length, 1);
   assert.equal(d[0].final, "not recorded");
-  assert.doesNotMatch(d[0].message, /Recorded as/);
+  assert.doesNotMatch(d[0].message, /recorded "/);
   // a self-test failure is recorded whatever the camera says
   const pass = snap();
   const d2 = disagreements(null, { display: { outcome: "fail", detail: null, at: AT } }, pass, mapCamera(pass, finality(pass)), finality(pass));
@@ -470,7 +552,7 @@ test("map: gaps — back minor chip is a flag; a severe frame crack is 'bent' wi
 test("finality: a grade without a named model tier is provisional, never final", () => {
   const f = finality(snap({}, { tierUsed: undefined }));
   assert.equal(f.status, "provisional");
-  assert.match(f.reasons.join(" "), /did not say which model/);
+  assert.match(f.reasons.join(" "), /Grader unknown/);
 });
 
 test("display: an inconclusive sweep never erases a self-test failure", () => {
@@ -536,4 +618,15 @@ test("pull window: 180 s from its start; a screen check minutes after the photos
   assert.equal(pullWindowClosed(onePass, afterScreen), true, "what the old rule would have said");
   assert.equal(pullWindowClosed(twoPass, afterScreen), false);
   assert.equal(pullWindowClosed(twoPass, Date.parse(screen) + 180_001), true);
+});
+
+test("identityBlock: one fixed sentence with the make and model only — never GradeIQ's own reasoning", () => {
+  const mismatch = (reasons: string[]) => ({ identity: { verdict: "mismatch" as const, reasons }, identityOverride: null });
+  assert.equal(
+    identityBlock(mismatch(["The camera says this is Samsung Galaxy A54: the camera bump has three lenses in a vertical strip and the frame is plastic, unlike the S23 Ultra's"])),
+    "Camera thinks this is a Samsung Galaxy A54 — a manager must confirm it."
+  );
+  assert.equal(identityBlock(mismatch(["imei_mismatch: the phone's IMEI is not the one on record"])), "Camera doubts this is the phone — a manager must confirm it.");
+  assert.equal(identityBlock(mismatch(["The camera says this is a different phone: something"])), "Camera doubts this is the phone — a manager must confirm it.");
+  assert.equal(identityBlock({ identity: { verdict: "match", reasons: [] }, identityOverride: null }), null);
 });

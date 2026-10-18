@@ -24,7 +24,7 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 /** The shape and cost of a real hash, for the constant-cost check when there is nobody to check against. */
 const DUMMY_HASH = `scrypt$${"0".repeat(32)}$${"0".repeat(64)}`;
 
-const REMOVED = "This tablet was removed from the store. A manager can set it up again.";
+const REMOVED = "Tablet removed — a manager can set it up again.";
 const CLOSED = "This store is closed in SwapUp.";
 const NOT_STAFF = "Not on this store's staff.";
 /** "Last seen" only needs to say roughly when — and the tablet polls — so write it at most once a minute. */
@@ -65,7 +65,7 @@ export function createStoreDevice(u: SessionUser, input: { name?: unknown }) {
   if (u.role !== "store_manager") throw new HttpError(403, "Only a store manager can set up a store tablet.");
   // A session unlocked by PIN on a tablet can't enrol another: each new tablet
   // would otherwise mint fresh PIN guesses (and outlive the tablet's removal).
-  if (u.dev) throw new HttpError(403, "Sign in with your username and password to set up a store tablet.");
+  if (u.dev) throw new HttpError(403, "Sign in with your password to set up a tablet.");
   const store = ownStore(u);
   // The tablet could not unlock anyone at a rejected store, so don't hand out a token that only fails.
   if (store.status === "rejected") throw new HttpError(409, CLOSED);
@@ -73,7 +73,7 @@ export function createStoreDevice(u: SessionUser, input: { name?: unknown }) {
   if (problem) throw new HttpError(400, problem);
   const name = String(input.name).trim().replace(/\s+/g, " ");
   const active = (db().prepare(`SELECT COUNT(*) AS n FROM store_devices WHERE store_id = ? AND revoked_at IS NULL`).get(store.id) as { n: number }).n;
-  if (active >= MAX_TABLETS_PER_STORE) throw new HttpError(409, `This store already has ${MAX_TABLETS_PER_STORE} tablets. Remove one first.`);
+  if (active >= MAX_TABLETS_PER_STORE) throw new HttpError(409, `This store has ${MAX_TABLETS_PER_STORE} tablets — remove one first.`);
   const deviceToken = `sdt_${randomBytes(32).toString("base64url")}`;
   const id = newId("dev");
   const createdAt = nowIso();
@@ -258,12 +258,12 @@ function refuseIfLocked(ctx: TabletContext, person: StaffRow, what: "pin" | "pas
     .prepare(`SELECT COALESCE(SUM(failures), 0) AS n FROM pin_attempts WHERE user_id = ? AND last_failure_at > ?`)
     .get(person.id, since) as { n: number }).n;
   if (spent >= PERSON_PIN_BUDGET)
-    throw new HttpError(429, `Too many wrong PINs for ${person.name.split(" ")[0]} on this store's tablets. Set a new PIN with your password.`);
+    throw new HttpError(429, `Too many wrong PINs for ${person.name.split(" ")[0]} — set a new PIN.`);
 }
 
 function lockedError(until: string): HttpError {
   const mins = Math.max(1, Math.ceil((Date.parse(until) - Date.now()) / 60_000));
-  return new HttpError(429, `Too many wrong PINs. Try again in ${mins} ${mins === 1 ? "minute" : "minutes"}, or ask your manager.`);
+  return new HttpError(429, `Too many wrong PINs — try in ${mins} ${mins === 1 ? "minute" : "minutes"}.`);
 }
 
 type Verdict = { kind: "ok" } | { kind: "locked"; until: string } | { kind: "wrong"; triesLeft: number };

@@ -15,11 +15,11 @@ export const ROLE_NAME: Record<Role, string> = {
 
 /** One line on what each role can do — shown next to the role picker. */
 export const ROLE_HINT: Record<Role, string> = {
-  platform: "SwapUp staff: onboards clients and partners, sees every programme.",
-  org_admin: "Runs the client's programme: stores, credit limits, bonus campaigns, catalogue, reports.",
-  store_manager: "Runs one store: the counter, its credit line, pickups and its advisors.",
-  advisor: "Works the counter at one store: repair-or-upgrade quotes and trade-ins.",
-  partner: "Buyback partner operations: pickups, verification, settlement and rate cards.",
+  platform: "SwapUp staff — every programme.",
+  org_admin: "Runs the programme.",
+  store_manager: "Runs one store.",
+  advisor: "Works the counter at one store.",
+  partner: "Pickups, verdicts, settlement, rate cards.",
 };
 
 export const CLIENT_TYPES = ["oem_service", "retail_chain", "experience_center", "other"] as const;

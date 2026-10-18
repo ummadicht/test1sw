@@ -20,7 +20,7 @@ export default async function PartnerTeamPage() {
         stores={[]}
         meId={u.id}
         fixedOrgId={u.orgId}
-        intro={<>Everyone here can schedule and collect pickups, verify devices, settle, and upload rate cards for every client you serve.</>}
+        intro={<>Your pickup and rate-card team.</>}
       />
     </AppShell>
   );

@@ -247,7 +247,7 @@ export function uploadRateCard(
 ): RateCardSummary[] {
   const partnerId = partnerIdFor(u, input.partnerId);
   const label = String(input.label || "").trim();
-  if (label.length < 3) throw new HttpError(400, "Name the rate card (e.g. the partner's sheet name and week).");
+  if (label.length < 3) throw new HttpError(400, "Name the rate card (e.g. sheet name and week).");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveFrom || "")) throw new HttpError(400, "Effective date must be YYYY-MM-DD.");
   const validity = Number(input.quoteValidityDays);
   if (!Number.isInteger(validity) || validity < 1 || validity > 30) throw new HttpError(400, "Quote validity must be 1–30 days.");
@@ -275,17 +275,10 @@ export function uploadRateCard(
   if (!entries.length) throw new HttpError(400, "The sheet has no prices.");
   const current = db().prepare(`SELECT data FROM rate_cards WHERE partner_id = ? AND active = 1 ORDER BY created_at DESC LIMIT 1`).get(partnerId) as { data: string } | undefined;
   const base = current ? parseJson<RateCard>(current.data, {} as RateCard) : null;
-  // Never inherit the SAMPLE card's deductions: the new card is labelled a partner
-  // rate card, so its condition deductions must be the partner's own.
-  const inherited = base?.source?.kind === "sample" ? undefined : base?.deductions;
+  // Only the partner's own card's deductions carry over: the new card is labelled a partner rate card.
+  const inherited = base?.source?.kind === "partner_ratecard" ? base.deductions : undefined;
   const deductions = input.deductions ?? inherited;
-  if (!deductions)
-    throw new HttpError(
-      400,
-      base?.source?.kind === "sample"
-        ? "The active card is the SAMPLE one — send your own condition deductions with this card."
-        : "No deduction rules — supply them with the first rate card."
-    );
+  if (!deductions) throw new HttpError(400, "No deduction rules — supply them with the first rate card.");
   const id = newId("rc");
   const partnerName = getOrg(partnerId)?.name ?? "Partner";
   const card: RateCard = {

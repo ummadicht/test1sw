@@ -5,8 +5,8 @@ import type { Campaign } from "./bonus.ts";
 
 export const CARD: RateCard = {
   id: "rc_test",
-  partner: "Cashify",
-  source: { kind: "sample", label: "Test card", effectiveFrom: "2026-10-01" },
+  partner: "Test Partner",
+  source: { kind: "partner_ratecard", label: "Test card", effectiveFrom: "2026-10-01" },
   quoteValidityDays: 3,
   roundTo: 10,
   maxDeductionBp: 8500,
@@ -31,7 +31,7 @@ export const CARD: RateCard = {
   ],
 };
 
-const src = { kind: "sample" as const, label: "Test book" };
+const src = { kind: "client" as const, label: "Test book" };
 export const BOOK: RepairBookEntry[] = [
   { modelId: "galaxy-s22", part: "display", price: 14000, source: src },
   { modelId: "galaxy-s22", part: "battery", price: 3000, source: src },

@@ -21,7 +21,7 @@ export function StoreTablets({ tablets, canRemove }: { tablets: TabletRow[]; can
   const inUse = tablets.filter((t) => !t.removed).length;
 
   const remove = async (t: TabletRow) => {
-    if (!window.confirm(`Remove “${t.name}” from the store? It stops working at once. To use it again, a manager sets it up again in SwapUp Store.`)) return;
+    if (!window.confirm(`Remove “${t.name}”? It stops working at once.`)) return;
     setBusy(t.id);
     setError(null);
     try {
@@ -39,8 +39,8 @@ export function StoreTablets({ tablets, canRemove }: { tablets: TabletRow[]; can
       {tablets.length === 0 ? (
         <Empty title="No store tablets yet">
           {canRemove
-            ? "On the counter tablet, sign in to SwapUp Store as the store manager and choose Settings → Use this device as the store tablet. Advisors then unlock it with their name and PIN."
-            : "The store manager sets up the counter tablet from the SwapUp Store app."}
+            ? "In SwapUp Store: Settings → Use this device as the store tablet."
+            : "The store manager sets it up in SwapUp Store."}
         </Empty>
       ) : (
         <div className="overflow-x-auto px-5 pb-3">
@@ -80,9 +80,7 @@ export function StoreTablets({ tablets, canRemove }: { tablets: TabletRow[]; can
             </tbody>
           </table>
           <ErrorText error={error} />
-          <p className="hint pb-2">
-            A tablet stays signed in for this store; each advisor unlocks it with their name and a 4-digit PIN. Remove one that is lost or replaced.
-          </p>
+          <p className="hint pb-2">Advisors unlock it with a PIN. Remove lost ones.</p>
         </div>
       )}
     </Card>

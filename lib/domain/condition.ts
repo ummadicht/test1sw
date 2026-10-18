@@ -212,11 +212,11 @@ export function conditionFloor(answers: ConditionAnswers, faults: FaultId[]): st
   if (floor.powersOn === false && answers.powersOn) problems.push("Recorded as switching on, but a fault says it does not.");
   if (floor.calls === false && answers.calls) problems.push("Recorded as making calls, but a fault says the network fails.");
   if (SCREEN_ORDER.indexOf(answers.screen) < SCREEN_ORDER.indexOf(floor.screen))
-    problems.push(`Screen recorded as "${SCREEN_LABEL[answers.screen]}", but the faults mean at least "${SCREEN_LABEL[floor.screen]}".`);
+    problems.push(`Screen "${SCREEN_LABEL[answers.screen]}" — the faults mean at least "${SCREEN_LABEL[floor.screen]}".`);
   if (BODY_ORDER.indexOf(answers.body) < BODY_ORDER.indexOf(floor.body))
-    problems.push(`Body recorded as "${BODY_LABEL[answers.body]}", but the faults mean at least "${BODY_LABEL[floor.body]}".`);
+    problems.push(`Body "${BODY_LABEL[answers.body]}" — the faults mean at least "${BODY_LABEL[floor.body]}".`);
   for (const i of floor.issues)
-    if (!answers.issues.includes(i)) problems.push(`"${ISSUE_LABEL[i]}" is a recorded fault but missing from the condition.`);
+    if (!answers.issues.includes(i)) problems.push(`"${ISSUE_LABEL[i]}" is a fault but not in the condition.`);
   return problems;
 }
 

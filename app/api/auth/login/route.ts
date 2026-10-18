@@ -11,7 +11,7 @@ export async function POST(req: Request) {
     const b = await body<{ username?: string; password?: string }>(req);
     const key = `${(b.username || "").toLowerCase()}|${req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local"}`;
     const f = fails.get(key);
-    if (f && f.n >= 8 && f.until > Date.now()) throw new HttpError(429, "Too many attempts. Wait a few minutes and try again.");
+    if (f && f.n >= 8 && f.until > Date.now()) throw new HttpError(429, "Too many attempts — wait a few minutes.");
     const u = authenticate(b.username || "", b.password || "");
     if (!u) {
       const cur = f && f.until > Date.now() ? f : { n: 0, until: Date.now() + 10 * 60_000 };

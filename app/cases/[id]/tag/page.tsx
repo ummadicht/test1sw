@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 import { requirePage } from "@/lib/server/page";
 import { getCaseForViewer } from "@/lib/server/counter-extra";
 import { HttpError } from "@/lib/server/auth";
+import { getOrg } from "@/lib/server/scope";
 import type { CaseView } from "@/lib/server/cases";
 import { inr } from "@/lib/domain/money";
 import { PrintBar } from "@/components/counter/PrintBar";
@@ -57,7 +58,7 @@ export default async function TagPage({ params }: { params: Promise<{ id: string
   }
 
   const qr = await QRCode.toDataURL(v.ref, { margin: 1, width: 360, errorCorrectionLevel: "M" });
-  const sample = v.quote?.source.kind === "sample";
+  const test = !!getOrg(v.orgId)?.demo;
 
   return (
     <Shell>
@@ -85,7 +86,7 @@ export default async function TagPage({ params }: { params: Promise<{ id: string
               <dt className="text-[11px] uppercase tracking-wider text-muted">Trade-in value</dt>
               <dd className="num font-semibold">
                 {inr(v.tradeValue)}
-                {sample ? <span className="ml-1.5 text-[11px] font-bold text-[color:var(--sample)]">SAMPLE</span> : null}
+                {test ? <span className="ml-1.5 text-[11px] font-bold text-[color:var(--test)]">TEST</span> : null}
               </dd>
             </div>
             <div>
@@ -94,7 +95,7 @@ export default async function TagPage({ params }: { params: Promise<{ id: string
             </div>
           </dl>
         </div>
-        <p className="text-[11.5px] text-muted mt-4">Scan or quote the case number at pickup. Do not hand over a phone without its tag.</p>
+        <p className="text-[11.5px] text-muted mt-4">No tag, no hand-over.</p>
       </article>
     </Shell>
   );

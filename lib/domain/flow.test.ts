@@ -71,9 +71,11 @@ test("decision: support ending never flips the advice on its own", () => {
   assert.ok(d.caveats.some((c) => c.includes("still works")));
 });
 
-test("decision: sample prices are always caveated", () => {
-  const d = decide({ ...BASE, valueSource: "sample" });
-  assert.ok(d.caveats.some((c) => c.includes("SAMPLE")));
+test("decision: no price is ever called a sample — the source of a real price adds no caveat of its own", () => {
+  for (const valueSource of ["priceiq", "partner_ratecard", "partner_manual"] as const) {
+    const d = decide({ ...BASE, valueSource });
+    assert.ok(!d.caveats.some((c) => /sample/i.test(c)), valueSource);
+  }
 });
 
 const POLICY: CreditPolicy = { limit: 100000, releaseOn: "collected", warnAt: 0.8, maxAgeDays: 7, pickupAtCount: 10 };

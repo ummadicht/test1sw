@@ -5,10 +5,12 @@ import { useState } from "react";
 import { Money, Pct, Banner, ErrorText } from "@/components/ui";
 import { OUTCOME_LABEL, PICKUP_STATUS_LABEL, type ClearanceOutcome, type PickupStatus } from "@/lib/domain/lifecycle";
 import { maskImei } from "@/lib/domain/imei";
+import { quoteSourceLabel } from "@/lib/domain/ratecard";
 import { QuoteSource } from "./StepTradeIn";
 import { idTypeLabel, maskPhone, fmtWhen, faultLabels, conditionSummary, COVER_LABEL } from "./shared";
 import type { CaseOps, PickupInfo } from "./ops";
 import { DataClearCard } from "./DataClearCard";
+import { TONE_TEXT, gradeTone } from "./gradingView";
 
 /** After the trade-in is taken: what was agreed, who checked it, and where the phone is now. */
 export function LockedSummary({
@@ -45,7 +47,7 @@ export function LockedSummary({
   if (view.settledAt || pickup?.settledAt) timeline.push({ label: "Settled by the partner", at: view.settledAt ?? pickup?.settledAt ?? null });
 
   async function cancel() {
-    if (reason.trim().length < 4) return setErr("Say why the trade-in is cancelled.");
+    if (reason.trim().length < 4) return setErr("Say why.");
     setErr(await act("cancel", { reason: reason.trim() }));
   }
 
@@ -57,10 +59,11 @@ export function LockedSummary({
           <h2 className="text-[17px] font-[720]">Trade-in</h2>
         </header>
         <div className="px-5 pb-5 pt-3 space-y-5">
-          {view.status === "cancelled" ? <Banner tone="warn">
-              This trade-in was cancelled before pickup. Its value was released back to the store&apos;s credit line.
-              {view.closedReason ? <> Reason: &ldquo;{view.closedReason}&rdquo;</> : null}
-            </Banner> : null}
+          {view.status === "cancelled" ? (
+            <Banner tone="warn">
+              Cancelled — value back on the credit line{view.closedReason ? <>: &ldquo;{view.closedReason}&rdquo;</> : "."}
+            </Banner>
+          ) : null}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
@@ -90,7 +93,7 @@ export function LockedSummary({
               </div>
               {view.upgrade ? (
                 <div className="hint">
-                  for the {view.upgrade.label} (<Money value={view.upgrade.price} />)
+                  for {view.upgrade.label} (<Money value={view.upgrade.price} />)
                 </div>
               ) : null}
             </div>
@@ -130,11 +133,11 @@ export function LockedSummary({
                     All confirmed by {view.checks.by}, {fmtWhen(view.checks.at)}
                     {view.checks.kym ? (
                       <div className="text-[13px] text-ink-2">
-                        Government IMEI register: {view.checks.kym.status === "clear" ? "no block" : view.checks.kym.status}
+                        IMEI register: {view.checks.kym.status === "clear" ? "no block" : view.checks.kym.status}
                         {view.checks.kym.reference ? ` · ${view.checks.kym.reference}` : ""}
                       </div>
                     ) : null}
-                    {view.checks.imeiCheckAck ? <div className="text-[13px] text-warn">IMEI check digit failed — confirmed correct by staff.</div> : null}
+                    {view.checks.imeiCheckAck ? <div className="text-[13px] text-warn">IMEI check digit failed — staff confirmed.</div> : null}
                   </>
                 ) : (
                   "—"
@@ -149,9 +152,29 @@ export function LockedSummary({
                     <span className="num font-semibold">{pickup.ref}</span> · {PICKUP_STATUS_LABEL[pickup.status as PickupStatus] ?? pickup.status}
                   </>
                 ) : view.status === "locked" ? (
-                  view.dataClearState === "due" ? "Not on a pickup yet — clear the customer's data first" : "Not on a pickup yet — waiting at the store"
+                  view.dataClearState === "due" ? "Clear the data first" : "Waiting at the store"
                 ) : (
                   "—"
+                )}
+              </dd>
+            </div>
+            <div className="sm:col-span-2">
+              <dt className="text-muted text-[12.5px]">SwapUp grade</dt>
+              <dd>
+                {view.grading ? (
+                  <>
+                    <span className={`font-semibold ${TONE_TEXT[gradeTone(view.grading.status, view.grading.final)]}`}>{view.grading.label}</span>
+                    {view.grading.report ? (
+                      <span className="text-[13px] text-ink-2">
+                        {" "}
+                        · report v{view.grading.report.version}
+                        {view.grading.report.final ? ", frozen at hand-over" : ""}
+                      </span>
+                    ) : null}
+                    {view.grading.why ? <div className="text-[13px] text-ink-2">{view.grading.why}</div> : null}
+                  </>
+                ) : (
+                  <span className="text-muted">No grade report.</span>
                 )}
               </dd>
             </div>
@@ -197,8 +220,13 @@ export function LockedSummary({
               Print receipt
             </Link>
             <Link href={`/cases/${view.id}/tag`} className="btn btn-sm">
-              Print device tag
+              Print tag
             </Link>
+            {view.grading?.report ? (
+              <Link href={`/cases/${view.id}/report`} className="btn btn-sm">
+                Print grade report
+              </Link>
+            ) : null}
           </div>
 
           {isManager && view.status === "locked" ? (
@@ -206,10 +234,10 @@ export function LockedSummary({
               {cancelling ? (
                 <div className="space-y-2">
                   <label className="block">
-                    <span className="label">Why is the trade-in cancelled?</span>
-                    <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. customer returned the new phone the same day" maxLength={200} />
+                    <span className="label">Why cancel?</span>
+                    <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. new phone returned" maxLength={200} />
                   </label>
-                  <p className="hint !mt-0">The phone goes back to the customer and its value is released from the credit line.</p>
+                  <p className="hint !mt-0">Phone goes back; credit is released.</p>
                   <div className="flex gap-2">
                     <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={cancel}>
                       Cancel trade-in
@@ -243,12 +271,12 @@ export function DeclaredCard({ ops }: { ops: CaseOps }) {
   return (
     <section className="card">
       <header className="px-5 pt-4">
-        <h2 className="text-[17px] font-[720]">As declared at the counter</h2>
+        <h2 className="text-[17px] font-[720]">As declared</h2>
       </header>
       <div className="px-5 pb-5 pt-3 space-y-3 text-[14px]">
         <div>
           <span className="text-muted">Faults: </span>
-          {view.faults.length ? faultLabels(view.faults) : "none recorded"}
+          {view.faults.length ? faultLabels(view.faults) : "none"}
           <span className="text-muted"> · Cover: </span>
           {COVER_LABEL[view.coverage]}
         </div>
@@ -262,7 +290,7 @@ export function DeclaredCard({ ops }: { ops: CaseOps }) {
         {q && q.status === "priced" ? (
           <details className="rounded-[11px] border border-line">
             <summary className="cursor-pointer px-4 py-2.5 font-semibold">
-              {q.partner}&apos;s price trace · <Money value={q.amount} />
+              Price trace
             </summary>
             <table className="w-full text-[14px] mx-4 mb-3" style={{ width: "calc(100% - 2rem)" }}>
               <tbody>
@@ -277,7 +305,7 @@ export function DeclaredCard({ ops }: { ops: CaseOps }) {
               </tbody>
             </table>
             <div className="hint px-4 pb-3 !mt-0">
-              {q.source.label} · quoted {fmtWhen(q.quotedAt)}
+              {quoteSourceLabel(q.source)} · quoted {fmtWhen(q.quotedAt)}
             </div>
           </details>
         ) : null}

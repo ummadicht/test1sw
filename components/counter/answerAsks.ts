@@ -1,7 +1,7 @@
 /**
  * The answer card's rules, kept pure so they are tested without a browser
  * (answerAsks.test.ts): which control sits under each ask, when the card quietly
- * re-quotes, what a Cashify quote typed in here must look like, and which "Swap up"
+ * re-quotes, what a partner quote typed in here must look like, and which "Swap up"
  * refusal the tile still has to say. Every sentence the customer reads is the
  * server's (lib/domain/offer.ts); this file only picks where it is answered.
  */
@@ -11,29 +11,29 @@ import type { CaseView } from "@/lib/server/cases";
 
 /** Where on this page each ask is answered, and the button that goes there. */
 export const ASK_STEP: Partial<Record<OfferAsk["kind"], { step: string; button: string }>> = {
-  model: { step: "step-phone", button: "Choose the model" },
-  partner_quote: { step: "step-tradein", button: "Enter the Cashify quote" },
-  repair_quote: { step: "step-repair", button: "Enter the repair quote" },
-  new_phone: { step: "step-upgrade", button: "Choose the new phone" },
+  model: { step: "step-phone", button: "Choose model" },
+  partner_quote: { step: "step-tradein", button: "Enter partner quote" },
+  repair_quote: { step: "step-repair", button: "Enter repair quote" },
+  new_phone: { step: "step-upgrade", button: "Choose new phone" },
 };
 
 /** What an advisor reads under "Check this is the right phone": the override is the store manager's (cases.ts, 403 otherwise). */
-export const ASK_MANAGER = "Ask your store manager to confirm it.";
+export const ASK_MANAGER = "Ask your manager to confirm it.";
 
 export type AskControl =
-  /** One tap each: the storage chips, with the server's sample note under them while any price is a sample. */
+  /** One tap each: the storage chips, with the server's note under them (old market data, PriceIQ unreachable). */
   | { kind: "chips"; options: StorageOption[]; note: string | null }
   /**
-   * The Cashify quote, typed in right on the card — the two cases nothing else on the card can
-   * answer, and whose step 5 is folded away under the answer:
-   *   lapsed    a quote read off the Cashify app ran out. SwapUp never re-quotes a quote from the
-   *             app, so only today's from the app replaces it (step 5 opens the same form: cashifyLapsed).
+   * The partner's quote, typed in right on the card — the two cases nothing else on the card can
+   * answer without leaving the answer for the trade-in step:
+   *   lapsed    a quote read off the partner's app ran out. SwapUp never re-quotes a quote from the
+   *             app, so only today's from the app replaces it (the trade-in step opens the same form: partnerQuoteLapsed).
    *   unlisted  the phone measured a size the model's list doesn't have (a 1TB Ultra). No chip can
    *             be right; the quote entered for the phone settles its storage at the size it
-   *             measured (updateCase; step 5 offers the same: unlistedSize).
+   *             measured (updateCase; the trade-in step offers the same: unlistedSize).
    */
-  | { kind: "cashify"; why: "lapsed" | "unlisted"; size: string | null }
-  /** Open the folded steps at the one that answers it. */
+  | { kind: "partner_quote_entry"; why: "lapsed" | "unlisted"; size: string | null }
+  /** Go to the step that answers it. */
   | { kind: "step"; step: string; button: string }
   /** The camera says it may be another phone: a store manager records why it is the right one. */
   | { kind: "identity_override" }
@@ -45,11 +45,11 @@ export function askControl(a: OfferAsk, v: Pick<CaseView, "partnerManual" | "mea
     case "storage":
       if (a.options.length) return { kind: "chips", options: a.options, note: a.note ?? null };
       // No chips: either the phone measured a size that isn't on file, or the model has no sizes at all.
-      if (v.measuredStorage) return { kind: "cashify", why: "unlisted", size: v.measuredStorage };
-      return { kind: "step", step: "step-phone", button: "Choose it in step 1" };
+      if (v.measuredStorage) return { kind: "partner_quote_entry", why: "unlisted", size: v.measuredStorage };
+      return { kind: "step", step: "step-phone", button: "Choose storage" };
     case "partner_quote":
-      // A Cashify-app quote on the case is always priced, so this ask can only mean it has lapsed.
-      if (v.partnerManual) return { kind: "cashify", why: "lapsed", size: null };
+      // A partner-app quote on the case is always priced, so this ask can only mean it has lapsed.
+      if (v.partnerManual) return { kind: "partner_quote_entry", why: "lapsed", size: null };
       break;
     case "blocked":
       return isManager ? { kind: "identity_override" } : { kind: "ask_manager", text: ASK_MANAGER };
@@ -63,7 +63,7 @@ export function askControl(a: OfferAsk, v: Pick<CaseView, "partnerManual" | "mea
  * partner quote has run out — then "Quote expired — re-quoting." is true. A plain reprice is
  * enough (reprice re-quotes an expired quote). Non-null = there is something to re-quote;
  * AnswerCard runs it at most ONCE per page open (a ref), so a partner whose fresh quote comes
- * back already out of date is never asked in a loop. Never for a quote read off the Cashify
+ * back already out of date is never asked in a loop. Never for a quote read off the partner's
  * app: reprice rebuilds it as entered, so only a new one helps.
  */
 export function autoRequoteKey(v: Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer">): string | null {
@@ -76,17 +76,17 @@ export function autoRequoteKey(v: Pick<CaseView, "id" | "quoteExpired" | "quote"
 export const requotable = (v: Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer">): boolean => autoRequoteKey(v) !== null;
 
 /**
- * A quote read off the Cashify app that has run out. Re-quoting can't renew it (reprice rebuilds
- * it as entered), so step 5 opens its form for today's quote instead of offering a Re-quote.
+ * A quote read off the partner's app that has run out. Re-quoting can't renew it (reprice rebuilds
+ * it as entered), so the trade-in step opens its form for today's quote instead of offering a Re-quote.
  */
-export const cashifyLapsed = (v: Pick<CaseView, "partnerManual" | "quoteExpired" | "quote">): boolean =>
+export const partnerQuoteLapsed = (v: Pick<CaseView, "partnerManual" | "quoteExpired" | "quote">): boolean =>
   !!v.partnerManual && v.quoteExpired && v.quote?.source.kind === "partner_manual";
 
 /**
  * The size the phone measured when it isn't on the model's list (a 1TB Ultra on file as
  * 256/512GB), while the case has no storage: the server's storage ask then offers no chip
- * (lib/domain/offer.ts). Step 5 takes the Cashify quote for it, which settles the storage at that
- * size (cases.ts updateCase) — step 1 can't, its chips are the sizes the phone ruled out. null otherwise.
+ * (lib/domain/offer.ts). The trade-in step takes the partner's quote for it, which settles the storage at
+ * that size (cases.ts updateCase) — the Phone step can't, its chips are the sizes the phone ruled out. null otherwise.
  */
 export function unlistedSize(v: Pick<CaseView, "device" | "measuredStorage" | "offer">): string | null {
   if (!v.device || v.device.variant || !v.measuredStorage) return null;
@@ -107,26 +107,28 @@ export function wholeRupees(t: string): number | null {
 const MAX_RUPEES = 500_000;
 
 /**
- * Why a Cashify quote typed on the card can't be saved yet — the server's own sentences
+ * Why a partner quote typed on the card can't be saved yet — the server's own sentences
  * (cases.ts updateCase, partnerQuote), the same as the store app's PartnerQuoteSheet — or null.
  */
-export function cashifyQuoteProblem(amount: string, reference: string, repaired: string): string | null {
+export function partnerQuoteProblem(amount: string, reference: string, repaired: string): string | null {
   const n = wholeRupees(amount);
-  if (n === null || n <= 0 || n > MAX_RUPEES) return "Enter the partner's quote as a whole rupee amount.";
-  if (!/^[A-Z0-9-]{4,40}$/.test(reference.trim().toUpperCase())) return "Enter the reference code the partner's app shows for this quote.";
+  if (n === null || n <= 0 || n > MAX_RUPEES) return "Quote: whole rupees only.";
+  if (!/^[A-Z0-9-]{4,40}$/.test(reference.trim().toUpperCase())) return "Enter the app's reference code.";
   if (repaired.trim()) {
     const r = wholeRupees(repaired);
-    if (r === null || r < n) return "The repaired value must be a whole rupee amount, at least the as-is quote.";
+    if (r === null || r < n) return "Repaired value must be at least the quote.";
   }
   return null;
 }
 
 /** The tile's own link when no new phone is chosen. */
-export const CHOOSE_NEW_PHONE_LINK = "Choose the new phone";
+export const CHOOSE_NEW_PHONE_LINK = "Choose new phone";
+/** The server's refusal that says the same as that link ("Choose the new phone."), however it is worded. */
+const SAYS_CHOOSE_NEW_PHONE = /^choose (?:the |a )?new phone\.?$/i;
 
 /**
  * Why "Swap up" is refused, said once in the trade-in tile — and not at all when the tile already
- * says it: as its why (no trade-in), as its warn note (a lapsed Cashify quote), or as its
+ * says it: as its why (no trade-in), as its warn note (a lapsed partner-app quote), or as its
  * "Choose the new phone" link.
  */
 export function swapRefusal(o: Offer): string | null {
@@ -134,6 +136,6 @@ export function swapRefusal(o: Offer): string | null {
   if (!no) return null;
   if (o.swap.total === null && no === o.swap.why) return null;
   if (no === o.swap.tradeInNote) return null;
-  if (!o.swap.newPhone && no.replace(/\.$/, "") === CHOOSE_NEW_PHONE_LINK) return null;
+  if (!o.swap.newPhone && SAYS_CHOOSE_NEW_PHONE.test(no.trim())) return null;
   return no;
 }

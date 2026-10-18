@@ -9,24 +9,24 @@ import type { CaseOps } from "./ops";
 /** What the customer does on their own phone, in the order they do it. Shown to the advisor to read out. */
 const GUIDE: { title: string; samsung: string; other: string }[] = [
   {
-    title: "Back up anything they want to keep",
-    samsung: "Photos and chats to their new phone (Smart Switch) or the cloud.",
-    other: "Same — once the phone is reset, nothing on it can be recovered.",
+    title: "Back up",
+    samsung: "Smart Switch to the new phone, or the cloud.",
+    other: "Nothing can be recovered after the reset.",
   },
   {
-    title: "Sign out of their accounts",
-    samsung: "Settings → Accounts and backup → Manage accounts → their Samsung account → Sign out (needs its password). Then the Google account → Remove account.",
-    other: "Settings → Passwords & accounts (or Accounts) → their Google account → Remove account. On an iPhone: Settings → their name → Sign Out.",
+    title: "Sign out of accounts",
+    samsung: "Settings → Accounts and backup → Manage accounts → Samsung account → Sign out. Then Google → Remove account.",
+    other: "Settings → Accounts → Google → Remove account. iPhone: Settings → their name → Sign Out.",
   },
   {
     title: "Factory reset",
-    samsung: "Settings → General management → Reset → Factory data reset → Reset → Delete all.",
-    other: "Settings → System → Reset options → Erase all data. On an iPhone: Settings → General → Transfer or Reset iPhone → Erase All Content and Settings.",
+    samsung: "Settings → General management → Reset → Factory data reset → Delete all.",
+    other: "Settings → System → Reset options → Erase all data. iPhone: General → Transfer or Reset iPhone → Erase All.",
   },
   {
-    title: "Wait for the setup screen",
-    samsung: "The phone restarts to a Welcome screen. Tap through setup until it asks to connect or sign in.",
-    other: "If setup asks for the previous owner's Google account or Apple ID, the account was not removed — the customer must sign in and remove it.",
+    title: "Wait for setup",
+    samsung: "Tap through until it asks to connect or sign in.",
+    other: "Asks for the old account? It wasn't removed — sign in and remove it.",
   },
 ];
 
@@ -46,7 +46,7 @@ export function DataClearCard({ ops, canRecord }: { ops: CaseOps; canRecord: boo
   const all = DATA_CLEAR_STEPS.every(([k]) => ticks[k]);
 
   async function save() {
-    if (!all) return setErr("Tick each step once you have seen it on the phone.");
+    if (!all) return setErr("Tick each step you saw.");
     setErr(await act("data_clear", { steps: ticks, note: note.trim() || undefined }));
   }
 
@@ -60,22 +60,16 @@ export function DataClearCard({ ops, canRecord }: { ops: CaseOps; canRecord: boo
         {state === "done" && rec ? (
           <>
             <Banner tone="up">
-              Reset seen by {rec.by}, {fmtWhen(rec.at)}. The phone came back to its setup screen without asking for the customer&apos;s account.
-              {rec.note ? <> Note: &ldquo;{rec.note}&rdquo;</> : null}
+              Reset seen by {rec.by}, {fmtWhen(rec.at)}
+              {rec.note ? <> · &ldquo;{rec.note}&rdquo;</> : null}
             </Banner>
             <p className="hint !mt-0">{rec.label}.</p>
           </>
         ) : state === "attested" ? (
-          <p className="text-[14px] text-ink-2">
-            This trade-in was taken before data clearing became its own step. The factory reset and account sign-out were ticked with the hand-over checks
-            {view.checks ? ` by ${view.checks.by}` : ""}. Factory reset by the customer — not a certified erasure.
-          </p>
+          <p className="text-[14px] text-ink-2">Ticked at hand-over{view.checks ? ` by ${view.checks.by}` : ""} — not a certified erasure.</p>
         ) : (
           <>
-            <p className="text-[14px] text-ink-2">
-              The customer has accepted. Before they leave, they clear their own phone from its Settings — staff never handle the customer&apos;s passwords.
-              Read these steps out, then tick what you see on the phone.
-            </p>
+            <p className="text-[14px] text-ink-2">The customer clears it — staff never handle passwords.</p>
             <ol className="space-y-2">
               {GUIDE.map((g, i) => (
                 <li key={g.title} className="rounded-[10px] border border-line px-3 py-2.5">
@@ -91,9 +85,6 @@ export function DataClearCard({ ops, canRecord }: { ops: CaseOps; canRecord: boo
                 </li>
               ))}
             </ol>
-            <p className="hint !mt-0">
-              The SwapUp Check app is deleted with everything else — that&apos;s expected; its test results are already saved on this case.
-            </p>
 
             {canRecord ? (
               <fieldset className="no-print">
@@ -108,23 +99,20 @@ export function DataClearCard({ ops, canRecord }: { ops: CaseOps; canRecord: boo
                 </div>
                 <label className="block mt-3">
                   <span className="label">Note (optional)</span>
-                  <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. customer kept the memory card" maxLength={200} />
+                  <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. kept the memory card" maxLength={200} />
                 </label>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <button type="button" className="btn btn-primary" disabled={busy || !all} onClick={save}>
                     Record data cleared
                   </button>
-                  <span className="hint !mt-0">Factory reset by the customer, seen by you — not a certified erasure.</span>
+                  <span className="hint !mt-0">Not a certified erasure.</span>
                 </div>
                 <ErrorText error={err} />
               </fieldset>
             ) : (
-              <Banner tone="warn">Not recorded yet — the store records it while the customer is at the counter.</Banner>
+              <Banner tone="warn">Not recorded yet.</Banner>
             )}
-            <p className="hint !mt-0">
-              If the customer leaves without resetting, call them back: a phone that still asks for their account can&apos;t be set up by anyone else, and the
-              partner will reject it.
-            </p>
+            <p className="hint !mt-0">Not reset? Call them back — the partner rejects locked phones.</p>
           </>
         )}
       </div>

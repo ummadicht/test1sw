@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Money, StatusPill, SourceBadge } from "@/components/ui";
+import { Money, StatusPill } from "@/components/ui";
 import { PICKUP_STATUS_LABEL } from "@/lib/domain/lifecycle";
 import type { PickupView } from "@/lib/server/pickups";
 import { ageLabel, fmtWhen } from "./format";
@@ -42,20 +42,17 @@ const gone = (p: PickupView) => p.status === "cancelled" && p.totals.devices ===
 /**
  * A list of pickups. Plain (server-renderable) — the columns are chosen by the
  * page so the store, the partner queue and the admin list each show what they
- * act on. `sample` lists pickups whose values come from a SAMPLE rate card.
+ * act on.
  */
 export function PickupTable({
   pickups,
   cols,
   now,
-  sample = [],
 }: {
   pickups: PickupView[];
   cols: PickupCol[];
   now: string;
-  sample?: string[];
 }) {
-  const sampleSet = new Set(sample);
   const cell = (p: PickupView, c: PickupCol): ReactNode => {
     switch (c) {
       case "client":
@@ -77,7 +74,6 @@ export function PickupTable({
         ) : (
           <div className="flex flex-col items-end gap-1">
             <Money value={p.totals.quoted} className="font-semibold" />
-            {sampleSet.has(p.id) ? <SourceBadge kind="sample" /> : null}
           </div>
         );
       case "accepted":

@@ -120,7 +120,7 @@ export function clearanceEvents(input: {
   if (outcome === "cleared") accepted = held;
   if (outcome === "rejected" || outcome === "not_received") accepted = 0;
   if (outcome === "regraded") {
-    if (accepted >= held) throw new RuleError("A regrade must be below the trade-in value — use Cleared if the partner pays in full.", 400);
+    if (accepted >= held) throw new RuleError("A regrade must be below the trade-in — else use Cleared.", 400);
   }
   const shortfall = held - accepted;
   const events: CreditEvent[] = [];

@@ -22,5 +22,5 @@ test("every step must be confirmed with a real true", () => {
   assert.deepEqual(missingDataClearSteps(all), []);
   assert.equal(missingDataClearSteps({}).length, DATA_CLEAR_STEPS.length);
   assert.equal(missingDataClearSteps({ ...all, noPreviousAccount: "true" }).length, 1, "a string is not a confirmation");
-  assert.match(missingDataClearSteps({ ...all, setupScreenSeen: false })[0], /setup/);
+  assert.match(missingDataClearSteps({ ...all, setupScreenSeen: false })[0], /Welcome screen/);
 });

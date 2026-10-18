@@ -19,7 +19,7 @@ export default async function AdminStoresPage({ searchParams }: { searchParams: 
   const u = await requirePage(["org_admin", "platform"], "/admin/stores");
   const sp = await searchParams;
   const ctx = adminContext(u, sp.orgId);
-  const intro = "Every store's trade-in credit line. A store can hold trade-in value up to its limit; at the limit it stops taking trade-ins until the partner collects.";
+  const intro = "Each store's trade-in credit line.";
   if (!ctx.orgId) {
     return (
       <AppShell user={u} wide>

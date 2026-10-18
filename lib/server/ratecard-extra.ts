@@ -34,10 +34,8 @@ export function tradeModelNames(): Record<string, string> {
  * The upload template: one row per catalogue model × storage, in the exact
  * `model_id,variant,max_price` shape the upload reads.
  *
- * Prices are pre-filled from the partner's ACTIVE card only when that card is
- * the partner's own sheet. The built-in SAMPLE card's illustrative figures are
- * never copied into a template — uploaded back, they would come out labelled
- * "Partner rate card", and a made-up number would pass for the partner's price.
+ * Prices are pre-filled from the partner's ACTIVE card (its own sheet); with no
+ * card the template is blank — SwapUp never fills in a price of its own.
  */
 export function rateCardTemplateCsv(partnerId: string): { csv: string; filename: string; prefilled: number; rows: number } {
   const card = activeRateCard(partnerId);

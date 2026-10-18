@@ -89,8 +89,8 @@ export function canHold(policy: Pick<CreditPolicy, "limit" | "warnAt">, events: 
       shortBy,
       reason:
         p.available <= 0
-          ? "This store's trade-in credit is used up. Book a pickup — collected devices free the line."
-          : `This trade-in needs ₹${amount.toLocaleString("en-IN")} of credit but only ₹${p.available.toLocaleString("en-IN")} is free. Book a pickup to free the line.`,
+          ? "Credit line used up — book a pickup."
+          : `Needs ₹${amount.toLocaleString("en-IN")} of credit, only ₹${p.available.toLocaleString("en-IN")} free — book a pickup.`,
     };
   }
   const after = p.exposure + amount;
@@ -99,7 +99,7 @@ export function canHold(policy: Pick<CreditPolicy, "limit" | "warnAt">, events: 
     ok: true,
     availableAfter: policy.limit - after,
     utilisationAfter,
-    warn: utilisationAfter >= policy.warnAt ? `After this trade-in the line is ${Math.round(utilisationAfter * 100)}% used — book a pickup soon.` : null,
+    warn: utilisationAfter >= policy.warnAt ? `Line ${Math.round(utilisationAfter * 100)}% used after this — book a pickup soon.` : null,
   };
 }
 

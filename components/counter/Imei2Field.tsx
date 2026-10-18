@@ -24,7 +24,7 @@ export function Imei2Field({ ops }: { ops: CaseOps }) {
       return;
     }
     if (d.length !== 14 && d.length !== 15) {
-      setErr(`An IMEI has 15 digits — this has ${d.length}.`);
+      setErr("An IMEI has 15 digits.");
       return;
     }
     setErr(await save({ imei2: d }));
@@ -34,7 +34,7 @@ export function Imei2Field({ ops }: { ops: CaseOps }) {
     <div>
       <label className="block">
         <span className="label">
-          IMEI 2 <span className="text-muted font-normal">(dual-SIM phones)</span>
+          IMEI 2 <span className="text-muted font-normal">(dual-SIM)</span>
         </span>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -53,13 +53,13 @@ export function Imei2Field({ ops }: { ops: CaseOps }) {
             }}
             inputMode="numeric"
             autoComplete="off"
-            placeholder="Second IMEI, if shown"
+            placeholder="If shown"
             maxLength={18}
             disabled={!editable}
             aria-invalid={!!err || view.imei2Check === "invalid" || undefined}
           />
           {view.imei2 && view.imei2Check === "valid" && val.replace(/\D/g, "") === view.imei2 ? <span className="pill pill-up">✓ Check digit OK</span> : null}
-          {view.imei2Check === "invalid" ? <span className="pill pill-warn">⚠ Check digit fails — re-read it</span> : null}
+          {view.imei2Check === "invalid" ? <span className="pill pill-warn">⚠ Re-read the IMEI</span> : null}
         </div>
       </label>
       {err ? (
@@ -67,7 +67,7 @@ export function Imei2Field({ ops }: { ops: CaseOps }) {
           {err}
         </span>
       ) : (
-        <span className="hint">*#06# shows both on a dual-SIM phone. Both are checked against other trade-ins.</span>
+        <span className="hint">*#06# shows both.</span>
       )}
     </div>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client/api";
 import { Banner, StatusPill } from "@/components/ui";
 import { CASE_STATUS_LABEL } from "@/lib/domain/lifecycle";
@@ -9,39 +9,42 @@ import type { CaseView, CasePatch } from "@/lib/server/cases";
 import type { Role } from "@/lib/server/auth";
 import { StepPhone } from "./StepPhone";
 import { StepFaults } from "./StepFaults";
-import { StepCondition } from "./StepCondition";
 import { StepRepair } from "./StepRepair";
 import { StepTradeIn } from "./StepTradeIn";
-import { StepUpgrade } from "./StepUpgrade";
-import { DecisionPanel } from "./DecisionPanel";
 import { LockForm } from "./LockForm";
 import { LockedSummary } from "./LockedSummary";
 import { AnswerCard } from "./AnswerCard";
+import { PhonecheckPanel } from "./PhonecheckPanel";
+import { StoreMargin } from "./StoreMargin";
+import { StepHeader, StepDock } from "./StepNav";
+import { STEP_ANCHOR, canShow, landingStep, stepDone, stepFromAnchor, stepOrder, testedCase, type StepId } from "./caseSteps";
 import { fmtWhen } from "./shared";
 import type { CaseOps, ModelOption, CampaignBand, PickupInfo } from "./ops";
 
 const COUNTER: Role[] = ["advisor", "store_manager"];
 const AT_COUNTER = ["draft", "quoted"];
 
-/** The folded steps' one-line summary: "Galaxy S23 Ultra · storage ? · 1 fault · cover none". */
-const COVER_WORD: Record<CaseView["coverage"], string> = { none: "none", warranty: "warranty", care_plus: "Care+" };
-
-function scrollToLock(nameRef: RefObject<HTMLInputElement | null>) {
-  const el = document.getElementById("step-lock");
-  el?.scrollIntoView({ behavior: "smooth", block: "start" });
-  setTimeout(() => nameRef.current?.focus({ preventScroll: true }), 450);
-}
-
 /**
- * The counter workspace for one case. Every change is saved at once and the
- * case comes back re-priced; saves run one at a time, in order, so the server
- * always ends on the advisor's last tap. Only the latest answer is painted.
+ * The counter workspace for one case — STEP BY STEP (caseSteps.ts): one step on the screen at a
+ * time, in the store app's order —
  *
- * ANSWER FIRST — once a phone test is on the case (or the store app handed off
- * with ?view=answer): the answer (refurb quote vs trade-in + bonus) leads, the
- * six steps fold into one line with "Edit", and the lock form waits for "Swap up".
- * The test already answered the steps; asking them again is what the owner
- * objected to. Without a test the page is the step-by-step desk, unchanged.
+ *     Phone → What's wrong → The answer   (→ Take the trade-in)
+ *
+ * with "Step 2 of 3 · What's wrong" on top (tap it for the list of steps) and Back / Next docked
+ * at the bottom. Each step asks one question and says one line; the rest is behind its "Show
+ * details", closed. The answer is the answer card (refurb quote vs trade-in + bonus, the SwapUp
+ * grade, Repair / Swap up / Walked away) with "Store margin · staff only" closed under it; its
+ * asks and "Change" links open the Repair quote and the Trade-in as pages of their own ("The
+ * answer › Repair quote", Back to the answer); "Swap up" opens the last step. One answer on the
+ * page: no comparison panel beside it.
+ *
+ * Where it opens (landingStep): a link to a step (#step-repair, the store app's #step-phone or
+ * #answer) opens that step; a tested case (SwapUp Check or Phonecheck), the store app's ?view=answer, and a case this viewer
+ * can't change open on the answer; otherwise the first step not answered yet. A save never moves
+ * the page — it stays on the step. Once traded in, the summary alone.
+ *
+ * Every change is saved at once and the case comes back re-priced; saves run one at a time, in
+ * order, so the server always ends on the advisor's last tap. Only the latest answer is painted.
  */
 export function CaseWorkspace({
   initial,
@@ -66,15 +69,12 @@ export function CaseWorkspace({
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const ticket = useRef(0);
   const lockName = useRef<HTMLInputElement>(null);
-  const details = useRef<HTMLDetailsElement>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [showLock, setShowLock] = useState(false);
-  const lockPending = useRef(false);
+  const top = useRef<HTMLDivElement>(null);
 
   const isCounter = COUNTER.includes(role);
   const isManager = role === "store_manager";
-  const editable = isCounter && AT_COUNTER.includes(view.status);
-  const answerFirstMode = editable && (view.camera !== null || answerFirst);
+  const editableOf = (v: CaseView) => isCounter && AT_COUNTER.includes(v.status);
+  const editable = editableOf(view);
   const id = initial.id;
 
   const run = useCallback(
@@ -121,161 +121,174 @@ export function CaseWorkspace({
   const ops: CaseOps = { view, editable, busy: pending > 0, save, act };
   const lockedOrLater = !AT_COUNTER.includes(view.status) && view.status !== "repair_chosen" && view.status !== "walked_away";
   const showCustomer = role !== "partner";
+  const isPartner = role === "partner";
+  /** "Store margin · staff only", closed, under the answer — before the trade-in, once there is a quote. */
+  const margin = !isPartner && !lockedOrLater && view.quote ? <StoreMargin ops={ops} /> : null;
 
-  function goToLock() {
-    scrollToLock(lockName);
-  }
+  /* ─────────── the steps ─────────── */
+  const hasAnswer = view.offer !== null;
+  const canLock = editable && hasAnswer;
+  const [lockOpen, setLockOpen] = useState(false);
+  const steps = stepOrder({ answer: hasAnswer, lock: canLock && lockOpen });
+  const done = (s: StepId) => stepDone(view, s);
+  const [step, setStep] = useState<StepId>(() =>
+    landingStep({
+      steps: stepOrder({ answer: initial.offer !== null, lock: false }),
+      answerFirst,
+      tested: testedCase(initial),
+      editable: editableOf(initial),
+      canLock: false,
+      done: (s) => stepDone(initial, s),
+    })
+  );
+  // A step that is no longer there (the trade-in step once the case closed) falls back to the answer.
+  // The answer's own pages (Repair quote, Trade-in) show beside it, opened from its asks and links.
+  const current: StepId = canShow(steps, step) ? step : hasAnswer ? "answer" : "tradein";
 
-  /** "Swap up": in answer-first mode the lock form is mounted on demand — mount it, then go to it once it is there. */
-  const swapUp = useCallback(() => {
-    if (document.getElementById("step-lock")) return scrollToLock(lockName);
-    lockPending.current = true;
-    setShowLock(true);
+  // The latest of everything the step links need, for the listeners below.
+  const latest = useRef({ steps, canLock, hasAnswer, editable, view, answerFirst });
+  latest.current = { steps, canLock, hasAnswer, editable, view, answerFirst };
+  const focusLock = useRef(false);
+  /** Set by Back / Next / the step list: the new step's heading takes the focus (a screen reader hears where it is). */
+  const focusStep = useRef(false);
+
+  /** Go to a step: the page shows it alone, from its top; the address says which, so a reload stays on it. */
+  const goTo = useCallback((target: StepId) => {
+    const l = latest.current;
+    let s = target;
+    if (s === "lock") {
+      if (!l.canLock) s = l.hasAnswer ? "answer" : "tradein";
+      else {
+        setLockOpen(true);
+        focusLock.current = true;
+      }
+    }
+    focusStep.current = true;
+    setStep(s);
+    try {
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${STEP_ANCHOR[s]}`);
+    } catch {
+      /* the address is a convenience */
+    }
+    const y = (top.current?.getBoundingClientRect().top ?? 0) + window.scrollY - 88;
+    if (window.scrollY > y) window.scrollTo({ top: Math.max(0, y) });
   }, []);
-  useEffect(() => {
-    if (!showLock || !lockPending.current) return;
-    lockPending.current = false;
-    scrollToLock(lockName);
-  }, [showLock]);
 
-  /** Unfold the steps and bring one into view: an ask's button, a tile's "Change", or a #step-… hand-off link. */
-  const openStep = useCallback((target: string) => {
-    const d = details.current;
-    if (d && !d.open) d.open = true; // the toggle event syncs detailsOpen
-    requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }, []);
-
-  // The hand-off may carry an anchor (/cases/<id>?view=answer#step-phone). Folded steps can't be
-  // scrolled to by the browser, and the lock form isn't mounted yet — follow the anchor ourselves.
+  // A link to a step (/cases/<id>#step-repair, the store app's ?view=answer#step-phone) opens it — on
+  // load and whenever the address's anchor changes. The server can't see the anchor, so the page
+  // first renders where landingStep puts it without one.
   useEffect(() => {
-    if (!answerFirstMode) return;
     function follow() {
-      const target = decodeURIComponent(window.location.hash.slice(1));
-      if (target === "step-lock") swapUp();
-      else if (target.startsWith("step-") || target === "why-answer") openStep(target);
+      if (!stepFromAnchor(window.location.hash)) return;
+      const l = latest.current;
+      const s = landingStep({
+        steps: l.steps.filter((x) => x !== "lock"),
+        anchor: window.location.hash,
+        answerFirst: l.answerFirst,
+        tested: testedCase(l.view),
+        editable: l.editable,
+        canLock: l.canLock,
+        done: (x) => stepDone(l.view, x),
+      });
+      if (s === "lock") {
+        setLockOpen(true);
+        focusLock.current = true;
+      }
+      setStep(s);
     }
     follow();
     window.addEventListener("hashchange", follow);
     return () => window.removeEventListener("hashchange", follow);
-  }, [answerFirstMode, swapUp, openStep]);
+  }, []);
+
+  // Once a step is on the screen: "Swap up" puts the cursor in the trade-in's first field; any other
+  // move puts the focus on the step's heading (not on a field — no keyboard pops up uninvited).
+  useEffect(() => {
+    if (!focusLock.current && !focusStep.current) return;
+    const lock = current === "lock" && focusLock.current;
+    focusLock.current = false;
+    focusStep.current = false;
+    const t = setTimeout(() => {
+      if (lock) lockName.current?.focus({ preventScroll: true });
+      else document.getElementById(`${STEP_ANCHOR[current]}-title`)?.focus({ preventScroll: true });
+    }, 50);
+    return () => clearTimeout(t);
+  }, [current]);
+
+  /** The answer card's asks and "Change" links name a step by its anchor ("step-repair"). */
+  const onStep = useCallback((anchor: string) => goTo(stepFromAnchor(anchor) ?? "answer"), [goTo]);
+  const swapUp = useCallback(() => goTo("lock"), [goTo]);
 
   const back = isCounter ? { href: "/desk", label: "Counter" } : { href: "/cases", label: "Cases" };
 
-  const steps = (): ReactNode => (
-    <>
-      <StepPhone ops={ops} brands={brands} initialModel={initialModel} />
-      <StepFaults ops={ops} />
-      <StepCondition ops={ops} />
-      <StepRepair ops={ops} />
-      <StepTradeIn ops={ops} showBuySell={role !== "partner"} />
-      <StepUpgrade ops={ops} isManager={isManager} bands={bands} />
-    </>
-  );
-
   return (
-    <div>
+    <div className="mx-auto max-w-[880px]">
       {/* Case header */}
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
-        <div className="min-w-0">
-          <Link href={back.href} className="text-[13px] no-underline hover:underline no-print">
-            <span className="text-muted">← {back.label}</span>
-          </Link>
-          <div className="flex flex-wrap items-center gap-2 mt-1">
-            <h1 className="text-[24px] font-[760] tracking-tight leading-tight">{showCustomer && view.customer?.name ? view.customer.name : "Case"}</h1>
-            <StatusPill status={view.status} label={CASE_STATUS_LABEL[view.status]} />
-            {view.demo ? <span className="pill pill-sample">Example case</span> : null}
-          </div>
-          <div className="text-[13px] text-muted mt-0.5">
-            <span className="num">{view.ref}</span> · {view.storeName} · opened {fmtWhen(view.createdAt)}
-            {view.advisorName ? ` by ${view.advisorName}` : ""}
-          </div>
+      <div className="mb-4 min-w-0" ref={top}>
+        <Link href={back.href} className="text-[13px] no-underline hover:underline no-print">
+          <span className="text-muted">← {back.label}</span>
+        </Link>
+        <div className="flex flex-wrap items-center gap-2 mt-1">
+          <h1 className="text-[24px] font-[760] tracking-tight leading-tight">{showCustomer && view.customer?.name ? view.customer.name : "Case"}</h1>
+          <StatusPill status={view.status} label={CASE_STATUS_LABEL[view.status]} />
+        </div>
+        <div className="text-[13px] text-muted mt-0.5">
+          <span className="num">{view.ref}</span> · {view.storeName} · opened {fmtWhen(view.createdAt)}
+          {view.advisorName ? ` by ${view.advisorName}` : ""}
         </div>
       </div>
 
       {view.status === "repair_chosen" ? (
-        <div className="mb-5">
-          <Banner tone="info">
-            Closed {fmtWhen(view.closedAt)} — the customer chose to repair and keep the phone. Book the repair in the service centre&apos;s job system as
-            usual.
-          </Banner>
+        <div className="mb-4">
+          <Banner tone="info">Closed {fmtWhen(view.closedAt)} — the customer is repairing it.</Banner>
         </div>
       ) : null}
       {view.status === "walked_away" ? (
-        <div className="mb-5">
+        <div className="mb-4">
           <Banner tone="info">
-            Closed {fmtWhen(view.closedAt)} — the customer left without repairing or upgrading.
-            {view.closedReason ? <> Reason given: &ldquo;{view.closedReason}&rdquo;</> : null}
+            Closed {fmtWhen(view.closedAt)} — walked away{view.closedReason ? <>: &ldquo;{view.closedReason}&rdquo;</> : "."}
           </Banner>
         </div>
       ) : null}
       {!isCounter && AT_COUNTER.includes(view.status) ? (
-        <div className="mb-5">
-          <Banner>This case is still at the counter. You are seeing it read-only.</Banner>
+        <div className="mb-4">
+          <Banner>At the counter — read-only.</Banner>
         </div>
       ) : null}
 
-      {answerFirstMode ? (
-        <div className="mb-5">
-          <AnswerCard ops={ops} isManager={isManager} onStep={openStep} onSwap={swapUp} onWhy={() => openStep("why-answer")} />
-        </div>
-      ) : null}
-
-      <div className={`grid gap-5 items-start ${role === "partner" ? "max-w-[880px]" : "lg:grid-cols-[minmax(0,1fr)_400px]"}`}>
-        {/* Steps (or, once traded in, the summary) */}
-        <div className="space-y-5 min-w-0 lg:col-start-1 lg:row-start-1">
-          {lockedOrLater ? (
-            <LockedSummary ops={ops} isManager={isManager} isCounter={isCounter} showCustomer={showCustomer} pickup={pickup} />
-          ) : answerFirstMode ? (
-            // suppressHydrationWarning: a #step-… link makes the browser open <details> itself before React hydrates.
-            <details id="case-details" ref={details} onToggle={(e) => setDetailsOpen(e.currentTarget.open)} suppressHydrationWarning>
-              <summary className="card list-none [&::-webkit-details-marker]:hidden cursor-pointer flex items-center gap-3 px-5 py-3.5 no-print">
-                <span className="min-w-0 flex-1">
-                  <span className="section-title block">Case details</span>
-                  <span className="block text-[15px] font-semibold leading-snug mt-0.5">{foldedSummary(view)}</span>
-                </span>
-                <span className="btn btn-sm shrink-0" aria-hidden>
-                  {detailsOpen ? "Close" : "Edit"}
-                </span>
-              </summary>
-              <div className="space-y-5 mt-5">
-                {steps()}
-                {/* Below lg the comparison panel lives here; on a wide screen it stays beside the answer. */}
-                <div id="why-answer" className="lg:hidden scroll-mt-28">
-                  <div className="section-title mb-2 px-1">Why this answer</div>
-                  <DecisionPanel ops={ops} onUpgrade={swapUp} isCounter={false} />
-                </div>
-              </div>
-            </details>
-          ) : (
-            steps()
-          )}
-        </div>
-
-        {/* Decision — sticky beside the steps on a wide screen, after them on a phone.
-            The buyback partner sees the phone, the declared condition and its verdict — not the customer's comparison.
-            Answer-first: the answer card carries the buttons, so the panel is only the why (isCounter={false} hides its own). */}
-        {role === "partner" ? null : (
-        <aside
-          className={`min-w-0 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-[100px] lg:max-h-[calc(100vh-116px)] lg:overflow-y-auto rounded-[14px] ${answerFirstMode ? "hidden lg:block" : ""}`}
-        >
-          {lockedOrLater ? <div className="section-title mb-2 px-1">What the customer was shown</div> : null}
-          {answerFirstMode ? <div className="section-title mb-2 px-1">Why this answer</div> : null}
-          <DecisionPanel ops={ops} onUpgrade={answerFirstMode ? swapUp : goToLock} isCounter={isCounter && !answerFirstMode} />
-        </aside>
-        )}
-
-        {editable && (!answerFirstMode || showLock) ? (
-          <div className="min-w-0 lg:col-start-1 lg:row-start-2">
-            <LockForm ops={ops} ref={lockName} />
+      {lockedOrLater ? (
+        <LockedSummary ops={ops} isManager={isManager} isCounter={isCounter} showCustomer={showCustomer} pickup={pickup} />
+      ) : (
+        <>
+          <StepHeader steps={steps} current={current} done={done} busy={ops.busy} onGo={goTo} />
+          {/* Every step stays mounted (a half-typed field survives Back and Next); only the current one shows. */}
+          <div hidden={current !== "phone"} data-step="phone">
+            <StepPhone ops={ops} brands={brands} initialModel={initialModel} />
           </div>
-        ) : null}
-      </div>
+          <div hidden={current !== "faults"} data-step="faults">
+            {/* Phonecheck changes the faults, so it sits in this step's details (store staff, at the counter only). */}
+            <StepFaults ops={ops} phonecheck={<PhonecheckPanel ops={ops} role={role} run={run} />} />
+          </div>
+          <div hidden={current !== "repair"} data-step="repair">
+            <StepRepair ops={ops} />
+          </div>
+          <div hidden={current !== "tradein"} data-step="tradein">
+            <StepTradeIn ops={ops} isPartner={isPartner} isManager={isManager} bands={bands} />
+          </div>
+          {hasAnswer ? (
+            <div hidden={current !== "answer"} data-step="answer" className="space-y-5">
+              <AnswerCard ops={ops} isManager={isManager} onStep={onStep} onSwap={swapUp} />
+              {margin}
+            </div>
+          ) : null}
+          {canLock && lockOpen ? (
+            <div hidden={current !== "lock"} data-step="lock">
+              <LockForm ops={ops} ref={lockName} />
+            </div>
+          ) : null}
+          <StepDock steps={steps} current={current} onGo={goTo} />
+        </>
+      )}
     </div>
   );
-}
-
-/** "Galaxy S23 Ultra · storage ? · 1 fault · cover none" — what the folded steps hold. */
-function foldedSummary(v: CaseView): string {
-  const n = v.faults.length;
-  return [v.device ? v.device.model : "No phone yet", v.device?.variant ?? "storage ?", `${n} ${n === 1 ? "fault" : "faults"}`, `cover ${COVER_WORD[v.coverage]}`].join(" · ");
 }

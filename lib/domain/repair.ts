@@ -27,7 +27,7 @@ import { type FaultId, type PartId, FAULT_BY_ID, PART_LABEL } from "./condition.
 import { RuleError } from "./errors.ts";
 
 export type SourceRef = {
-  kind: "oem_public" | "client" | "sample" | "manual";
+  kind: "oem_public" | "client" | "approximate" | "manual";
   label: string;
   url?: string;
   observedAt?: string;
@@ -88,7 +88,7 @@ export function estimateRepair(input: {
 
   if (manual) {
     if (!Number.isInteger(manual.amount) || manual.amount < 0) throw new RuleError("Manual repair quote must be a whole, non-negative rupee amount.", 400);
-    if ((manual.reason || "").trim().length < 8) throw new RuleError("A manual repair quote needs a reason (at least a few words).", 400);
+    if ((manual.reason || "").trim().length < 8) throw new RuleError("Say where the repair quote comes from.", 400);
     return {
       status: "quoted",
       basis: "manual",
@@ -101,7 +101,7 @@ export function estimateRepair(input: {
       coverage,
       inspectionFaults: [],
       missingParts: [],
-      notes: [`Service centre quote entered by ${manual.by}: ${manual.reason.trim()}`],
+      notes: [`Service centre quote, by ${manual.by}: ${manual.reason.trim()}`],
     };
   }
 
@@ -145,14 +145,14 @@ export function estimateRepair(input: {
   const base = { lines, coverage, inspectionFaults, missingParts, notes };
   if (inspectionFaults.length) {
     notes.push(
-      `${inspectionFaults.map((f) => FAULT_BY_ID[f].label).join(", ")} can only be priced after a bench diagnosis — enter the service centre's quote.`
+      `Bench check needed (${inspectionFaults.map((f) => FAULT_BY_ID[f].label).join(", ")}) — enter the service centre's quote.`
     );
     return { ...base, status: "needs_inspection", basis: null, labour: 0, gst: 0, carePlusFee: 0, customerPays: null, listTotal: null };
   }
   // A covered part needs no price to be free; a CHARGED part does.
   const blocking = lines.filter((l) => l.listPrice === null && !l.covered);
   if (blocking.length) {
-    notes.push(`No price in the book for ${blocking.map((l) => l.label).join(", ")} on this model — enter the service centre's quote.`);
+    notes.push(`No book price for ${blocking.map((l) => l.label).join(", ")} — enter the service centre's quote.`);
     return { ...base, status: "unpriced", basis: null, labour: 0, gst: 0, carePlusFee: 0, customerPays: null, listTotal: null };
   }
 
@@ -167,11 +167,11 @@ export function estimateRepair(input: {
   const listParts = lines.reduce((s, l) => s + (l.listPrice ?? 0), 0);
   const listTotal = listKnown ? listParts + policy.labour + Math.round(((listParts + policy.labour) * policy.gstBp) / 10_000) : null;
 
-  if (coverage === "warranty" && lines.some((l) => l.covered)) notes.push("Non-physical faults are covered by the manufacturer warranty.");
-  if (coverage === "warranty" && lines.some((l) => !l.covered)) notes.push("Physical damage is not covered by warranty and is charged.");
-  if (fee) notes.push("Accidental damage is covered by the plan for its per-claim fee.");
+  if (coverage === "warranty" && lines.some((l) => l.covered)) notes.push("Warranty covers the non-physical faults.");
+  if (coverage === "warranty" && lines.some((l) => !l.covered)) notes.push("Physical damage isn't under warranty — charged.");
+  if (fee) notes.push("The plan covers accidental damage for its claim fee.");
 
-  if (gst) notes.push(`Includes GST at ${policy.gstBp / 100}% on parts and labour.`);
+  if (gst) notes.push(`Includes ${policy.gstBp / 100}% GST.`);
 
   return { ...base, status: "quoted", basis: "book", labour, gst, carePlusFee: fee, customerPays, listTotal };
 }

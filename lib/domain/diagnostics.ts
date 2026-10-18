@@ -92,9 +92,18 @@ export type DiagnosticSummary = {
   /** sources: where the fault came from — the phone's own test, or the customer's answer (both possible). */
   faults: { id: FaultId; because: string; sources: ("tested" | "declared" | "camera_ai")[] }[];
   untested: { id: string; name: string; critical: boolean }[];
+  /**
+   * The trade-in condition's issues a failed test proves (NOTE_ONLY: Wi-Fi / Bluetooth, fingerprint,
+   * vibration): not SwapUp faults, but priced — Apply puts them on the condition (withIssues), so the
+   * reduced flow, which never asks the advisor to tick them, still deducts them.
+   */
+  issues: IssueId[];
   notes: string[];
   verdict: "all_passed" | "faults_found" | "incomplete";
 };
+
+/** The one note about condition a phone can't test on itself: the advisor certifies it (lib/domain/certify.ts). */
+export const CERTIFY_NOTE = "Certify screen, body and liquid on Check the phone.";
 
 /* ─────────────────────────── the plan ─────────────────────────── */
 
@@ -131,7 +140,7 @@ export const DEFAULT_PLAN: readonly PlanItem[] = [
 /* ─────────────────────────── test → fault mapping ─────────────────────────── */
 
 /** A failed test that IS a SwapUp fault (camera is handled by side, below). */
-const FAIL_FAULT: Record<string, FaultId> = {
+export const FAIL_FAULT: Readonly<Record<string, FaultId>> = {
   touch: "touch_issue",
   multitouch: "touch_issue",
   display: "display_lines",
@@ -155,11 +164,15 @@ export const BATTERY_HEALTH_METHOD = "battery screenshot read by GradeIQ";
  * GradeIQ's reading of a battery-health screenshot → the battery_health result.
  * Nothing legible (null, 0, out of range) is a SKIP — untested, never a pass:
  * a blurry screenshot must not read as a healthy battery.
+ *
+ * `method` names where the % came from when it is not a screenshot — a
+ * Phonecheck station's BatteryHealthPercentage (lib/domain/phonecheck.ts). The
+ * same 80 % line applies whoever read it.
  */
-export function batteryHealthResult(pct: number | null | undefined, at: string): TestResult {
+export function batteryHealthResult(pct: number | null | undefined, at: string, method: string = BATTERY_HEALTH_METHOD): TestResult {
   const p = typeof pct === "number" && Number.isFinite(pct) && pct > 0 && pct <= 100 ? Math.round(pct) : null;
-  if (p === null) return { outcome: "skip", detail: { healthPct: null, method: BATTERY_HEALTH_METHOD, reason: "the screenshot could not be read" }, at };
-  return { outcome: p >= BATTERY_HEALTH_PASS_PCT ? "pass" : "fail", detail: { healthPct: p, method: BATTERY_HEALTH_METHOD }, at };
+  if (p === null) return { outcome: "skip", detail: { healthPct: null, method, reason: method === BATTERY_HEALTH_METHOD ? "the screenshot could not be read" : "no battery health reading" }, at };
+  return { outcome: p >= BATTERY_HEALTH_PASS_PCT ? "pass" : "fail", detail: { healthPct: p, method }, at };
 }
 
 /**
@@ -167,7 +180,7 @@ export function batteryHealthResult(pct: number | null | undefined, at: string):
  * condition has a matching issue, the note says which box to tick, because the
  * buyback partner does price it.
  */
-const NOTE_ONLY: Record<string, IssueId | null> = {
+export const NOTE_ONLY: Readonly<Record<string, IssueId | null>> = {
   flash: null,
   faceid: "fingerprint",
   vibration: "vibration",
@@ -239,8 +252,8 @@ export function matchModel(device: DeviceReport | null, tradeModels: TradeModelR
   if (!codes.length) {
     return none(
       reported
-        ? `The phone reports "${reported}", which is not a Samsung model code. SwapUp matches phones by model code only — choose the model by hand.`
-        : "The phone did not report its model. Choose the model by hand."
+        ? `"${reported}" isn't a Samsung model code — choose the model by hand.`
+        : "No model reported — choose it by hand."
     );
   }
 
@@ -251,7 +264,7 @@ export function matchModel(device: DeviceReport | null, tradeModels: TradeModelR
       const hits = known.filter((k) => (level === "exact" ? k.codes.includes(code) : k.codes.some((c) => codeFamily(c) === codeFamily(code))));
       const ids = [...new Set(hits.map((h) => h.m.id))];
       if (ids.length > 1) {
-        return none(`Model code ${code} matches more than one model on file (${hits.map((h) => h.m.model).join(", ")}). Choose the model by hand.`);
+        return none(`Model code ${code} matches ${hits.map((h) => h.m.model).join(", ")} — choose by hand.`);
       }
       if (ids.length === 1) {
         const via = level === "exact" ? code : hits[0].codes.find((c) => codeFamily(c) === codeFamily(code))!;
@@ -261,25 +274,25 @@ export function matchModel(device: DeviceReport | null, tradeModels: TradeModelR
     }
     if (found) break;
   }
-  if (!found) return none(`Model code ${codes[0]} is not in SwapUp's model list. Choose the model by hand.`);
+  if (!found) return none(`Model code ${codes[0]} isn't on file — choose by hand.`);
 
   const { m } = found;
   const label = `${m.brand} ${m.model}`;
   const modelWhy =
     found.match === "exact"
       ? `Model code ${found.code} is the ${m.model}.`
-      : `Model code ${found.code} is the same model family as ${found.via} (${m.model}) — a regional version of it.`;
+      : `Model code ${found.code}: a regional ${m.model} (${found.via}).`;
 
   const size = storageVariant(device.totalDiskBytes);
   let variant: string | null = null;
   let storageWhy: string;
   if (size === null) {
-    storageWhy = "The phone did not report its storage — choose the storage by hand.";
+    storageWhy = "No storage reported — choose it by hand.";
   } else if ((m.variants || []).includes(size)) {
     variant = size;
     storageWhy = `Storage reads ${gb(device.totalDiskBytes!)}, so ${size}.`;
   } else {
-    storageWhy = `Storage reads ${gb(device.totalDiskBytes!)} (${size}), which is not a storage option on file for the ${m.model} — choose the storage by hand.`;
+    storageWhy = `Storage reads ${gb(device.totalDiskBytes!)} (${size}), not on file for the ${m.model} — choose by hand.`;
   }
   return { modelId: m.id, label, variant, match: found.match, why: `${modelWhy} ${storageWhy}` };
 }
@@ -294,7 +307,7 @@ export function matchModel(device: DeviceReport | null, tradeModels: TradeModelR
  * "unsupported" and stay UNTESTED like any other gap — this note only tells the
  * advisor why there are more of them.
  */
-export const BROWSER_NOTE = "Tested in a web browser — some tests can't run in a browser; the SwapUp Check app covers more.";
+export const BROWSER_NOTE = "Tested in a browser — the SwapUp Check app covers more.";
 
 /** The results came from the browser build of SwapUp Check (appVersion "web-…"), not the installed app. */
 export function isBrowserReport(device: Pick<DeviceReport, "appVersion"> | null | undefined): boolean {
@@ -316,9 +329,7 @@ export function summarise(
   results: TestResults,
   declared: Declared | null,
   device: DeviceReport | null,
-  tradeModels: TradeModelRef[],
-  /** false for the native automatic app, which never asks the damage questions (the store camera covers cracks). */
-  opts: { declaredExpected?: boolean } = {}
+  tradeModels: TradeModelRef[]
 ): DiagnosticSummary {
   const nameOf = new Map(plan.map((p) => [p.id, p.name]));
   const name = (id: string) => nameOf.get(id) ?? id;
@@ -331,6 +342,7 @@ export function summarise(
     sources.set(f, (sources.get(f) ?? new Set()).add(source));
   };
   const notes: string[] = [];
+  const issues = new Set<IssueId>();
   let anyFailed = false;
 
   // Plan order first, then anything extra the phone sent, so the output is stable.
@@ -356,40 +368,36 @@ export function summarise(
       const side = cameraSide(r.detail);
       if (side === "rear" || side === "both") add("rear_camera", `${what} (rear camera)`);
       if (side === "front" || side === "both") add("front_camera", `${what} (front camera)`);
-      if (!side) notes.push("The camera test failed but the app did not say which camera. Check both cameras and add the fault by hand.");
+      if (!side) notes.push("Camera test failed, side unknown — check both cameras.");
     } else if (FAIL_FAULT[id]) {
       add(FAIL_FAULT[id], what);
     } else if (id in NOTE_ONLY) {
       const issue = NOTE_ONLY[id];
+      if (issue) issues.add(issue);
       notes.push(
         issue
-          ? `${name(id)} test failed. It is not a repair fault, but tick "${ISSUE_LABEL[issue]}" in the condition if it is faulty — the buyback partner prices it.`
-          : `${name(id)} test failed. It does not change the repair quote or the trade-in price; tell the customer.`
+          ? `${name(id)} failed — "${ISSUE_LABEL[issue]}" is on the condition.`
+          : `${name(id)} failed — no price change; tell the customer.`
       );
     } else {
-      notes.push(`${name(id)} test failed. SwapUp has no fault for it — check it by hand.`);
+      notes.push(`${name(id)} failed — no SwapUp fault; check by hand.`);
     }
   }
 
-  // What the customer says about damage a phone cannot see on itself. SwapUp
-  // Check ≥ 0.6.0 declares its IMEI and identity answers with the damage answers
-  // left empty — that is "not asked", not three unanswered questions.
-  const damageSaid = !!declared && [declared.screenCracked, declared.backCracked, declared.liquid].some((v) => v === true || v === false);
-  if (!damageSaid && opts.declaredExpected === false) {
-    notes.push("The app doesn't ask the customer about damage: cracks and scratches come from the store camera check. Liquid damage can't be tested — check the liquid indicators by eye.");
-  } else if (!declared) {
-    notes.push("The customer has not answered the damage questions (cracked screen, cracked back, liquid). Check the phone by eye.");
-  } else {
-    const ask: [keyof Declared, FaultId, string, string][] = [
-      ["screenCracked", "screen_cracked", "The customer says the screen is cracked", "whether the screen is cracked"],
-      ["backCracked", "back_cracked", "The customer says the back glass is cracked", "whether the back glass is cracked"],
-      ["liquid", "water_damage", "The customer says the phone has had liquid damage", "whether the phone has had liquid damage"],
+  // The customer is never asked about condition (owner, 2026-10-17): the store
+  // camera checks the glass and the screen, and where it can't, the advisor
+  // certifies the screen, body and liquid indicator by eye in SwapUp Store. An
+  // older browser check still sends its three damage answers: a "yes" counts (it
+  // can only make the phone worse); a "no" or no answer is never a pass.
+  if (declared) {
+    const said: [keyof Declared, FaultId, string][] = [
+      ["screenCracked", "screen_cracked", "The customer says the screen is cracked"],
+      ["backCracked", "back_cracked", "The customer says the back glass is cracked"],
+      ["liquid", "water_damage", "The customer says the phone has had liquid damage"],
     ];
-    for (const [key, fault, yes, what] of ask) {
-      if (declared[key] === true) add(fault, yes, "declared");
-      else if (declared[key] === null || declared[key] === undefined) notes.push(`The customer did not say ${what} — check it by eye.`);
-    }
+    for (const [key, fault, yes] of said) if (declared[key] === true) add(fault, yes, "declared");
   }
+  notes.push(CERTIFY_NOTE);
 
   // Untested: in the plan, but no pass/fail.
   const untested = plan
@@ -400,7 +408,7 @@ export function summarise(
     .map((p) => ({ id: p.id, name: p.name, critical: p.critical }));
 
   if (isBrowserReport(device)) notes.push(BROWSER_NOTE);
-  if (device && device.isPhysicalDevice === false) notes.push("These tests ran on an emulator, not a real phone. Do not use them for a trade-in.");
+  if (device && device.isPhysicalDevice === false) notes.push("Emulator, not a real phone — don't use for a trade-in.");
 
   const faults = [...reasons.entries()]
     .sort((a, b) => FAULT_ORDER.indexOf(a[0]) - FAULT_ORDER.indexOf(b[0]))
@@ -412,7 +420,7 @@ export function summarise(
       ? "faults_found"
       : "all_passed";
 
-  return { model: matchModel(device, tradeModels), faults, untested, notes, verdict };
+  return { model: matchModel(device, tradeModels), faults, untested, issues: [...issues].sort(), notes, verdict };
 }
 
 /** Plan tests with any result in (a skip counts — the app moved past it). */
@@ -442,6 +450,12 @@ export function mergeCondition(prev: ConditionAnswers | null, faults: FaultId[])
     accessories: { ...prev.accessories },
     age: prev.age,
   };
+}
+
+/** The condition with the issues a failed test proved added (DiagnosticSummary.issues) — never removed. */
+export function withIssues(c: ConditionAnswers, issues: readonly IssueId[]): ConditionAnswers {
+  if (!issues.length || issues.every((i) => c.issues.includes(i))) return c;
+  return { ...c, issues: [...new Set([...c.issues, ...issues])].sort() as IssueId[] };
 }
 
 /** Existing case faults plus the tested ones, de-duplicated, existing first. */
@@ -549,7 +563,7 @@ export function readDeclared(raw: unknown): { ok: true; declared: Declared } | {
   let imei: string | null = null;
   if (!blank(o.imei)) {
     const r = readImei(String(o.imei));
-    if (!r.ok) return { ok: false, reason: "That IMEI does not look right. Dial *#06# and type the 15 digits shown under IMEI." };
+    if (!r.ok) return { ok: false, reason: "IMEI looks wrong — dial *#06# and type its 15 digits." };
     imei = r.imei;
   }
   const declared: Declared = { screenCracked, backCracked, liquid, imei };
@@ -558,8 +572,8 @@ export function readDeclared(raw: unknown): { ok: true; declared: Declared } | {
     declared.imei2 = null;
     if (!blank(o.imei2)) {
       const r = readImei(String(o.imei2));
-      if (!r.ok) return { ok: false, reason: "That second IMEI does not look right. Dial *#06# and type the 15 digits shown under IMEI 2." };
-      if (r.imei === imei) return { ok: false, reason: "The second IMEI is the same as the first — a two-SIM phone shows two different numbers." };
+      if (!r.ok) return { ok: false, reason: "IMEI 2 looks wrong — dial *#06# and type its 15 digits." };
+      if (r.imei === imei) return { ok: false, reason: "IMEI 2 can't be the same as IMEI 1." };
       declared.imei2 = r.imei;
     }
   }
@@ -622,7 +636,7 @@ export function readWifi(raw: unknown): { ok: true; wifi: StoreWifi | null } | {
   if (!["WPA", "WEP", "nopass"].includes(security)) return { ok: false, reason: "Choose the Wi-Fi security: WPA/WPA2/WPA3, WEP or none." };
   const password = security === "nopass" ? "" : typeof o.password === "string" ? o.password : "";
   if (security === "WPA" && !(password.length >= 8 && password.length <= 63) && !/^[0-9a-fA-F]{64}$/.test(password))
-    return { ok: false, reason: "A WPA Wi-Fi password is 8 to 63 characters. Type it exactly as the router shows it." };
+    return { ok: false, reason: "A WPA password is 8 to 63 characters." };
   if (security === "WEP" && ![5, 13].includes(password.length) && !/^([0-9a-fA-F]{10}|[0-9a-fA-F]{26})$/.test(password))
     return { ok: false, reason: "A WEP key is 5 or 13 characters (or 10 or 26 hex digits)." };
   return { ok: true, wifi: { ssid, password, security, hidden: o.hidden === true } };

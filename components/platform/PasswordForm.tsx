@@ -48,7 +48,7 @@ export function PasswordForm() {
       </Field>
       <Field
         label="New password"
-        hint={`At least ${MIN} characters. A short sentence is easier to remember than symbols.`}
+        hint={`At least ${MIN} characters.`}
         error={tooShort ? `${MIN - next.length} more character${MIN - next.length === 1 ? "" : "s"} needed.` : sameAsOld ? "That is your current password." : null}
       >
         <input className="input" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} required minLength={MIN} />
@@ -62,7 +62,7 @@ export function PasswordForm() {
       {done ? (
         <div className="banner banner-up" role="status">
           <span aria-hidden>✓</span>
-          <div>Password changed. Use the new one next time you sign in — you stay signed in on this device.</div>
+          <div>Password changed.</div>
         </div>
       ) : null}
       <ErrorText error={error} />

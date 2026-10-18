@@ -25,6 +25,9 @@ import { type Rupees } from "./money.ts";
 import type { PriceSourceKind } from "./ratecard.ts";
 
 /** Bumped whenever a rule or default changes; stored with every decision for audit. */
+
+/** The one caveat that is never behind a toggle: the answer shows it under its headline (Offer.safety). */
+export const SWOLLEN_BATTERY_CAVEAT = "Swollen battery is a safety risk — stop using and charging it.";
 export const RULESET_VERSION = "2026-10-15.2";
 
 export type Thresholds = {
@@ -126,11 +129,8 @@ export function decide(input: DecisionInput): Decision {
   const yearsLeftOld = input.old.supportEndYear !== null ? input.old.supportEndYear - input.thisYear : null;
   const yearsLeftNew = input.upgrade?.supportEndYear != null ? input.upgrade.supportEndYear - input.thisYear : null;
 
-  if (input.valueSource === "sample") {
-    caveats.push("Trade-in values here come from a SAMPLE rate card, not the buyback partner. Do not quote them to a customer.");
-  }
   if (input.upgrade && input.upgrade.bonus > 0) {
-    caveats.push("The upgrade bonus is a promotion. It is shown, but it is never counted as a reason to upgrade.");
+    caveats.push("The bonus is a promotion, never a reason to upgrade.");
   }
 
   const upgradeBlock = (repairPays: Rupees | null): Decision["upgrade"] => {
@@ -149,7 +149,7 @@ export function decide(input: DecisionInput): Decision {
   // 1. Free repair: always the answer. Nothing else needs to be known.
   if (input.repairPays === 0 && input.repairCovered) {
     const up = upgradeBlock(0);
-    signals.push({ code: "covered", points: "repair", strength: "strong", text: "The repair is covered — it costs the customer nothing." });
+    signals.push({ code: "covered", points: "repair", strength: "strong", text: "Covered — the customer pays nothing." });
     return {
       version: RULESET_VERSION,
       recommendation: "repair",
@@ -182,16 +182,16 @@ export function decide(input: DecisionInput): Decision {
       upgrade: upgradeBlock(null),
       metrics: { repairRatio: null, repairVsNewRatio: null, valueAddedByRepair: null, yearsLeftOld, yearsLeftNew, costPerYearRepair: null, costPerYearUpgrade: upgradeBlock(null) && yearsLeftNew && yearsLeftNew > 0 ? Math.round(upgradeBlock(null)!.pays / yearsLeftNew) : null },
       signals: yearsLeftOld !== null && yearsLeftOld < 0 && input.old.supportEndYear !== null
-        ? [{ code: "support_ended", points: "upgrade", strength: "soft", text: `Security updates for this model ended in ${input.old.supportEndYear}.` }]
+        ? [{ code: "support_ended", points: "upgrade", strength: "soft", text: `Security updates ended in ${input.old.supportEndYear}.` }]
         : [],
-      missing: input.asIsValue === null ? ["No trade-in value for this phone as it is."] : [],
+      missing: input.asIsValue === null ? ["No trade-in price yet."] : [],
       caveats,
     };
   }
 
-  if (input.repairPays === null) missing.push("No repair quote yet — price the repair (or enter the service centre's quote) before comparing.");
-  if (input.repairedValue === null) missing.push("No buyback value for this phone once repaired.");
-  if (input.asIsValue === null) missing.push("No trade-in value for this phone as it is.");
+  if (input.repairPays === null) missing.push("No repair quote yet.");
+  if (input.repairedValue === null) missing.push("No repaired value yet.");
+  if (input.asIsValue === null) missing.push("No trade-in price yet.");
 
   if (missing.length || input.repairPays === null || input.repairedValue === null || input.asIsValue === null) {
     return {
@@ -229,11 +229,11 @@ export function decide(input: DecisionInput): Decision {
   const vsNew = N && N > 0 ? R / N : null;
   if (vsNew !== null) {
     if (vsNew >= t.upgradeRatio) {
-      signals.push({ code: "repair_vs_new_high", points: "upgrade", strength: "strong", text: `The repair is ${pct(vsNew)} of the price of a new ${input.upgrade!.label} — the common "50% rule" says a replacement is worth considering.` });
+      signals.push({ code: "repair_vs_new_high", points: "upgrade", strength: "strong", text: `Repair is ${pct(vsNew)} of a new ${input.upgrade!.label} — consider replacing.` });
     } else if (vsNew <= t.repairRatio) {
-      signals.push({ code: "repair_vs_new_low", points: "repair", strength: "strong", text: `The repair is only ${pct(vsNew)} of the price of a new phone — repair is normally the better value.` });
+      signals.push({ code: "repair_vs_new_low", points: "repair", strength: "strong", text: `Repair is only ${pct(vsNew)} of a new phone's price.` });
     } else {
-      signals.push({ code: "repair_vs_new_mid", points: "repair", strength: "soft", text: `The repair is ${pct(vsNew)} of the price of a new phone — repair is normally worth it.` });
+      signals.push({ code: "repair_vs_new_mid", points: "repair", strength: "soft", text: `Repair is ${pct(vsNew)} of a new phone's price.` });
     }
   }
   if (R >= V) {
@@ -241,48 +241,48 @@ export function decide(input: DecisionInput): Decision {
       code: "repair_exceeds_value",
       points: "upgrade",
       strength: "strong",
-      text: V > 0 ? `The repair (${r(R)}) costs more than the phone will be worth repaired (${r(V)}).` : "The phone has no resale value even once repaired.",
+      text: V > 0 ? `Repair costs more than the phone is worth repaired (${r(V)}).` : "No resale value, even repaired.",
     });
   } else if (ratio >= t.upgradeRatio) {
-    signals.push({ code: "repair_ratio_high", points: "upgrade", strength: "soft", text: `The repair is ${pct(ratio)} of what the phone will be worth repaired.` });
+    signals.push({ code: "repair_ratio_high", points: "upgrade", strength: "soft", text: `Repair is ${pct(ratio)} of the repaired phone's value.` });
   }
   if (added >= R + t.materialGap) {
     signals.push({
       code: "repair_adds_value",
       points: "repair",
       strength: "strong",
-      text: `The repair costs ${r(R)} and adds ${r(added)} to what the phone is worth — it pays for itself even at resale.`,
+      text: `Repair adds ${r(added)} to its value — it pays for itself.`,
     });
   } else if (added < R - t.materialGap) {
     signals.push({
       code: "repair_destroys_value",
       points: "upgrade",
       strength: "soft",
-      text: `If the customer plans to sell soon: the repair costs ${r(R)} but adds only ${r(Math.max(0, added))} to resale value.`,
+      text: `If selling soon, repair adds only ${r(Math.max(0, added))} to resale value.`,
     });
   }
   if ((input.faultCount ?? 0) >= 3) {
-    signals.push({ code: "many_faults", points: "upgrade", strength: "soft", text: `${input.faultCount} separate faults at once.` });
+    signals.push({ code: "many_faults", points: "upgrade", strength: "soft", text: `${input.faultCount} faults at once.` });
   }
   if (input.systemicFault) {
-    caveats.push("Liquid, board, network or no-power faults can come back after a repair — the bench diagnosis decides, and the customer should hear that risk.");
+    caveats.push("Liquid, board, network or power faults can return after repair.");
   }
 
   // 3. Life left in the phone. Context, never decisive on its own: a phone past
   //    its updates is not unusable, and the customer can choose to keep it.
   if (yearsLeftOld !== null && input.old.supportEndYear !== null) {
     if (yearsLeftOld < 0) {
-      signals.push({ code: "support_ended", points: "upgrade", strength: "soft", text: `Security updates for this model ended in ${input.old.supportEndYear}.` });
-      caveats.push("A phone without security updates still works — avoid banking on it, keep apps updated and do not sideload. That is the customer's call.");
+      signals.push({ code: "support_ended", points: "upgrade", strength: "soft", text: `Security updates ended in ${input.old.supportEndYear}.` });
+      caveats.push("It still works without updates — avoid banking on it.");
     } else if (yearsLeftOld <= t.supportSoonYears) {
-      signals.push({ code: "support_ending", points: "upgrade", strength: "soft", text: `Security updates for this model end in ${input.old.supportEndYear}.` });
+      signals.push({ code: "support_ending", points: "upgrade", strength: "soft", text: `Security updates end in ${input.old.supportEndYear}.` });
     }
   }
   if (input.old.ageYears !== null && input.old.ageYears >= t.oldAgeYears) {
     signals.push({ code: "old_device", points: "upgrade", strength: "soft", text: `The phone is ${input.old.ageYears} years old.` });
   }
   if (input.swollenBattery) {
-    caveats.unshift("A swollen battery is a safety issue: stop using and charging the phone until the battery is replaced — whichever option the customer chooses.");
+    caveats.unshift(SWOLLEN_BATTERY_CAVEAT);
   }
 
   const strongUp = signals.some((s) => s.points === "upgrade" && s.strength === "strong");
@@ -305,13 +305,13 @@ export function decide(input: DecisionInput): Decision {
       ? "Repair recommended"
       : recommendation === "upgrade"
         ? "An upgrade is worth considering"
-        : "Either is reasonable — it's the customer's choice";
+        : "Either works — customer's choice";
 
-  if (favoursCustomer === "level") caveats.push("Kept or let go, the phone is worth about the same to the customer — this is their call, not ours.");
+  if (favoursCustomer === "level") caveats.push("Kept or traded, it's worth about the same — customer's call.");
   if (yearsLeftOld !== null || yearsLeftNew !== null) {
-    caveats.push("Cost per year assumes the phone is kept until its security updates end.");
+    caveats.push("Cost per year assumes use until updates end.");
   }
-  caveats.push("This recommendation does not depend on what the store earns — the thresholds are the programme's published rules.");
+  caveats.push("This answer doesn't depend on what the store earns.");
 
   return {
     version: RULESET_VERSION,

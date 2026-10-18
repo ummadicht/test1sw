@@ -75,7 +75,7 @@ export function AdminFrame({
 function ChooseClient({ ctx, section, keep }: { ctx: AdminCtx; section: string; keep?: Record<string, string | undefined> }) {
   return (
     <div className="space-y-4">
-      {ctx.badOrg ? <Banner tone="warn">That client could not be found. Choose one below.</Banner> : null}
+      {ctx.badOrg ? <Banner tone="warn">Client not found — choose one.</Banner> : null}
       <Card title="Choose a client programme">
         {ctx.clients.length ? (
           <ul className="grid sm:grid-cols-2 gap-3">
@@ -86,13 +86,13 @@ function ChooseClient({ ctx, section, keep }: { ctx: AdminCtx; section: string; 
                   className="block rounded-[12px] border border-line px-4 py-3.5 no-underline hover:bg-[color:var(--surface-2)]"
                 >
                   <div className="font-semibold">{c.name}</div>
-                  <div className="hint">{c.demo ? "Demo programme · sample prices" : "Live programme"}</div>
+                  <div className="hint">{c.demo ? "Test programme — no real money" : "Live programme"}</div>
                 </Link>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="text-ink-2">No client programmes yet. Onboard one from Clients &amp; partners.</p>
+          <p className="text-ink-2">No client programmes yet.</p>
         )}
       </Card>
     </div>

@@ -12,7 +12,7 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
   const u = await requirePage(["org_admin", "platform"], "/admin/settings");
   const sp = await searchParams;
   const ctx = adminContext(u, sp.orgId);
-  const intro = "How credit lines release, when stores are told to book a pickup, how repairs are priced and how the recommendation weighs the money.";
+  const intro = "Credit, pickups, repair pricing and the recommendation.";
   return (
     <AppShell user={u} wide>
       <AdminFrame ctx={ctx} section="/admin/settings" title="Programme settings" intro={intro}>

@@ -4,32 +4,74 @@
 experience centres — that puts the repair quote and the trade-in value side by side, gives
 an honest recommendation, and turns the upgrade into a new Samsung with a 2–5% bonus. Every
 store's trade-in exposure is kept inside a credit limit until the buyback partner
-(Cashify) collects or clears the phones.
+collects or clears the phones.
 
 ## The flow
 
-1. **Counter** (`/desk`, `/cases/:id`) — the advisor records the phone (model, storage,
-   IMEI, warranty / Care+ cover) and what is wrong with it. The faults drive both the
-   repair quote and the trade-in condition, so the two can never disagree.
-2. **Repair quote** — Samsung India's published spare-part price for the part that fixes
-   the fault, plus the published labour charge for the model's tier, plus GST. Faults with
-   no published price (liquid, no power, charging port on most models) need the centre's own
-   bench quote — the app never guesses one.
-3. **Trade-in value** — from the buyback partner: its live API when connected, otherwise
-   the amount and reference code read off the partner's own app, otherwise its uploaded
-   rate card. A built-in **sample** card exists only for demos and is labelled everywhere.
-4. **Decision** — repair vs upgrade, with the rules that fired (the 50% rule against the
-   new phone's price, repair vs resale value, update support, age). The upgrade bonus is
-   shown but never counted as a reason; a covered repair is always "repair".
-5. **Upgrade** — the customer picks a new Samsung; the bonus campaign (2–5% of the new
-   price, clamped, optionally capped) is applied; the trade-in is **locked**: value held on
-   the store's credit line, receipt and device tag printed.
-6. **Pickup** (`/store`, `/pickups/:id`, `/partner`) — the store books a pickup, the
-   partner schedules and collects (handover named on both sides), inspects each phone
-   (cleared / regraded / rejected / not received) and settles. The credit line frees up at
-   collection or clearance (per client), and any shortfall comes back as a chargeback.
-7. **Programme** (`/admin`) — stores and credit limits, bonus campaigns, catalogue and
-   repair price book, programme settings, bonus-claim export for the brand.
+One flow, the same on the store tablet (SwapUp Store), the customer's phone (SwapUp Check)
+and the desk (`/desk`, `/cases/:id`) — the fewest steps that keep the law, the money and safety
+(owner, 2026-10-17: "Reduce the flow"):
+
+1. **New trade-in** — the advisor types the customer's mobile (a returning customer's name fills
+   in), or the customer scans the store's counter QR alone.
+2. **The customer's phone connects** — it scans the test code. Its own steps are **Scan → Test →
+   Done**: nobody asks about condition. "Is this your phone?" only when the model match isn't
+   exact, the storage only when the phone can't measure it, and the battery screenshot only when
+   no other battery reading exists (an attached Phonecheck report) — and it can be skipped.
+3. **One camera pass** — the store tablet scans the code on the customer's phone; GradeIQ's
+   camera page photographs it and sweeps its screen in one go. Where the camera can't decide,
+   "Check the phone" opens **inside that step**: the advisor taps the screen (while the phone
+   shows the test colours), body and liquid indicator, one tap each, by name. A desk-only case
+   records the phone by hand instead: model, storage, IMEI, cover, and what is wrong with it.
+4. **The answer, by itself** — when the phone's tests and the camera grade are in (and the
+   advisor's taps, where the camera couldn't decide), the server puts the results on the case
+   with no "Apply to case" tap (`lib/domain/autoApply.ts`; Apply's own gates still decide, and a
+   refusal shows its one-line reason and a Retry). One screen: the **refurb quote** (what
+   repairing costs the customer) next to the **trade-in + bonus** toward a new Samsung, the
+   phone's **SwapUp grade**, and the one thing still missing, if anything. Each number is shown once.
+   - Refurb quote: Samsung India's published spare-part price for the part that fixes the
+     fault, plus the published labour charge for the model's tier, plus GST. Faults with no
+     published price (liquid, no power, charging port on most models) need the centre's own
+     bench quote — the app never guesses one.
+   - Trade-in, in this order: the amount and reference code read off the partner's own app;
+     otherwise **PriceIQ, live** — the lowest refurbished-market listing at the phone's grade
+     (the next lower grade, named, if none), less the **markdown** (5% up to ₹15,000, 4% to
+     ₹30,000, 3% to ₹50,000, 2% above — the same margin as the sell price, and GradeIQ's), less
+     **SwapUp's % for each defect** (e.g. "Refurbished market price ₹51,399 (Good) − 2% − 2
+     defects · PriceIQ 2026-W35"). Market data over 14 days old is shown with its age; over 90
+     days old is no price. Otherwise the partner's uploaded rate card; with none of them, "No
+     market price yet — enter a quote". Never a made-up price. Rules: `docs/GRADING.md` §6.
+   - The recommendation follows the rules that fired (the 50% rule against the new phone's
+     price, repair vs resale value, update support, age). The bonus (2–5% of the new price,
+     clamped, optionally capped) is shown but never counted as a reason; a covered repair is
+     always "repair".
+5. **Repair, Walked away or Swap up** — Repair and Walked away end the visit from the answer.
+   Swap up opens ONE "Take the trade-in" screen: the IMEI only if the case has none, the
+   customer's name and mobile prefilled, the ID type and last 4, the government IMEI check
+   (KYM), and ONE hand-over confirm — "Owner confirmed · SIM out · IMEI matches · no EMI/lock" —
+   that still sends the server all four flags. The trade-in is then **locked**: value held on the
+   store's credit line, receipt and device tag printed.
+
+Afterwards the **grade report** (`/r/<token>`) says what was tested and why the phone got its
+SwapUp grade, with no money in it: the customer opens it on their phone, the store shows it as a
+QR, and the partner sees the version frozen at hand-over.
+
+On the desk the case page takes the same order one step at a time — **Phone → What's wrong →
+The answer** (Swap up then opens **Take the trade-in**) — with "Step 2 of 3" on top and Back /
+Next at the bottom. The answer's asks and "Change" links open the **Repair quote** and the
+**Trade-in** as pages of their own ("The answer › Repair quote", Back to the answer). Each step
+asks one question and shows one figure; the rest is behind its "Show details". A tested case
+(SwapUp Check or Phonecheck), and the store app's hand-off, open on the answer; `#step-repair`
+and the like open that page.
+
+After the counter:
+
+- **Pickup** (`/store`, `/pickups/:id`, `/partner`) — the store books a pickup, the partner
+  schedules and collects (handover named on both sides), inspects each phone (cleared /
+  regraded / rejected / not received) and settles. The credit line frees up at collection
+  or clearance (per client), and any shortfall comes back as a chargeback.
+- **Programme** (`/admin`) — stores and credit limits, bonus campaigns, catalogue and repair
+  price book, programme settings, bonus-claim export for the brand.
 
 ## Where the numbers come from
 
@@ -39,36 +81,54 @@ store's trade-in exposure is kept inside a credit limit until the buyback partne
 | Labour per job | Samsung India out-of-warranty repair charges: Galaxy Z ₹525, S ₹425, others ₹350 (L2, taxes extra) |
 | Care+ plan fee | Samsung Care+ smartphone terms (ADLD processing fee per repair, tax incl.) where published per model; otherwise the programme default |
 | New phone prices | samsung.com/in selling prices, read 2026-10-15 — `scripts/research-samsung-lineup-2026-10-15.csv` |
-| Trade-in values | the partner (live API / app reading / rate card). The demo **sample** card is illustrative only |
+| Trade-in values | a quote staff read off the partner's app, else PriceIQ's lowest refurbished-market listing at the grade (live, `GET /api/market-grades`) less the 5%→2% markdown and SwapUp's % per defect, else the partner's uploaded rate card, else no price ("No market price yet — enter a quote") |
 | Update support | release year + Samsung's update policy per series (approximate; check Samsung's security-update page) |
 
 Regenerate the seed after refreshing the snapshots: `python3 scripts/build-seed-data.py`.
 
-## Connecting Cashify
+## PriceIQ (the refurbished market price)
 
-Cashify publishes no partner API. Until a contract exists, stores use one of:
+`lib/server/priceiq.ts` asks PriceIQ, server to server on the VM:
+`GET {PRICEIQ_BASE_URL}/api/market-grades?brand=&model=&storageGb=&market=IN` with
+`Authorization: Bearer {PRICEIQ_API_KEY}` and a 6-second timeout. Both go in `/etc/swapup.env`
+(`PRICEIQ_BASE_URL=http://127.0.0.1:4301/apps/priceiq`, a read-only key); never `NEXT_PUBLIC_`,
+never logged (at most its last 4 characters), sent only to 127.0.0.1 or over https. No key → no
+price, never a guess.
 
-- **Read the quote off the Cashify app** — on the case, "Enter the quote from the Cashify
-  app": amount + reference code (+ optional repaired-condition value). Expires after the
+Each answer (one row per grade: its lowest listing) is kept in `market_listings` with
+`fetched_at`, fresh for an hour. A quote waits for the refresh (6 s at most); a page view reads
+what is kept and refreshes it in the background. A 404 is kept for an hour too. PriceIQ down or
+slow → the last good answer, labelled "PriceIQ unreachable, last answer …". There is no bundled
+price file: `deploy/deploy.sh` checks PriceIQ answers 200 for a known phone before it ships.
+
+## Connecting the buyback partner
+
+The buyback partner publishes no partner API. Besides PriceIQ, stores use:
+
+- **Read the quote off the partner's app** — on the case, "Enter the partner's quote":
+  amount + reference code (+ optional repaired-condition value). Expires after the
   stated days; any change to the device description clears it.
 - **Rate card** — the partner's operations team uploads its sheet (`model_id,variant,max_price`)
-  on `/partner/rate-cards`; SwapUp applies the card's condition deductions.
-- **Live API** — `lib/server/buyback.ts` `liveQuote()` is the only place SwapUp talks to the
-  partner. Set `CASHIFY_API_BASE`, `CASHIFY_PARTNER_ID`, `CASHIFY_API_KEY`, and — only after
-  the request/response mapping has been checked against Cashify's document —
-  `CASHIFY_CONTRACT_CONFIRMED=1`.
+  on `/partner/rate-cards`; SwapUp applies the card's condition deductions. It prices what
+  PriceIQ can't.
+
+Screens never name the partner company: they say "the partner" or the partner org's own
+name. The test programmes' partner is **Buyback Partner (demo)** (login `partner`); a
+database seeded under the partner's former name is renamed once on start (`renameDemoPartner`,
+`lib/server/seed.ts`), and its seeded example cases are removed once (`removeExampleCases`).
+Test programmes carry the banner "Test programme — no real money".
 
 ## Run
 
 ```bash
 npm install
-npm run dev        # http://localhost:4500 — seeds a demo programme on first request
-npm test           # domain tests (node type-stripping, no build)
+npm run dev        # http://localhost:4500 — seeds the test programmes on first request (no cases, no prices)
+npm test           # domain, desk and server tests (node type-stripping, no build)
 npx tsc --noEmit
 ```
 
 Demo accounts (password `swapup2026`, override with `SWAPUP_DEMO_PASSWORD` before first
-boot): `advisor`, `manager`, `samsung` (programme admin), `cashify` (partner), `platform`;
+boot): `advisor`, `manager`, `samsung` (programme admin), `partner` (buyback partner), `platform`;
 `advisor.kor` / `manager.kor`; `xc.admin` / `xc.manager` / `xc.advisor`.
 
 ## Deploy
@@ -76,4 +136,7 @@ boot): `advisor`, `manager`, `samsung` (programme admin), `cashify` (partner), `
 `bash deploy/deploy.sh` — builds locally in a clean copy (webpack), ships to the
 denovo-erp VM, installs production dependencies there, runs pm2 `swapup` on :4500 and
 adds the Caddy site `swapup.104-197-168-25.sslip.io`. The session secret lives in
-`/etc/swapup.env` on the VM, minted once and reused.
+`/etc/swapup.env` on the VM, minted once and reused. Before shipping it checks, from the VM,
+that PriceIQ answers 200 for a known phone (Galaxy S23 Ultra 256GB) with the key in
+`/etc/swapup.env` — skipped, with a message, while that key is missing — and it never ships a
+`.csv` (there is no bundled price file).

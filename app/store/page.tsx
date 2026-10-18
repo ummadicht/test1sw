@@ -2,12 +2,14 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { Banner, Card, Empty, Meter, Money, Pct, SourceBadge, Stat, StatusPill } from "@/components/ui";
+import { Banner, Card, Empty, Meter, Money, Pct, Stat, StatusPill } from "@/components/ui";
 import { PickupTable } from "@/components/pickups/PickupTable";
 import { CloseShortfall } from "@/components/pickups/CloseShortfall";
 import { ageLabel, fmtWhen, istMonthStart, wholeDays } from "@/components/pickups/format";
 import { BookPickup, type BookableDevice } from "./BookPickup";
 import { StoreTablets, type TabletRow } from "./StoreTablets";
+import { StorePhonecheck } from "./StorePhonecheck";
+import { getStorePhonecheck } from "@/lib/server/phonecheck";
 import { listStoreDevices } from "@/lib/server/storeTablet";
 import { requirePage } from "@/lib/server/page";
 import { HttpError, type SessionUser } from "@/lib/server/auth";
@@ -15,7 +17,6 @@ import { creditSummary, type CreditSummary } from "@/lib/server/credit";
 import { listPickups, openChargebacks } from "@/lib/server/pickups";
 import { programmeReport } from "@/lib/server/reports";
 import { getOrg, getStore, storesForUser } from "@/lib/server/scope";
-import { tradeSources } from "@/lib/server/pickups-extra";
 import { dataClearDueIds } from "@/lib/server/cases";
 import { nowIso } from "@/lib/server/db";
 import { SIGN, type CreditEventKind } from "@/lib/domain/credit";
@@ -29,8 +30,8 @@ const one = (v: string | string[] | undefined): string | null => (Array.isArray(
 
 const STATE: Record<CreditSummary["position"]["state"], { label: string; pill: string; text: string }> = {
   ok: { label: "Healthy", pill: "pill-up", text: "text-up" },
-  warn: { label: "Getting full — book a pickup", pill: "pill-warn", text: "text-warn" },
-  full: { label: "Full — no new trade-ins", pill: "pill-bad", text: "text-bad" },
+  warn: { label: "Nearly full", pill: "pill-warn", text: "text-warn" },
+  full: { label: "Full", pill: "pill-bad", text: "text-bad" },
   over: { label: "Over the limit", pill: "pill-bad", text: "text-bad" },
 };
 
@@ -87,15 +88,10 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
   // Newest first by when it happened (demo data back-dates some holds, so posting order alone reads oddly).
   const ledger = [...(cs.ledger ?? [])].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : b.id - a.id));
 
-  const sources = tradeSources([...cs.held.map((h) => h.caseId), ...ledger.map((l) => l.case_id), ...chargebacks.map((c) => c.caseId), ...pickups.flatMap((p) => p.items.map((i) => i.id))]);
-  const isSample = (id: string) => sources[id]?.kind === "sample";
-  const anySample = Object.values(sources).some((s) => s.kind === "sample");
-  const samplePickups = pickups.filter((p) => p.items.some((i) => isSample(i.id))).map((p) => p.id);
-
   const dataDue = dataClearDueIds(cs.store.id);
   const bookable: BookableDevice[] = cs.held
     .filter((h) => h.status === "locked")
-    .map((h) => ({ caseId: h.caseId, ref: h.ref, label: h.label, value: h.value, days: wholeDays(h.heldSince, now), sample: isSample(h.caseId), dataDue: dataDue.has(h.caseId) }));
+    .map((h) => ({ caseId: h.caseId, ref: h.ref, label: h.label, value: h.value, days: wholeDays(h.heldSince, now), dataDue: dataDue.has(h.caseId) }));
   const onPickup = cs.held.length - bookable.length;
 
   const month = istMonthStart(now);
@@ -116,8 +112,8 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
 
   const releaseRule =
     policy.releaseOn === "collected"
-      ? `Credit frees up when ${partner} collects the phones.`
-      : `Credit frees up when ${partner} clears them after inspection.`;
+      ? "Credit frees up on collection."
+      : "Credit frees up once the partner clears them.";
   const usedPct = Number.isFinite(pos.utilisation) ? Math.round(pos.utilisation * 100) : 100;
 
   return (
@@ -139,13 +135,6 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
           </div>
         </div>
 
-        {anySample ? (
-          <Banner tone="sample">
-            Trade-in values marked <strong>◆ SAMPLE</strong>{" "}come from an illustrative rate card, not {partner} prices. The credit-line arithmetic is real;
-            the amounts are not partner prices.
-          </Banner>
-        ) : null}
-
         {/* ── the credit line ─────────────────────────────── */}
         <Card>
           <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_1fr] gap-6 lg:gap-10">
@@ -155,7 +144,7 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
                 <Money value={pos.available} />
               </div>
               <div className="mt-2 text-[15px] text-ink-2">
-                of a <Money value={pos.limit} className="font-semibold" /> credit limit · <span className="num font-semibold">{usedPct}%</span> used
+                <span className="num font-semibold">{usedPct}%</span> of the credit limit used
               </div>
               <div className="mt-4">
                 <Meter value={Number.isFinite(pos.utilisation) ? pos.utilisation : 1} state={pos.state} />
@@ -164,10 +153,7 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
                 <span className={`pill ${st.pill}`}>{st.label}</span>
                 <span className="text-[12.5px] text-muted">Pickup advised at {Math.round(policy.warnAt * 100)}% used</span>
               </div>
-              <p className="mt-4 text-[15px]">
-                <strong>{releaseRule}</strong>{" "}
-                <span className="text-ink-2">At the limit the counter cannot take another trade-in until a pickup frees the line.</span>
-              </p>
+              <p className="mt-4 text-[15px] font-semibold">{releaseRule}</p>
             </div>
             <div className="grid grid-cols-2 gap-x-6 gap-y-5 content-start lg:border-l lg:border-line lg:pl-10">
               <Stat
@@ -175,18 +161,18 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
                 value={<Money value={pos.held} />}
                 sub={
                   policy.releaseOn === "collected"
-                    ? `${cs.held.length} ${cs.held.length === 1 ? "phone" : "phones"} not yet collected`
-                    : `${cs.held.length} at the store, ${cs.inTransit.count} with ${partner}`
+                    ? `${cs.held.length} ${cs.held.length === 1 ? "phone" : "phones"}`
+                    : `${cs.held.length} here, ${cs.inTransit.count} with the partner`
                 }
               />
               <Stat
                 label="Chargebacks open"
                 value={<Money value={pos.chargebacksOpen} />}
                 tone={pos.chargebacksOpen > 0 ? "bad" : undefined}
-                sub={chargebacks.length ? `${chargebacks.length} ${chargebacks.length === 1 ? "shortfall" : "shortfalls"} not yet made good` : "Nothing owed"}
+                sub={chargebacks.length ? `${chargebacks.length} ${chargebacks.length === 1 ? "shortfall" : "shortfalls"}` : "Nothing owed"}
               />
               <Stat label="Using the line" value={<Money value={pos.exposure} />} sub="Held + chargebacks open" />
-              <Stat label="Credit limit" value={<Money value={pos.limit} />} sub="Set by the programme admin" />
+              <Stat label="Credit limit" value={<Money value={pos.limit} />} sub="Set by admin" />
             </div>
           </div>
         </Card>
@@ -195,7 +181,7 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
         <section className="space-y-3" aria-label="Pickup advice">
           {pos.state === "full" || pos.state === "over" ? (
             <Banner tone="bad">
-              <strong>The counter cannot take trade-ins right now</strong> — the line is {pos.state === "over" ? "over its limit" : "full"}. {releaseRule}
+              <strong>No trade-ins now</strong> — the line is {pos.state === "over" ? "over its limit" : "full"}.
             </Banner>
           ) : null}
           {advice.due ? (
@@ -207,31 +193,25 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
                 ))}
               </ul>
               {onPickup > 0 ? (
-                <div className="mt-1">
-                  {onPickup} of the waiting phones {onPickup === 1 ? "is" : "are"} already on a pickup.
-                </div>
+                <div className="mt-1">{onPickup} already on a pickup.</div>
               ) : null}
             </Banner>
           ) : cs.held.length ? (
-            <Banner>
-              No pickup is due yet. {cs.held.length} {cs.held.length === 1 ? "phone is" : "phones are"} waiting;{" "}
-              {!advice.oldestDays ? "the oldest came in today" : `the oldest has been here ${advice.oldestDays} ${advice.oldestDays === 1 ? "day" : "days"}`}. A pickup is due at {Math.round(policy.warnAt * 100)}% of the line, after {policy.maxAgeDays} days, or at{" "}
-              {policy.pickupAtCount} phones.
-            </Banner>
+            <Banner>No pickup due yet.</Banner>
           ) : (
-            <Banner>No traded-in phones are waiting at the store.</Banner>
+            <Banner>No phones waiting.</Banner>
           )}
           {isManager && bookable.length ? (
             <BookPickup devices={bookable} maxAgeDays={policy.maxAgeDays} partnerName={partner} primary={advice.due || pos.state !== "ok"} />
           ) : isManager && onPickup > 0 ? (
-            <p className="hint">Every waiting phone is already on a pickup — {partner} has been asked to collect.</p>
+            <p className="hint">All waiting phones are on a pickup.</p>
           ) : null}
         </section>
 
         {/* ── waiting at the store ────────────────────────── */}
         <Card title={`Waiting at the store (${cs.held.length})`} pad={false}>
           {cs.held.length === 0 ? (
-            <Empty title="Nothing waiting">Traded-in phones appear here from the moment the counter takes them until {partner} collects them.</Empty>
+            <Empty title="Nothing waiting">Traded-in phones show here.</Empty>
           ) : (
             <div className="overflow-x-auto px-5 pb-3">
               <table className="table min-w-[680px]">
@@ -260,14 +240,13 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
                           {h.label}
                           {dataDue.has(h.caseId) ? (
                             <Link href={`/cases/${h.caseId}#data-clear`} className="block text-[12.5px] text-warn font-semibold hover:underline">
-                              Customer&apos;s data not cleared
+                              Data not cleared
                             </Link>
                           ) : null}
                         </td>
                         <td className="text-right">
                           <div className="flex flex-col items-end gap-1">
                             <Money value={h.value} className="font-semibold" />
-                            {isSample(h.caseId) ? <SourceBadge kind="sample" /> : null}
                           </div>
                         </td>
                         <td>
@@ -306,17 +285,14 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
               <Money value={cs.inTransit.value} className="text-[18px] font-semibold" />
             </div>
             <p className="hint mt-2!">
-              Collected by {partner} and awaiting inspection.{" "}
-              {policy.releaseOn === "collected"
-                ? "They stopped counting against the line when they were collected."
-                : `They still count against the line until ${partner} clears them.`}
+              {policy.releaseOn === "collected" ? "Awaiting inspection — off the line." : "Awaiting inspection — on the line until cleared."}
             </p>
           </Card>
 
           {/* ── open chargebacks ──────────────────────────── */}
           <Card title={`Open chargebacks (${chargebacks.length})`} className="lg:col-span-2" pad={false}>
             {chargebacks.length === 0 ? (
-              <Empty title="No open chargebacks">When {partner} pays less than the trade-in value and the store carries the difference, it shows here until it is made good.</Empty>
+              <Empty title="No open chargebacks">Partner shortfalls show here.</Empty>
             ) : (
               <div className="overflow-x-auto px-5 pb-3">
                 <table className="table min-w-[560px]">
@@ -363,7 +339,7 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
                     })}
                   </tbody>
                 </table>
-                {isManager ? <p className="hint pb-2">Your programme admin closes a chargeback once the shortfall is made good.</p> : null}
+                {isManager ? <p className="hint pb-2">Your admin closes these.</p> : null}
               </div>
             )}
           </Card>
@@ -374,7 +350,7 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
           {pickups.length === 0 ? (
             <Empty title="No pickups yet">{isManager ? "Book one above when phones are waiting." : "The store manager books pickups."}</Empty>
           ) : (
-            <PickupTable pickups={pickups} cols={["status", "devices", "quoted", "accepted", "requested", "settlement"]} now={now} sample={samplePickups} />
+            <PickupTable pickups={pickups} cols={["status", "devices", "quoted", "accepted", "requested", "settlement"]} now={now} />
           )}
         </Card>
 
@@ -394,10 +370,12 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
                 <Stat label="Bonus given" value={<Money value={monthRow.bonusTotal} />} />
                 <Stat label="Average bonus" value={<Pct bp={monthRow.avgBonusBp} />} />
               </div>
-              <p className="hint mt-4!">
-                Counted by the day each case was opened, from 1 {month.label.split(" ")[0]}. Upgrade rate = upgrades ÷ (repairs + upgrades + walk-aways); cancelled
-                trade-ins are left out.
-              </p>
+              <details className="hint mt-4!">
+                <summary className="cursor-pointer font-semibold">How it&apos;s counted</summary>
+                <p className="mt-1">
+                  By day opened, from 1 {month.label.split(" ")[0]}. Rate = upgrades ÷ (repairs + upgrades + walk-aways).
+                </p>
+              </details>
             </>
           ) : (
             <Empty title="No figures for this store" />
@@ -406,6 +384,9 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
 
         {/* ── store tablets ───────────────────────────────── */}
         <StoreTablets tablets={tablets} canRemove={isManager} />
+
+        {/* ── Phonecheck station (docs/GRADING.md) ─────────── */}
+        <StorePhonecheck storeId={cs.store.id} initial={getStorePhonecheck(u, cs.store.id)} canEdit />
 
         {/* ── credit ledger ───────────────────────────────── */}
         <Card
@@ -418,7 +399,7 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
           pad={false}
         >
           {ledger.length === 0 ? (
-            <Empty title="No credit movements yet">Every trade-in, collection, chargeback and recovery is recorded here.</Empty>
+            <Empty title="No credit movements yet" />
           ) : (
             <div className="overflow-x-auto px-5 pb-3">
               <table className="table min-w-[640px]">
@@ -478,11 +459,11 @@ function StorePicker({ u }: { u: SessionUser }) {
     <div className="space-y-5">
       <div>
         <h1 className="text-[26px] sm:text-[30px] font-[750] tracking-tight">Store credit & pickups</h1>
-        <p className="text-[15px] text-ink-2">Choose a store to see its credit line, the phones it is holding and its pickups.</p>
+        <p className="text-[15px] text-ink-2">Choose a store.</p>
       </div>
       <Card pad={false}>
         {report.stores.length === 0 ? (
-          <Empty title="No stores yet">Stores appear here once they are added to the programme.</Empty>
+          <Empty title="No stores yet" />
         ) : (
           <div className="overflow-x-auto px-5 pb-3 pt-2">
             <table className="table min-w-[680px]">

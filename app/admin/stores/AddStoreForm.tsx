@@ -76,7 +76,7 @@ export function AddStoreForm({ orgId, isPlatform, usersHref }: { orgId: string; 
             required
           />
         </Field>
-        <Field label="Trade-in credit limit (₹)" hint="The most trade-in value this store may hold before the partner collects." error={f.limit && !limitOk ? "Whole rupees only." : null}>
+        <Field label="Trade-in credit limit (₹)" hint="Max trade-in value held before pickup." error={f.limit && !limitOk ? "Whole rupees only." : null}>
           <input className="input num" inputMode="numeric" value={f.limit} onChange={set("limit")} placeholder="e.g. 200000" required />
         </Field>
       </div>

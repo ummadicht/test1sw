@@ -13,6 +13,7 @@ import {
   imeiAgreement,
   scanFirstMessage,
   scanFirstLock,
+  coloursApp,
   phoneMayPost,
   nextBatteryHealth,
   type ScanFirstState,
@@ -23,6 +24,7 @@ import {
   BATTERY_HEALTH_METHOD,
   batteryHealthResult,
   summarise,
+  CERTIFY_NOTE,
   matchModel,
   readDeclared,
   type DeviceReport,
@@ -97,6 +99,14 @@ test("plan: battery_health only for the apps that have the step", () => {
   assert.deepEqual(planForApp([{ id: "touch", name: "Touchscreen", critical: true }], true).map((p) => p.id), ["touch", BATTERY_HEALTH_ID], "no battery test → at the end");
 });
 
+test("plan: no battery screenshot when the case already has a battery-health % from elsewhere", () => {
+  const known = planForApp(DEFAULT_PLAN, true, true);
+  assert.ok(!known.some((p) => p.id === BATTERY_HEALTH_ID), "an attached Phonecheck report read it: the customer isn't asked");
+  assert.equal(known.length, DEFAULT_PLAN.length - 1, "nothing else changes");
+  assert.deepEqual(planForApp(DEFAULT_PLAN, true, false), [...DEFAULT_PLAN], "no other source: the step stays (and stays skippable on the phone)");
+  assert.deepEqual(planForApp(planForApp(DEFAULT_PLAN, false), true, true), planForApp(DEFAULT_PLAN, false), "never put back when it is known");
+});
+
 /* ─────────────────────────── identity ─────────────────────────── */
 
 test("identity at join: the model match in the phone's terms, never a price", () => {
@@ -149,7 +159,7 @@ test("storage at Apply: the phone's measurement always wins — a different clai
   assert.deepEqual(r, {
     variant: "128GB",
     source: "measured",
-    flag: "Storage: the customer said 256GB, the phone measures 128GB. The measurement is used.",
+    flag: "Storage: customer said 256GB, phone measures 128GB — measurement used.",
   });
   assert.equal(storageFromTest({ match: { ...S22, variant: "128GB" }, picked: { modelId: "galaxy-s22", variant: "128GB" }, variants: SIZES, caseModelId: null, caseVariant: null }).flag, null, "the same size: nothing to flag");
   assert.equal(storageFromTest({ match: { ...S22, variant: "128GB" }, picked: { modelId: "galaxy-a54", variant: "256GB" }, variants: SIZES, caseModelId: null, caseVariant: null }).flag, null, "another model's size is the identity flag's business");
@@ -167,7 +177,7 @@ test("storage at Apply: a model sold in one size needs no question", () => {
 });
 
 test("storage at Apply: the customer's pick of the same model fills it — as a claim, with its flag", () => {
-  const flag = "Storage: the customer said 256GB — the phone couldn't measure it. Check Settings › About phone before the trade-in.";
+  const flag = "Storage: customer said 256GB, not measured — check Settings › About phone.";
   assert.deepEqual(storageFromTest({ match: S22, picked: { modelId: "galaxy-s22", variant: "256GB" }, variants: SIZES, caseModelId: null, caseVariant: null }), { variant: "256GB", source: "customer", flag });
   // No model code matched: the pick names the model too, when the case has none or the same one.
   const unmatched = { modelId: null, variant: null };
@@ -193,14 +203,14 @@ test("storage at Apply: nothing measured, nothing picked → nothing (the answer
 });
 
 test("storage at Apply: a measured size that isn't on file is never replaced by a pick, a single size or a guess", () => {
-  const flag = "Storage: the phone measures 1TB, which isn't a size on file. Check Settings › About phone, and enter the Cashify quote on the full case if it's really 1TB.";
+  const flag = "Storage: phone measures 1TB, not on file — check Settings, then enter the partner's quote.";
   // The matcher dropped the size (variant null); the reading still travels with the phone.
   assert.deepEqual(storageFromTest({ match: S22, picked: null, variants: SIZES, caseModelId: null, caseVariant: null, measured: "1TB" }), { variant: null, source: null, flag });
   // The customer tapped 256GB on the confirm card (an older app still asks): not used — the phone measured otherwise.
   assert.deepEqual(storageFromTest({ match: S22, picked: { modelId: "galaxy-s22", variant: "256GB" }, variants: SIZES, caseModelId: null, caseVariant: null, measured: "1TB" }), {
     variant: null,
     source: null,
-    flag: "Storage: the phone measures 1TB, which isn't a size on file (the customer said 256GB — not used). Check Settings › About phone, and enter the Cashify quote on the full case if it's really 1TB.",
+    flag: "Storage: phone measures 1TB, not on file (customer said 256GB — not used) — check Settings, then enter the partner's quote.",
   });
   // A model sold in one size, but the phone measured another: the catalogue's size is not this phone's.
   assert.deepEqual(storageFromTest({ match: S22, picked: null, variants: ["128GB"], caseModelId: null, caseVariant: null, measured: "256GB" }).variant, null);
@@ -215,7 +225,7 @@ test("storage at Apply, re-test: a reading takes a size the customer TYPED off t
   const typed = storageFromTest({ match: S22, picked: null, variants: SIZES, caseModelId: "galaxy-s22", caseVariant: "256GB", measured: "1TB", caseSource: "customer" });
   assert.equal(typed.variant, null);
   assert.equal(typed.clear, true, "the claim comes off — it must not be priced as if true");
-  assert.match(typed.flag ?? "", /the customer said 256GB earlier — removed/);
+  assert.match(typed.flag ?? "", /customer's earlier 256GB removed/);
   // The same reading against a size STAFF saved: kept, flagged, never cleared.
   const staff = storageFromTest({ match: S22, picked: null, variants: SIZES, caseModelId: "galaxy-s22", caseVariant: "256GB", measured: "1TB", caseSource: "advisor" });
   assert.equal(staff.clear, undefined);
@@ -225,7 +235,7 @@ test("storage at Apply, re-test: a reading takes a size the customer TYPED off t
   const again = storageFromTest({ match: S22, picked: { modelId: "galaxy-s22", variant: "128GB" }, variants: SIZES, caseModelId: "galaxy-s22", caseVariant: null, measured: "1TB", caseSource: null });
   assert.equal(again.variant, null);
   assert.equal(again.source, null);
-  assert.match(again.flag ?? "", /the customer said 128GB — not used/);
+  assert.match(again.flag ?? "", /customer said 128GB — not used/);
 });
 
 test("storage at Apply: the disk reading counts however the model was named — a pick never beats it", () => {
@@ -240,7 +250,7 @@ test("storage at Apply: the disk reading counts however the model was named — 
   assert.deepEqual(storageFromTest({ match: unmatched, picked: { modelId: "galaxy-s22", variant: "128GB" }, variants: SIZES, caseModelId: null, caseVariant: null, measured: "256GB" }), {
     variant: "256GB",
     source: "measured",
-    flag: "Storage: the customer said 128GB, the phone measures 256GB. The measurement is used.",
+    flag: "Storage: customer said 128GB, phone measures 256GB — measurement used.",
   });
   // The reading given explicitly agrees with the match's own: one answer.
   assert.equal(storageFromTest({ match: { ...S22, variant: "128GB" }, picked: null, variants: SIZES, caseModelId: null, caseVariant: null, measured: "128GB" }).source, "measured");
@@ -318,7 +328,7 @@ test("declare: the Identify step — second IMEI, the answer, a pick, a counter 
 
 test("declare: what it refuses, in words the customer can act on", () => {
   const same = readDeclared({ imei: IMEI_A, imei2: IMEI_A });
-  assert.ok(!same.ok && /two different numbers/.test(same.reason));
+  assert.ok(!same.ok && /can't be the same/.test(same.reason));
   const bad2 = readDeclared({ imei2: "123" });
   assert.ok(!bad2.ok && /IMEI 2/.test(bad2.reason));
   const yes = readDeclared({ identityConfirmed: "yes" });
@@ -333,15 +343,14 @@ test("declare: what it refuses, in words the customer can act on", () => {
   assert.ok(!name.ok);
 });
 
-test("summary: a 0.6.0 app's IMEI-only declaration is 'not asked', not three unanswered questions", () => {
+test("summary: the customer is never asked about damage — one note says the advisor certifies it, native or browser", () => {
   const d = readDeclared({ imei: IMEI_A, imei2: null, identityConfirmed: true });
   assert.ok(d.ok);
-  const native = summarise(DEFAULT_PLAN, allPass(), d.declared, NATIVE_060, MODELS, { declaredExpected: false });
-  assert.equal(native.notes.filter((n) => /did not say/.test(n)).length, 0);
-  assert.ok(native.notes.some((n) => /doesn't ask the customer about damage/.test(n)));
-  // The browser build still asks: an unanswered question is still said so.
-  const web = summarise(DEFAULT_PLAN, allPass(), d.declared, { ...NATIVE_060, appVersion: "web-0.6.0" }, MODELS, { declaredExpected: true });
-  assert.equal(web.notes.filter((n) => /did not say/.test(n)).length, 3);
+  for (const device of [NATIVE_060, { ...NATIVE_060, appVersion: "web-0.6.0" }]) {
+    const s = summarise(DEFAULT_PLAN, allPass(), d.declared, device, MODELS);
+    assert.equal(s.notes.filter((n) => /did not say|damage questions/.test(n)).length, 0);
+    assert.equal(s.notes.filter((n) => n === CERTIFY_NOTE).length, 1);
+  }
 });
 
 /* ─────────────────────────── battery health ─────────────────────────── */
@@ -360,14 +369,14 @@ test("battery health: 80 % and up passes, below fails, unreadable is untested", 
 });
 
 test("battery health: below 80 % is the battery_drain fault, said in the customer's numbers", () => {
-  const s = summarise(DEFAULT_PLAN, allPass({ battery_health: batteryHealthResult(72, AT) }), null, NATIVE_060, MODELS, { declaredExpected: false });
+  const s = summarise(DEFAULT_PLAN, allPass({ battery_health: batteryHealthResult(72, AT) }), null, NATIVE_060, MODELS);
   const f = s.faults.find((x) => x.id === "battery_drain");
   assert.ok(f, "battery_drain added");
   assert.equal(f!.because, "Battery health 72 % (screenshot)");
   assert.deepEqual(f!.sources, ["tested"]);
   assert.equal(s.verdict, "faults_found");
   // Unreadable: untested, never a pass — and not critical, so the verdict stands.
-  const u = summarise(DEFAULT_PLAN, allPass({ battery_health: batteryHealthResult(null, AT) }), null, NATIVE_060, MODELS, { declaredExpected: false });
+  const u = summarise(DEFAULT_PLAN, allPass({ battery_health: batteryHealthResult(null, AT) }), null, NATIVE_060, MODELS);
   assert.ok(u.untested.some((x) => x.id === BATTERY_HEALTH_ID && !x.critical));
   assert.equal(u.verdict, "all_passed");
   assert.ok(!u.faults.some((x) => x.id === "battery_drain"));
@@ -390,11 +399,17 @@ test("battery health: an unreadable screenshot never wipes a reading; a new read
   assert.equal(nextBatteryHealth(first, batteryHealthResult(null, T2)), null, "keep the 72 %");
   const unread = batteryHealthResult(null, AT);
   assert.equal(nextBatteryHealth(unread, batteryHealthResult(null, T2))?.at, T2, "skip over skip is fine");
+  // A second, better screenshot never replaces the sub-80 % reading: the lower one stands.
   const second = nextBatteryHealth(first, batteryHealthResult(91, T2))!;
-  assert.equal(second.outcome, "pass");
-  assert.deepEqual(second.detail, { healthPct: 91, method: BATTERY_HEALTH_METHOD, earlier: [72] });
+  assert.equal(second.outcome, "fail");
+  assert.deepEqual(second.detail, { healthPct: 72, method: BATTERY_HEALTH_METHOD, earlier: [91] });
   const third = nextBatteryHealth(second, batteryHealthResult(85, T2))!;
-  assert.deepEqual(third.detail?.earlier, [72, 91]);
+  assert.equal(third.outcome, "fail");
+  assert.deepEqual(third.detail?.earlier, [91, 85]);
+  // A lower reading does replace a higher one.
+  const lower = nextBatteryHealth(batteryHealthResult(91, AT), batteryHealthResult(74, T2))!;
+  assert.equal(lower.outcome, "fail");
+  assert.deepEqual(lower.detail, { healthPct: 74, method: BATTERY_HEALTH_METHOD, earlier: [91] });
 });
 
 test("battery health: never forwarded to GradeIQ as a functional test (it holds the % itself)", () => {
@@ -417,31 +432,43 @@ const BASE: ScanFirstState = {
 };
 
 test("tablet line: follows the phone — identifying, showing its scan code, testing while the grade is worked out", () => {
-  assert.equal(scanFirstMessage(BASE), "The customer's phone is identifying itself. It shows its scan code next.");
+  assert.equal(scanFirstMessage(BASE), "Phone identifying itself — scan code next.");
   assert.equal(scanFirstMessage({ ...BASE, phase: null }), scanFirstMessage(BASE), "no phase yet = identifying");
   assert.equal(
     scanFirstMessage({ ...BASE, phase: "scan", unlocked: true }),
-    "The customer's phone is showing its scan code — scan it with your camera, or Take photos."
+    "Scan the phone's code, or Take photos."
   );
-  assert.match(scanFirstMessage({ ...BASE, phase: "scan", unlocked: true, cameraAtWork: true }), /store camera is photographing/);
+  assert.match(scanFirstMessage({ ...BASE, phase: "scan", unlocked: true, cameraAtWork: true }), /Camera at work/);
   assert.equal(scanFirstMessage({ ...BASE, phase: "scan", locked: "Can't confirm the customer's phone is ready (x)." }), "Can't confirm the customer's phone is ready (x).");
-  assert.match(scanFirstMessage({ ...BASE, phase: "scan", unlocked: true, photosDone: true }), /checks the screen next/);
+  assert.match(scanFirstMessage({ ...BASE, phase: "scan", unlocked: true, photosDone: true }), /screen check next/);
   assert.equal(
     scanFirstMessage({ ...BASE, phase: "test", unlocked: true, photosDone: true, screenDone: true, gradeLine: "Camera grade B is provisional.", gradeSettled: false }),
-    "The customer's phone is testing itself — the camera grade is being worked out."
+    "Phone testing — grade coming."
   );
   assert.equal(
     scanFirstMessage({ ...BASE, phase: "battery", photosDone: true, screenDone: true, gradeLine: "Camera grade B (final).", gradeSettled: true }),
-    "Camera grade B (final). The customer's phone is testing itself."
+    "Camera grade B (final). Phone testing."
   );
-  assert.equal(scanFirstMessage({ ...BASE, phase: "done", photosDone: true, screenDone: true, gradeLine: "Camera grade A (final).", gradeSettled: true }), "Camera grade A (final). The customer's phone has finished its tests.");
-  assert.match(scanFirstMessage({ ...BASE, phase: "test" }), /camera check didn't run, so check the screen and glass by eye/);
+  assert.equal(scanFirstMessage({ ...BASE, phase: "done", photosDone: true, screenDone: true, gradeLine: "Camera grade A (final).", gradeSettled: true }), "Camera grade A (final). Tests done.");
+  assert.match(scanFirstMessage({ ...BASE, phase: "test" }), /no camera check; certify it or Take photos/);
+  // The phone is showing the test colours for the advisor (≥ 0.8.0).
+  assert.match(scanFirstMessage({ ...BASE, phase: "colours" }), /showing test colours — tap what you see/);
+  assert.match(scanFirstMessage({ ...BASE, phase: "colours", photosDone: true, screenDone: true, gradeLine: "Camera grade A (final).", gradeSettled: true }), /showing test colours/);
+});
+
+test("colours: SwapUp Check 0.8.0 and later (native or browser) shows the test colours; older apps can't", () => {
+  assert.equal(readPhase("colours"), "colours");
+  assert.equal(coloursApp({ appVersion: "0.8.0" }), true);
+  assert.equal(coloursApp({ appVersion: "web-0.8.1" }), true);
+  assert.equal(coloursApp({ appVersion: "1.0.0" }), true);
+  for (const v of ["0.7.9", "web-0.7.0", "0.6.0", "", null, undefined]) assert.equal(coloursApp({ appVersion: v as string | null }), false, String(v));
+  assert.equal(coloursApp(null), false);
 });
 
 test("tablet lock: why the camera is still locked for a scan-first phone", () => {
-  assert.match(scanFirstLock(null, false, false), /once it has identified itself/);
-  assert.match(scanFirstLock("identify", false, false), /once it has identified itself/);
-  assert.match(scanFirstLock("scan", false, false), /Waiting for the customer's phone to show its scan code/);
+  assert.match(scanFirstLock(null, false, false), /when the phone shows its scan code/);
+  assert.match(scanFirstLock("identify", false, false), /when the phone shows its scan code/);
+  assert.match(scanFirstLock("scan", false, false), /Waiting for the phone's scan code/);
   for (const [phase, skipped, complete] of [["scan", true, false], ["test", false, false], ["identify", false, true]] as const)
-    assert.match(scanFirstLock(phase, skipped, complete), /override with your name and a reason/, `${phase} ${skipped} ${complete}`);
+    assert.match(scanFirstLock(phase, skipped, complete), /photos need an override/, `${phase} ${skipped} ${complete}`);
 });

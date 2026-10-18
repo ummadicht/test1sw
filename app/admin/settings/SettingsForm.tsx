@@ -49,7 +49,7 @@ export function SettingsForm({
           const r = await api<{ settings: OrgSettings }>("/api/admin/settings", { body: { orgId: isPlatform ? orgId : undefined, patch } });
           setSaved(r.settings);
           setF(toForm(r.settings));
-          setNotice("Settings saved. They apply to the next case, quote and credit check.");
+          setNotice("Saved — applies from the next case.");
           router.refresh();
         } catch (err) {
           setError((err as Error).message);
@@ -69,8 +69,7 @@ export function SettingsForm({
                 onChange={() => setF((p) => ({ ...p, releaseOn: "collected" }))}
                 title="When the partner collects it"
               >
-                The line frees up as soon as the courier takes the phones, so stores keep trading in. If the partner later pays less, the difference comes back
-                as a chargeback.
+                Frees up on pickup; any shortfall comes back as a chargeback.
               </Choice>
               <Choice
                 name="releaseOn"
@@ -78,14 +77,13 @@ export function SettingsForm({
                 onChange={() => setF((p) => ({ ...p, releaseOn: "cleared" }))}
                 title="When the partner clears it"
               >
-                The line frees up only after the partner has checked each phone and confirmed its value. Fewer surprises, but stores wait longer before they
-                can trade in again.
+                Frees up after inspection — fewer surprises, longer waits.
               </Choice>
             </div>
           </fieldset>
 
           <div>
-            <div className="label">Ask the store to book a pickup when any of these is reached</div>
+            <div className="label">Ask for a pickup at any of these</div>
             <div className="grid sm:grid-cols-3 gap-4">
               <Field label="Line used (%)" error={errors.warnAtPct} hint="e.g. 80 — the meter turns amber here.">
                 {input("warnAtPct", "decimal")}
@@ -140,8 +138,7 @@ export function SettingsForm({
               </Field>
             </div>
             <p className="hint">
-              The defaults ({inr(labourDefaults.Z ?? null)} / {inr(labourDefaults.S ?? null)} / {inr(labourDefaults.other ?? null)}) are Samsung India&apos;s published
-              L2 labour charges. Charged once per job, before GST.
+              Defaults: Samsung India L2 labour ({inr(labourDefaults.Z ?? null)} / {inr(labourDefaults.S ?? null)} / {inr(labourDefaults.other ?? null)}), once per job, before GST.
             </p>
           </div>
           <div className="grid sm:grid-cols-3 gap-4">
@@ -165,7 +162,7 @@ export function SettingsForm({
 
       <Card title="Repair-or-upgrade recommendation">
         <p className="hint !mt-0 mb-4">
-          Repair share = the repair cost ÷ what the phone is worth once repaired. These thresholds decide which way each money signal points.
+          Repair share = repair cost ÷ repaired value.
         </p>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <Field label="Point to upgrade at a repair share of (%)" error={errors.upgradeRatioPct} hint="At or above this, the repair is poor value.">
@@ -197,14 +194,14 @@ export function SettingsForm({
                 {input("bandMaxPct", "decimal")}
               </Field>
             </div>
-            <p className="hint">Every campaign this client runs must sit inside this band. Existing campaigns outside a new band will be refused when next saved.</p>
+            <p className="hint">Every campaign must sit inside this band.</p>
           </div>
         ) : (
           <p className="text-ink-2">
             <strong className="num text-ink text-[18px]">
               {fmtBp(saved.bandMinBp)}–{fmtBp(saved.bandMaxBp)}
             </strong>{" "}
-            · set by SwapUp. Every upgrade-bonus campaign must stay inside it. Ask SwapUp if your programme needs a different band.
+            · set by SwapUp. Campaigns stay inside it.
           </p>
         )}
       </Card>

@@ -13,16 +13,16 @@
 
 import type { CaseStatus } from "./lifecycle.ts";
 
-export const DATA_CLEAR_LABEL = "Factory reset by the customer, seen by the store — not a certified erasure";
+export const DATA_CLEAR_LABEL = "Customer's factory reset, seen by the store — not a certified erasure";
 
 /** While the phone is still at the store. Before acceptance the phone is the customer's; after pickup it is gone. */
 export const DATA_CLEAR_STATUSES: CaseStatus[] = ["locked", "in_pickup"];
 
 export const DATA_CLEAR_STEPS = [
-  ["accountsSignedOut", "The customer signed out of their Samsung and Google accounts on the phone"],
-  ["resetDone", "The customer factory-reset the phone from its Settings"],
-  ["setupScreenSeen", "The phone restarted to its first-time setup (Welcome) screen"],
-  ["noPreviousAccount", "Going on through setup, it did not ask for the previous owner's Google or Samsung account"],
+  ["accountsSignedOut", "Customer signed out of Samsung and Google"],
+  ["resetDone", "Customer factory-reset it from Settings"],
+  ["setupScreenSeen", "Phone restarted to its Welcome screen"],
+  ["noPreviousAccount", "Setup didn't ask for the old owner's account"],
 ] as const;
 
 export type DataClearStep = (typeof DATA_CLEAR_STEPS)[number][0];

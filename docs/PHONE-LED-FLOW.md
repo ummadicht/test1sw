@@ -17,9 +17,15 @@ GradeIQ needs NO change: the single pass (photos → front glass dimmed → scre
 handoffDone) is exactly GradeIQ v2's await2nd handoff. Pass 1/2 (`?pass=`) stay for SwapUp Store's
 own "Take photos" fallback on older flows.
 
-## The customer's phone (SwapUp Check ≥ 0.6.0) — Identify › Scan › Test › Result
+## The customer's phone (SwapUp Check ≥ 0.6.0) — Scan › Test › Done
 
-A step rail on every screen: **Identify · Scan · Test · Result**.
+**Reduced (owner, 2026-10-17: "Reduce the flow").** A step rail on every screen: **Scan · Test ·
+Done**. Nothing is asked unless no test can tell: "Is this your phone?" (the one-tap confirm below)
+only for a `family` match — an `exact` match goes straight to Scan, `none` gets the picker; the storage
+only when the phone couldn't measure it; no IMEI, no name or mobile, no condition questions; the battery
+screenshot only when the case has no other battery reading (an attached Phonecheck report — the join
+then leaves `battery_health` out of the plan), and it is always skippable. The numbered list below is
+the full contract; where it says more is asked, this paragraph wins.
 
 1. **Join** (unchanged): store QR / link / 6-char code / deep link — or the store's **counter code**.
 2. **Identify**
@@ -49,17 +55,29 @@ A step rail on every screen: **Identify · Scan · Test · Result**.
    your phone and checks its screen (about 2 minutes)." + status line. When the camera drives patterns → the
    full-screen colours as today; when GradeIQ asks for the **Settings photo**, show "Open Settings › About phone
    so the camera can read it" + "Open Settings" (`Linking.sendIntent('android.settings.DEVICE_INFO_SETTINGS')`,
-   fallback SETTINGS); leave on handoffDone (and the existing grace/escapes: 90 s no camera, stalls).
-   Copy for the skip button: "Skip the camera check" → "The advisor then checks the screen by eye."
+   fallback SETTINGS); leave on handoffDone.
+   **No customer skip (2026-10-17, ≥ 0.8.0)** — the customer is never asked anything about condition,
+   nor whether to skip the camera: the phone stays on Scan until `handoffDone`, or until
+   `GET /api/device/screen` says `released: true` (the advisor pressed "Go on without the camera" in
+   SwapUp Store — `POST /api/test-sessions/<id>/release-scan`, by name). Leaving Scan for any reason it
+   echoes `shown: "off"` once, so no colour is left behind as its last echo. Poll about every 350 ms
+   once a camera page is connected (the server reads GradeIQ fresh on every poll — GradeIQ gives the
+   phone only 4 s to confirm white), echo two frames after drawing a colour, re-send a lost echo after 600 ms.
 4. **Battery health** (new): per-platform guide (Samsung: Settings › Battery › Battery information — or
    Samsung Members › Diagnostics › Battery status; Pixel: Settings › Battery › Battery health; other
    Android: Settings › Battery). "Take a screenshot of it, then choose it here." **Choose screenshot**
    (expo-image-picker, images only, quality 0.6, max ~1600 px) → `POST /api/device/battery {image}` →
-   "Battery health **87 %**" (or "Couldn't read it — try a clearer screenshot" / "Skip").
+   "Battery health **87 %**" (or "Couldn't read it — try a clearer screenshot" / "Skip"; a 409 means the reader
+   is off — "the advisor checks the battery instead").
 5. **Test**: GetReady → automatic tests → swipe squares → charger (unchanged).
 6. **Result**: "Checks complete — the advisor will confirm your price." Ref, store, Passed / Failed /
-   Not tested, "Screen and glass: checked by the store's camera" (or by eye), battery health %.
+   Not tested, "Screen and glass: checked by the store's camera" (or by the advisor), battery health %.
    Never a price or a grade letter. After Apply: the existing "store has your results" + clear-your-phone guide.
+   **The test colours (≥ 0.8.0)**: while `GET /api/device/status` says `colours: true` (the camera's sweep
+   didn't check the screen and the advisor hasn't certified it), the result screen shows white → black →
+   red → green → blue → stripes full-screen, about 2.5 s each, looping, brightness up, "The advisor is
+   checking your screen — keep it face up", and posts phase `colours`; back to `done` when it turns false.
+   The customer taps nothing; the advisor taps Screen on "Check the phone" (MOBILE-API §8b).
 
 `nativeStep`: identify → scan → battery → auto → actions → done (resume-safe: `identifiedAt`,
 `pairing`, `battery` records in CheckState). `POST /api/device/phase {phase}` on each step change.
@@ -72,7 +90,13 @@ available), Battery (file input via expo-image-picker web), then today's interac
 - **Migration 9**: `test_sessions.phone_phase TEXT`, `phone_phase_at TEXT`; `stores.counter_code TEXT` (unique when set).
 - `GET /api/device/camera-link` (Ticket): `{ url: cameraUrl(gradeiq_id) }` when `gradeiq_state = ready`; 409
   "The camera check isn't ready yet" otherwise (the phone retries). The full pass, no `pass` param.
-- `POST /api/device/phase` (Ticket) `{ phase: "identify"|"scan"|"battery"|"test"|"done" }` → `{ok}`; staff view `phonePhase`.
+- `POST /api/device/phase` (Ticket) `{ phase: "identify"|"scan"|"battery"|"test"|"done"|"colours" }` → `{ok}`; staff view `phonePhase`.
+- **Migration 14** (2026-10-17): `cases.certification TEXT` (what the advisor certified by eye — MOBILE-API §8b),
+  `test_sessions.scan_release TEXT` (the advisor let the phone go on from Scan without the camera).
+- **The advisor certifies** (`{action:"certify"}`, MOBILE-API §8b): the staff session view's `certify` block lists
+  the rows and the chips; `GET /api/device/status` `colours` tells the phone to show the test colours.
+- The battery reader being off (GradeIQ's `/ocr` answers `ocr.source: "error"`, e.g. its AI out of credit) is a
+  409 "Battery reader isn't available — skip; the advisor checks it." to the phone — never "try a clearer screenshot".
 - Join response gains `identity: { label, match: "exact"|"family"|"none", reason, variant, modelId, variants }` (matchModel;
   no prices). `variants` (2026-10-17) = the matched model's storage sizes from `trade_models`, `[]` when no model
   matched — what the confirm card's "How much storage?" offers. Also `[]` whenever the phone reported its disk
@@ -87,8 +111,7 @@ available), Battery (file input via expo-image-picker web), then today's interac
   always wins (a different size the customer picked is only flagged) — it is the disk reading of the session's
   device, so it counts however the model was named (code match or the customer's pick). A measured size that
   isn't on the model's list fills nothing and is never replaced by a pick, the model's single size or a guess:
-  flagged "Storage: the phone measures 1TB, which isn't a size on file. Check Settings › About phone, and enter
-  the Cashify quote on the full case if it's really 1TB." and kept on the case (`measuredStorage`, migration 12),
+  flagged "Storage: phone measures 1TB, not on file — check Settings, then enter the partner's quote." and kept on the case (`measuredStorage`, migration 12),
   so the answer says the same instead of "couldn't measure" (MOBILE-API §3c). A size the case already has is kept; a
   model sold in one size takes it; otherwise the customer's pick of that model's size fills it as a CLAIM —
   even when the model code matched — flagged "Storage: the customer said X — the phone couldn't measure it.
@@ -110,16 +133,32 @@ available), Battery (file input via expo-image-picker web), then today's interac
   code, generalised: this install's own open session at that store, else a new session + case
   (created_by = a store manager, audit `via: "counter code"`). `/j/<counter code>` page: the store's name.
 - `scanFirstApp(device)`: native Check ≥ 0.6.0 or web ≥ 0.6.0. For those sessions gradingView sends
-  `photosUrl: null` (no photos-first), and messages by phonePhase ("identifying itself", "showing its scan
-  code — scan it with your camera, or Take photos", "testing itself — the camera grade is being worked out").
+  `photosUrl: null` (no photos-first), and messages by phonePhase ("Phone identifying itself — scan code next.", "Scan the phone's code, or Take
+  photos.", "Phone testing — grade coming.").
   Older apps: unchanged.
 
-## SwapUp Store (≥ 0.6.0)
+## SwapUp Store (≥ 0.6.0) — reduced (owner, 2026-10-17: "Reduce the flow")
 
-- Scan-first session layout (when the server sends no `photosUrl` and the phone is scan-first):
-  1 Customer's phone joins (QR / code, as today) → 2 **Identify** (what the customer confirmed/picked, IMEI 1/2
-  with check pill, "IMEI differs from the one recorded") → 3 **Scan** ("The customer's phone shows a QR — scan it
-  with this tablet's camera app", plus "Take photos" = open `cameraUrl` here, existing gate/override) → 4 Tests
-  (+ battery health %) → Summary → Apply → Continue pricing.
+1 **New trade-in** (the customer's mobile) → 2 **Connect the customer's phone** (Wi‑Fi + test code) →
+3 **ONE camera pass** — the customer's phone shows GradeIQ's camera link as a QR, this tablet's camera
+app scans it, and the camera page photographs the phone and sweeps its screen in one go ("Take photos"
+opens the same page from here; "Go on without the camera" (`grading.canRelease`) replaces the
+customer's skip). Where the camera couldn't decide, **Check the phone** (`TestSessionView.certify`,
+MOBILE-API §8b) opens inside this step: Body and Liquid indicator at once, Screen once the phone's
+tests are done and it shows the colours, one tap each, by name → 4 **The answer, by itself**: when
+the tests and the camera grade (and those taps) are in, the server applies the session with no
+"Apply to case" tap (`TestSessionView.autoApply`, MOBILE-API §3 — Apply's gates unchanged; a refusal
+shows its one-line reason and a Retry; "Apply the results so far" stays for a phone that stopped
+mid-test) and the Session screen opens the answer → 5 **Swap up** opens ONE "Take the trade-in"
+screen: the IMEI only if missing, name + mobile prefilled, ID type + last 4, the KYM result, and ONE
+hand-over confirm ("Owner confirmed · SIM out · IMEI matches · no EMI/lock") that still sends all four
+flags. Repair / Walked away end the visit from the answer.
+
+Gone from the Session screen: the separate photo pass and screen-check pass (two-pass layout — an older
+SwapUp Check gets the same single camera pass after its tests), the Identify card, the tests card, the
+result cards (summary, device, camera AI, what the customer said — the answer and the grade report
+carry them) and the Apply step.
+
 - Settings: **Counter QR** card (manager: show QR + code + "Print" + "New code"; advisor: view).
-- Customer-started trade-ins appear on Home like any session (they're the store's sessions).
+- Customer-started trade-ins appear on Home like any session (they're the store's sessions); Home flags
+  "Check the phone" while the answer waits for the advisor's taps, and "Not on the case" after a refusal.

@@ -42,10 +42,10 @@ export function CloseShortfall({ caseId, caseRef, open, hint }: { caseId: string
     );
   return (
     <form onSubmit={submit} className="space-y-3 min-w-[240px]" aria-label={`Close shortfall on ${caseRef}`}>
-      <Field label="Amount recovered (₹)" hint={amountOk ? `Up to ${inr(open)} is open.` : `Enter a whole amount between ₹1 and ${inr(open)}.`}>
+      <Field label="Amount recovered (₹)" hint={amountOk ? undefined : `₹1 to ${inr(open)}.`}>
         <input className="input num" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ""))} />
       </Field>
-      <Field label="How it was settled" hint={hint ?? "e.g. Store paid by UPI, ref …; or partner found the phone."}>
+      <Field label="How it was settled" hint={hint ?? "e.g. UPI ref …"}>
         <input className="input" value={note} onChange={(e) => setNote(e.target.value)} minLength={6} maxLength={200} required />
       </Field>
       <div className="flex gap-2">

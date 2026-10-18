@@ -6,7 +6,7 @@ import { estimateRepair, type Coverage, type RepairBookEntry } from "./repair.ts
 import type { FaultId } from "./condition.ts";
 
 /* ─────────────────────────── fixtures: the spec's worked example (§3.4) ─────────────────────────── */
-// org_samsung_svc, the sample rate card, the seeded campaign and the S23 Ultra price book;
+// org_samsung_svc, the partner's rate card, the seeded campaign and the S23 Ultra price book;
 // a cracked screen. Built with the real domain functions, the way reprice() builds them.
 
 const S23U = "galaxy-s23-ultra";
@@ -20,7 +20,7 @@ const repairFor = (faults: FaultId[], coverage: Coverage = "none", manual: { amo
 
 // As cases.ts stores it (UpgradeChoice): the label carries the brand; the answer names the phone without it.
 const S26U = { deviceId: "nd_s26u_256", label: "Samsung Galaxy S26 Ultra 256GB", model: "Galaxy S26 Ultra", variant: "256GB", price: 154999, suggested: true, why: "Newest Galaxy S Ultra, same storage (256GB)." };
-const SAMPLE_QUOTE = { status: "priced" as const, amount: 18800, source: { kind: "sample" as const }, partnerRef: null };
+const CARD_QUOTE = { status: "priced" as const, amount: 18800, source: { kind: "partner_ratecard" as const }, partnerRef: null };
 const BONUS = { amount: 6199, bp: 400, override: null };
 const REPAIRED_VALUE = 34800;
 
@@ -56,7 +56,7 @@ function priced(over: Partial<OfferInput> = {}, repairedValue = REPAIRED_VALUE):
     repair: repairFor(["screen_cracked"]),
     manualRepair: null,
     repairNotServiced: null,
-    quote: SAMPLE_QUOTE,
+    quote: CARD_QUOTE,
     quoteExpired: false,
     quoteBlocked: null,
     conditionProblems: [],
@@ -76,8 +76,8 @@ function storageUnknown(over: Partial<OfferInput> = {}): OfferInput {
     variantSource: null,
     // Out of order on purpose: the chips come back smallest first.
     storageQuotes: [
-      { variant: "512GB", amount: 20300, reason: null, sample: true },
-      { variant: "256GB", amount: 18800, reason: null, sample: true },
+      { variant: "512GB", amount: 20300, reason: null },
+      { variant: "256GB", amount: 18800, reason: null },
     ],
     quote: null,
     bonus: { amount: 4649, bp: 300, override: null },
@@ -111,20 +111,20 @@ test("offer 1: fully priced — refurb quote vs trade-in + bonus, nothing to ask
   assert.equal(o.swap.customerPays, 130000);
   assert.equal(o.swap.customerPays, priced().decision!.upgrade!.pays);
   assert.equal(o.swap.vsRepair, 95904);
-  assert.equal(o.swap.tradeInNote, "Sample price — not a real quote.");
+  assert.equal(o.swap.tradeInNote, null, "a rate-card quote: nothing to mark");
   // The verdict is decide()'s, unchanged.
   assert.equal(o.recommendation, "either");
   assert.equal(o.recommended, null);
-  assert.equal(o.headline, "Either is reasonable — it's the customer's choice");
+  assert.equal(o.headline, "Either works — customer's choice");
   assert.deepEqual(
     o.signals.map((s) => [s.points, s.strength]),
     [["repair", "soft"], ["upgrade", "soft"], ["upgrade", "soft"]]
   );
-  assert.match(o.signals[0].text, /22% of the price of a new phone/);
-  assert.match(o.signals[1].text, /98% of what the phone will be worth repaired/);
+  assert.match(o.signals[0].text, /22% of a new phone's price/);
+  assert.match(o.signals[1].text, /98% of the repaired phone's value/);
   assert.match(o.signals[2].text, /adds only ₹16,000/);
   assert.equal(o.reason, o.signals[0].text, "no strong signal: the first one");
-  assert.ok(o.caveats.some((c) => /SAMPLE/.test(c)));
+  assert.ok(!o.caveats.some((c) => /sample/i.test(c)), "no price is ever called a sample");
   assert.deepEqual(allowed(o), { repair: null, swap: null, walkAway: null });
   assert.equal(o.storage.variant, "256GB");
   assert.equal(o.storage.source, "advisor");
@@ -143,18 +143,17 @@ test("offer 2: storage unknown — one row of chips, each with its trade-in pric
   assert.equal(input.decision!.recommendation, "cannot_say");
   const o = buildOffer(input);
   assert.equal(o.headline, "Which storage is it?");
-  assert.equal(o.reason, "The phone couldn't measure its storage. Settings › About phone › Storage shows it.");
+  assert.equal(o.reason, "The phone couldn't measure it — see Settings › About phone.");
   assert.equal(o.asks.length, 1);
   assert.deepEqual(o.asks[0], {
     kind: "storage",
     title: "Which storage is it?",
-    text: "The phone couldn't measure its storage. Settings › About phone › Storage shows it.",
+    text: "The phone couldn't measure it — see Settings › About phone.",
     options: [
-      { variant: "256GB", tradeIn: 18800, sample: true },
-      { variant: "512GB", tradeIn: 20300, sample: true },
+      { variant: "256GB", tradeIn: 18800 },
+      { variant: "512GB", tradeIn: 20300 },
     ],
-    // The chips are SAMPLE rate-card figures: marked while they are on screen, before any tap.
-    note: "Sample price — not a real quote.",
+    note: null,
   });
   assert.equal(o.swap.tradeIn, null);
   assert.equal(o.swap.total, null);
@@ -175,39 +174,36 @@ test("offer 2b: no what-if prices — the model's sizes, unpriced, never a guess
   const ask = o.asks[0];
   assert.equal(ask.kind, "storage");
   assert.deepEqual(ask.kind === "storage" && ask.options, [
-    { variant: "256GB", tradeIn: null, sample: false },
-    { variant: "512GB", tradeIn: null, sample: false },
+    { variant: "256GB", tradeIn: null },
+    { variant: "512GB", tradeIn: null },
   ]);
-  assert.equal(ask.kind === "storage" && ask.note, null, "no price on screen, nothing to mark");
-  // A size the partner can't price shows no price, still a chip — and is not "sample": it shows no figure.
-  const partly = buildOffer(storageUnknown({ storageQuotes: [{ variant: "256GB", amount: 18800, reason: null, sample: true }, { variant: "512GB", amount: null, reason: "No price", sample: true }] }));
+  assert.equal(ask.kind === "storage" && ask.note, null, "no price on screen, nothing to note");
+  // A size nothing prices shows no price, still a chip.
+  const partly = buildOffer(storageUnknown({ storageQuotes: [{ variant: "256GB", amount: 18800, reason: null }, { variant: "512GB", amount: null, reason: "No price" }] }));
   const p = partly.asks[0];
   assert.deepEqual(p.kind === "storage" && p.options, [
-    { variant: "256GB", tradeIn: 18800, sample: true },
-    { variant: "512GB", tradeIn: null, sample: false },
+    { variant: "256GB", tradeIn: 18800 },
+    { variant: "512GB", tradeIn: null },
   ]);
-  assert.equal(p.kind === "storage" && p.note, "Sample price — not a real quote.");
+  assert.equal(p.kind === "storage" && p.note, null);
 });
 
-test("offer 2c: the sample note marks sample chips only — a real rate card's chips carry none", () => {
-  const real = buildOffer(storageUnknown({ storageQuotes: [{ variant: "256GB", amount: 18800, reason: null, sample: false }, { variant: "512GB", amount: 20300, reason: null, sample: false }] }));
-  const ask = real.asks[0];
-  assert.deepEqual(ask.kind === "storage" && ask.options.map((x) => x.sample), [false, false]);
-  assert.equal(ask.kind === "storage" && ask.note, null);
-  // Every priced sample chip is marked; one is enough for the note.
-  const mixed = buildOffer(storageUnknown({ storageQuotes: [{ variant: "256GB", amount: 18800, reason: null, sample: false }, { variant: "512GB", amount: 20300, reason: null, sample: true }] }));
-  const m = mixed.asks[0];
-  assert.deepEqual(m.kind === "storage" && m.options.map((x) => x.sample), [false, true]);
-  assert.equal(m.kind === "storage" && m.note, "Sample price — not a real quote.");
-  // An older stored row with no flag is not called a sample.
-  const legacy = buildOffer(storageUnknown({ storageQuotes: [{ variant: "256GB", amount: 18800, reason: null } as never] }));
-  assert.equal(legacy.asks[0].kind === "storage" && legacy.asks[0].note, null);
+test("offer 2c: chips priced off old market data carry its age under them; a chip with no price carries nothing", () => {
+  const AGE = "Refurbished market price, week 2026-W35, 52 days old.";
+  const old = buildOffer(storageUnknown({ storageQuotes: [{ variant: "256GB", amount: 18800, reason: null, note: AGE }, { variant: "512GB", amount: 20300, reason: null, note: AGE }] }));
+  const ask = old.asks[0];
+  assert.equal(ask.kind === "storage" && ask.note, AGE);
+  // Only a priced chip's note counts: an unpriced size says nothing about the others' data.
+  const unpriced = buildOffer(storageUnknown({ storageQuotes: [{ variant: "256GB", amount: null, reason: "No price", note: AGE }, { variant: "512GB", amount: 20300, reason: null }] }));
+  assert.equal(unpriced.asks[0].kind === "storage" && unpriced.asks[0].note, null);
+  // No chip field the app could read as a sample flag.
+  assert.ok(ask.kind === "storage" && ask.options.every((o) => Object.keys(o).sort().join() === "tradeIn,variant"));
 });
 
 /* ─────────────────────────── 2d. measured, but not a size on file ─────────────────────────── */
 
 test("offer 2d: the phone measured a size the model's list doesn't have — said so, and no chip for another size", () => {
-  const text = "The phone measures 1TB, which isn't a size on file. Check Settings › About phone, and enter the Cashify quote on the full case if it's really 1TB.";
+  const text = "Phone measures 1TB, not on file — check Settings, then enter the partner's quote.";
   // Even with what-if prices stored for 256/512GB: the phone has ruled them out.
   const o = buildOffer(storageUnknown({ measuredStorage: "1TB" }));
   assert.deepEqual(o.asks[0], { kind: "storage", title: "Which storage is it?", text, options: [], note: null });
@@ -222,9 +218,9 @@ test("offer 2d: the phone measured a size the model's list doesn't have — said
   const onList = buildOffer(storageUnknown({ measuredStorage: "512GB" }));
   const ask = onList.asks[0];
   assert.equal(ask.kind === "storage" && ask.options.length, 2);
-  assert.equal(ask.text, "No storage on the case yet. Settings › About phone › Storage shows it.");
+  assert.equal(ask.text, "See Settings › About phone › Storage.");
   assert.equal(onList.swap.why, "Tap the storage to see the trade-in.");
-  // The Cashify quote entered for it settles the storage at the measured size (cases.ts updateCase):
+  // The partner's quote entered for it settles the storage at the measured size (cases.ts updateCase):
   // from then on it is an ordinary priced answer.
   const settled = buildOffer(
     priced({
@@ -236,7 +232,7 @@ test("offer 2d: the phone measured a size the model's list doesn't have — said
   );
   assert.deepEqual(settled.asks, []);
   assert.equal(settled.swap.tradeIn, 52000);
-  assert.equal(settled.swap.tradeInNote, "Cashify ref CF-1TB-01");
+  assert.equal(settled.swap.tradeInNote, "Partner ref CF-1TB-01");
   assert.deepEqual(settled.storage, { variant: "1TB", source: "measured", note: null });
 });
 
@@ -247,7 +243,7 @@ test("offer 3: no faults — nothing to repair, a straight trade-in", () => {
   assert.equal(o.recommendation, "no_repair");
   assert.equal(o.recommended, "swap");
   assert.equal(o.headline, "Nothing to repair — a straight trade-in");
-  assert.equal(o.reason, "The test found nothing wrong with the phone.");
+  assert.equal(o.reason, "The test found nothing wrong.");
   assert.equal(o.repair.nothingToRepair, true);
   assert.equal(o.repair.amount, null);
   assert.equal(o.repair.why, "Nothing to repair.");
@@ -264,17 +260,17 @@ test("offer 3b: a desk-only case (no test applied) never says a test found or me
   // No faults recorded on a case no phone test ran on: the verdict is decide()'s, the sentence is true.
   const o = buildOffer(priced({ faultCount: 0, repair: null, tested: false }));
   assert.equal(o.headline, "Nothing to repair — a straight trade-in");
-  assert.equal(o.reason, "No faults are recorded on the case.");
+  assert.equal(o.reason, "No faults on the case.");
   assert.ok(!/test/i.test(JSON.stringify({ headline: o.headline, reason: o.reason, asks: o.asks })));
   // A model but no storage yet: no phone was there to measure it.
   const s = buildOffer(storageUnknown({ tested: false }));
-  assert.equal(s.asks[0].text, "No storage on the case yet. Settings › About phone › Storage shows it.");
-  assert.equal(s.reason, "No storage on the case yet. Settings › About phone › Storage shows it.");
+  assert.equal(s.asks[0].text, "See Settings › About phone › Storage.");
+  assert.equal(s.reason, "See Settings › About phone › Storage.");
   // The chips and their prices are the same either way.
   assert.deepEqual(s.asks[0].kind === "storage" && s.asks[0].options.map((x) => x.tradeIn), [18800, 20300]);
   // A tested case keeps the test's words (and `tested` left out means tested).
-  assert.equal(buildOffer(priced({ faultCount: 0, repair: null, tested: true })).reason, "The test found nothing wrong with the phone.");
-  assert.equal(buildOffer(storageUnknown()).asks[0].text, "The phone couldn't measure its storage. Settings › About phone › Storage shows it.");
+  assert.equal(buildOffer(priced({ faultCount: 0, repair: null, tested: true })).reason, "The test found nothing wrong.");
+  assert.equal(buildOffer(storageUnknown()).asks[0].text, "The phone couldn't measure it — see Settings › About phone.");
 });
 
 /* ─────────────────────────── 4. the book can't price it ─────────────────────────── */
@@ -282,7 +278,7 @@ test("offer 3b: a desk-only case (no test applied) never says a test found or me
 test("offer 4: a bench-only fault asks for the repair quote, in the book's words", () => {
   const input = priced({ repair: repairFor(["water_damage"]) });
   const note = input.repair!.notes[0];
-  assert.match(note, /bench diagnosis/);
+  assert.match(note, /Bench check needed/);
   const o = buildOffer(input);
   assert.deepEqual(o.asks, [{ kind: "repair_quote", title: "The repair needs a quote", text: note }]);
   assert.equal(o.headline, "The repair needs a quote");
@@ -321,7 +317,7 @@ test("offer 5: covered — ₹0, said as covered, and decide() recommends the re
   assert.equal(o.repair.coverage, "warranty");
   assert.equal(o.headline, "Repair it — it's covered");
   assert.equal(o.recommended, "repair");
-  assert.equal(o.reason, "The repair is covered — it costs the customer nothing.");
+  assert.equal(o.reason, "Covered — the customer pays nothing.");
   assert.equal(buildOffer(priced({ coverage: "care_plus", repair: repairFor(["battery_drain"], "care_plus") })).repair.detail, "Covered by Care+");
   // Care+ with accidental damage costs the plan fee: not "covered", the fee is in the detail.
   const fee = buildOffer(priced({ coverage: "care_plus", repair: repairFor(["screen_cracked"], "care_plus") }));
@@ -350,23 +346,21 @@ test("offer 6: the camera's identity block comes first, ahead of the storage", (
 
 /* ─────────────────────────── 7. where the trade-in came from ─────────────────────────── */
 
-test("offer 7: sample, expired and partner-app quotes each say so", () => {
-  assert.equal(buildOffer(priced()).swap.tradeInNote, "Sample price — not a real quote.");
-  const card = { ...SAMPLE_QUOTE, source: { kind: "partner_ratecard" as const } };
+test("offer 7: expired and partner-app quotes each say so", () => {
+  const card = { ...CARD_QUOTE, source: { kind: "partner_ratecard" as const } };
   assert.equal(buildOffer(priced({ quote: card })).swap.tradeInNote, null);
   assert.equal(buildOffer(priced({ quote: card, quoteExpired: true })).swap.tradeInNote, "Quote expired — re-quoting.");
-  assert.equal(buildOffer(priced({ quote: { ...SAMPLE_QUOTE }, quoteExpired: true })).swap.tradeInNote, "Sample price — not a real quote.", "sample says sample first");
-  const manual = { ...SAMPLE_QUOTE, source: { kind: "partner_manual" as const }, partnerRef: "CF-88421" };
-  assert.equal(buildOffer(priced({ quote: manual })).swap.tradeInNote, "Cashify ref CF-88421");
+  const manual = { ...CARD_QUOTE, source: { kind: "partner_manual" as const }, partnerRef: "CF-88421" };
+  assert.equal(buildOffer(priced({ quote: manual })).swap.tradeInNote, "Partner ref CF-88421");
   // SwapUp never re-quotes a quote read off the partner's app — so it never says it is re-quoting one (7d).
-  assert.equal(buildOffer(priced({ quote: manual, quoteExpired: true })).swap.tradeInNote, "Cashify quote (ref CF-88421) expired — enter today's quote.");
+  assert.equal(buildOffer(priced({ quote: manual, quoteExpired: true })).swap.tradeInNote, "Partner quote (ref CF-88421) expired — enter today's quote.");
   // A closed case is never re-quoted: its quote running out after the lock is no news.
   assert.equal(buildOffer(priced({ status: "locked", quote: card, quoteExpired: true })).swap.tradeInNote, null);
-  assert.equal(buildOffer(priced({ status: "locked", quote: manual, quoteExpired: true })).swap.tradeInNote, "Cashify ref CF-88421");
+  assert.equal(buildOffer(priced({ status: "locked", quote: manual, quoteExpired: true })).swap.tradeInNote, "Partner ref CF-88421");
 });
 
-test("offer 7d: a Cashify-app quote that has lapsed — marked, asked for again, and the swap refused until it is", () => {
-  const text = "Cashify quote (ref CF-88421) expired — enter today's quote.";
+test("offer 7d: a partner-app quote that has lapsed — marked, asked for again, and the swap refused until it is", () => {
+  const text = "Partner quote (ref CF-88421) expired — enter today's quote.";
   const manual = { status: "priced" as const, amount: 18800, source: { kind: "partner_manual" as const }, partnerRef: "CF-88421" };
   const fresh = buildOffer(priced({ quote: manual }));
   assert.deepEqual(fresh.asks, []);
@@ -376,9 +370,9 @@ test("offer 7d: a Cashify-app quote that has lapsed — marked, asked for again,
   assert.equal(o.swap.tradeIn, 18800);
   assert.equal(o.swap.tradeInNote, text);
   assert.equal(o.swap.why, null, "there is a trade-in figure; the note says what is wrong with it");
-  // One ask — the existing "Enter the Cashify quote" sheet replaces it with a fresh validity.
-  assert.deepEqual(o.asks, [{ kind: "partner_quote", title: "Enter the Cashify quote", text }]);
-  assert.equal(o.headline, "Enter the Cashify quote");
+  // One ask — the existing "Enter the partner's quote" sheet replaces it with a fresh validity.
+  assert.deepEqual(o.asks, [{ kind: "partner_quote", title: "Enter the partner's quote", text }]);
+  assert.equal(o.headline, "Enter the partner's quote");
   assert.equal(o.reason, text);
   // The Lock screen would refuse it and can't fix it there: refused here, with the reason.
   assert.equal(o.actions.swap, text);
@@ -388,7 +382,7 @@ test("offer 7d: a Cashify-app quote that has lapsed — marked, asked for again,
   assert.deepEqual(both.asks.map((a) => a.kind), ["partner_quote", "repair_quote", "new_phone"]);
   assert.equal(both.actions.swap, text);
   // No reference on file: still said, never invented.
-  assert.equal(buildOffer(priced({ quote: { ...manual, partnerRef: null }, quoteExpired: true })).swap.tradeInNote, "Cashify quote (ref —) expired — enter today's quote.");
+  assert.equal(buildOffer(priced({ quote: { ...manual, partnerRef: null }, quoteExpired: true })).swap.tradeInNote, "Partner quote (ref —) expired — enter today's quote.");
   // A lapsed rate-card quote is still SwapUp's to re-quote: no ask, the Lock screen's blocker.
   const card = buildOffer(priced({ quote: { ...manual, source: { kind: "partner_ratecard" as const }, partnerRef: null }, quoteExpired: true }));
   assert.deepEqual(card.asks, []);
@@ -400,28 +394,28 @@ test("offer 7d: a Cashify-app quote that has lapsed — marked, asked for again,
   assert.equal(blocked.swap.tradeInNote, null);
 });
 
-test("offer 7e: the lock's expired-quote blocker says what fixes it — the answer's own sentence for a Cashify-app quote", () => {
+test("offer 7e: the lock's expired-quote blocker says what fixes it — the answer's own sentence for a partner-app quote", () => {
   const manual = { source: { kind: "partner_manual" as const }, partnerRef: "CF-88421" };
   const o = buildOffer(priced({ quote: { status: "priced", amount: 18800, ...manual }, quoteExpired: true }));
   // One sentence on the answer, the swap's refusal and the Lock screen: re-quoting can't renew a quote typed from the app.
   assert.equal(expiredQuoteBlocker(manual), o.swap.tradeInNote);
   assert.equal(expiredQuoteBlocker(manual), o.actions.swap);
-  assert.equal(expiredQuoteBlocker({ ...manual, partnerRef: null }), "Cashify quote (ref —) expired — enter today's quote.");
+  assert.equal(expiredQuoteBlocker({ ...manual, partnerRef: null }), "Partner quote (ref —) expired — enter today's quote.");
   // SwapUp re-quotes everything else, so "re-quote" is the true fix there.
-  for (const kind of ["partner_ratecard", "partner_live", "sample"] as const)
+  for (const kind of ["partner_ratecard", "priceiq"] as const)
     assert.equal(expiredQuoteBlocker({ source: { kind }, partnerRef: null }), "The partner's quote has expired — re-quote.");
 });
 
-test("offer 7b: the partner has no price — ask for the Cashify quote, in the partner's words", () => {
-  const reason = "The Cashify rate card has no price for this model and storage — ask the partner for a quote rather than using a similar model.";
-  const o = buildOffer(priced({ quote: { status: "unpriced", amount: null, source: { kind: "sample" }, partnerRef: null, reason } }));
-  assert.deepEqual(o.asks, [{ kind: "partner_quote", title: "Enter the Cashify quote", text: reason }]);
-  assert.equal(o.headline, "Enter the Cashify quote");
+test("offer 7b: nothing priced it — ask for a quote, in the server's words (owner: 'No market price yet — enter a quote')", () => {
+  const reason = "No market price yet — enter a quote.";
+  const o = buildOffer(priced({ quote: { status: "unpriced", amount: null, source: { kind: "none" }, partnerRef: null, reason } }));
+  assert.deepEqual(o.asks, [{ kind: "partner_quote", title: "Enter the partner's quote", text: reason }]);
+  assert.equal(o.headline, "Enter the partner's quote");
   assert.equal(o.swap.why, reason);
   assert.equal(o.actions.swap, reason);
   assert.equal(o.swap.tradeIn, null);
-  const silent = buildOffer(priced({ quote: { status: "error", amount: null, source: { kind: "partner_live" }, partnerRef: null } }));
-  assert.equal(silent.asks[0].text, "The partner has no price for this phone.");
+  const silent = buildOffer(priced({ quote: { status: "unpriced", amount: null, source: { kind: "none" }, partnerRef: null } }));
+  assert.equal(silent.asks[0].text, "No market price yet — enter a quote.", "no reason stored: the same words, never a made-up price");
 });
 
 test("offer 7c: no price because of the condition — its first problem, never a partner ask", () => {
@@ -445,7 +439,7 @@ test("offer 8: a manager's bonus override is the bonus shown", () => {
 test("offer 9: no new phone — ask for one, the trade-in alone is the total, the verdict stands", () => {
   const input = priced({ upgrade: null, bonus: null });
   const o = buildOffer(input);
-  assert.deepEqual(o.asks, [{ kind: "new_phone", title: "Choose the new phone", text: "No new phone in the catalogue matches this one — choose it to see the bonus." }]);
+  assert.deepEqual(o.asks, [{ kind: "new_phone", title: "Choose the new phone", text: "No catalogue match — choose one to see the bonus." }]);
   assert.equal(o.headline, input.decision!.headline, "new_phone never replaces the headline");
   assert.notEqual(o.reason, o.asks[0].text);
   assert.equal(o.swap.bonus, null);
@@ -460,13 +454,13 @@ test("offer 9: no new phone — ask for one, the trade-in alone is the total, th
   assert.equal(o.actions.swap, "Choose the new phone.");
   assert.equal(o.actions.repair, null, "the repair is still allowed");
   // With no trade-in either, the missing trade-in is the reason (it comes first).
-  assert.equal(buildOffer(priced({ upgrade: null, bonus: null, quote: null })).actions.swap, "No trade-in price from the partner yet.");
+  assert.equal(buildOffer(priced({ upgrade: null, bonus: null, quote: null })).actions.swap, "No trade-in price yet.");
   // Nothing to repair and no new phone: both refused, each with its own reason.
   const straight = buildOffer(priced({ faultCount: 0, repair: null, upgrade: null, bonus: null }));
   assert.deepEqual(straight.actions, { repair: "Nothing to repair.", swap: "Choose the new phone.", walkAway: null });
   // A new phone, but no campaign covers it.
   const none = buildOffer(priced({ bonus: null }));
-  assert.equal(none.swap.bonusWhy, "No upgrade-bonus campaign applies to this phone today.");
+  assert.equal(none.swap.bonusWhy, "No bonus campaign today.");
   assert.equal(none.swap.total, 18800);
   // A staff pick is not "suggested".
   assert.equal(buildOffer(priced({ upgrade: { deviceId: "nd_s25u", label: "Galaxy S25 Ultra 256GB", price: 114999, suggested: false } })).swap.newPhone?.suggested, false);
@@ -507,7 +501,7 @@ test("offer 12: storage the customer typed carries its note", () => {
   assert.deepEqual(o.storage, {
     variant: "256GB",
     source: "customer",
-    note: "The customer typed this — the phone couldn't measure it. Check Settings › About phone before the trade-in.",
+    note: "Customer typed this — check Settings › About phone.",
   });
   for (const source of ["measured", "catalogue", "advisor", null] as const) assert.equal(buildOffer(priced({ variantSource: source })).storage.note, null, String(source));
 });
@@ -519,15 +513,15 @@ test("offer 13: several things missing — asked in one order: blocked, model, s
   const many = buildOffer(storageUnknown({ quoteBlocked: blocked, repair: repairFor(["water_damage"]), upgrade: null, bonus: null }));
   assert.deepEqual(many.asks.map((a) => a.kind), ["blocked", "storage", "repair_quote", "new_phone"]);
   assert.equal(many.headline, "Check this is the right phone");
-  const partner = buildOffer(priced({ quote: { status: "unpriced", amount: null, source: { kind: "sample" }, partnerRef: null, reason: "No price." }, repair: repairFor(["no_power"]), upgrade: null, bonus: null }));
+  const partner = buildOffer(priced({ quote: { status: "unpriced", amount: null, source: { kind: "none" }, partnerRef: null, reason: "No price." }, repair: repairFor(["no_power"]), upgrade: null, bonus: null }));
   assert.deepEqual(partner.asks.map((a) => a.kind), ["partner_quote", "repair_quote", "new_phone"]);
-  assert.equal(partner.headline, "Enter the Cashify quote");
+  assert.equal(partner.headline, "Enter the partner's quote");
   // No model at all: the model is the one question; nothing else can be asked of a phone with no model.
   const noModel = buildOffer(priced({ device: null, quote: null, repair: null, upgrade: null, bonus: null }));
   assert.deepEqual(noModel.asks.map((a) => a.kind), ["model"]);
-  assert.deepEqual(noModel.asks[0], { kind: "model", title: "Which phone is it?", text: "The test couldn't tell the model. Choose it on the full case." });
+  assert.deepEqual(noModel.asks[0], { kind: "model", title: "Which phone is it?", text: "The test couldn't tell — choose it on the full case." });
   // A desk-only case had no test to blame.
-  assert.equal(buildOffer(priced({ device: null, quote: null, repair: null, upgrade: null, bonus: null, tested: false })).asks[0].text, "No model on the case yet. Choose it on the full case.");
+  assert.equal(buildOffer(priced({ device: null, quote: null, repair: null, upgrade: null, bonus: null, tested: false })).asks[0].text, "Choose it on the full case.");
   assert.equal(noModel.headline, "Which phone is it?");
   assert.equal(noModel.repair.why, "Choose the phone first.");
   assert.equal(noModel.swap.why, "Choose the phone first.");
@@ -552,10 +546,102 @@ test("offer: the recommended side follows decide(), never the bonus", () => {
 });
 
 test("offer: 'not enough to compare' with nothing to ask says what the comparison is missing", () => {
-  // e.g. a Cashify quote typed in without its repaired value: decide() can't compare, and no ask applies.
+  // e.g. a partner quote typed in without its repaired value: decide() can't compare, and no ask applies.
   const base = priced();
-  const missing = "No buyback value for this phone once repaired.";
+  const missing = "No repaired value yet.";
   const o = buildOffer({ ...base, decision: { ...base.decision!, recommendation: "cannot_say", signals: [], missing: [missing] } });
   assert.deepEqual(o.asks, []);
   assert.equal(o.reason, missing);
+});
+
+/* ─────────────────────────── how the trade-in was reached (PriceIQ at the grade less defects) ─────────────────────────── */
+
+const PRICEIQ_QUOTE = {
+  status: "priced" as const,
+  amount: 36_490,
+  source: { kind: "priceiq" as const },
+  partnerRef: null,
+  lines: [
+    { label: "Refurbished market price (Good) · PriceIQ", amount: 51_399 },
+    { label: "Below the market price", bp: 200, amount: -1_028 },
+    { label: "Battery drains / swollen", bp: 900, amount: -4_625 },
+    { label: "Rear camera faulty", bp: 1_800, amount: -9_251 },
+    { label: "Rounded down to ₹10", amount: -5 },
+  ],
+  priceiq: { grade: "Good" as const, gradeWanted: "Good" as const, listing: 51_399, markdownBp: 200, defects: 2, deductions: "SwapUp's % per defect", week: "2026-W35", listings: 2 },
+};
+
+test("tradeInDetail: a PriceIQ quote — one line under the figure, the details from the markdown on (its base is in the line)", () => {
+  const o = buildOffer(priced({ quote: PRICEIQ_QUOTE }));
+  assert.equal(o.swap.tradeIn, 36_490);
+  assert.deepEqual(o.swap.tradeInDetail, {
+    line: "Refurbished market price ₹51,399 (Good) − 2% − 2 defects · PriceIQ 2026-W35",
+    lines: [
+      { label: "Below the market price", pct: "2%", amount: -1_028 },
+      { label: "Battery drains / swollen", pct: "9%", amount: -4_625 },
+      { label: "Rear camera faulty", pct: "18%", amount: -9_251 },
+      { label: "Rounded down to ₹10", pct: null, amount: -5 },
+    ],
+    note: null,
+  });
+  assert.equal(o.swap.tradeInNote, null, "fresh market data, PriceIQ answered: nothing to mark");
+  const lower = buildOffer(priced({ quote: { ...PRICEIQ_QUOTE, priceiq: { ...PRICEIQ_QUOTE.priceiq, grade: "Fair", gradeWanted: "Good" } } }));
+  assert.equal(lower.swap.tradeInDetail?.line, "Refurbished market price ₹51,399 (Fair) − 2% − 2 defects · PriceIQ 2026-W35 · none at Good");
+});
+
+test("a swollen battery's safety warning is the answer's own line, in the open — not one of the caveats behind the toggle", () => {
+  const base = priced();
+  const d = base.decision!;
+  const o = buildOffer({ ...base, decision: { ...d, caveats: ["Swollen battery is a safety risk — stop using and charging it.", ...d.caveats] } });
+  assert.equal(o.safety, "Swollen battery is a safety risk — stop using and charging it.");
+  assert.ok(!o.caveats.includes(o.safety!), "said once");
+  assert.equal(buildOffer(base).safety, null);
+});
+
+test("old market data and an unreachable PriceIQ are said under the figure — and the swap still goes ahead (a price is a price)", () => {
+  const stale = { ...PRICEIQ_QUOTE, priceiq: { ...PRICEIQ_QUOTE.priceiq, stale: true, ageDays: 52, note: "Refurbished market price, week 2026-W35, 52 days old." } };
+  const o = buildOffer(priced({ quote: stale }));
+  assert.equal(o.swap.tradeInNote, "Refurbished market price, week 2026-W35, 52 days old.");
+  assert.equal(o.swap.tradeInDetail?.line, "Refurbished market price ₹51,399 (Good) − 2% − 2 defects · PriceIQ 2026-W35, 52 days old");
+  assert.equal(o.actions.swap, null);
+  const down = { ...PRICEIQ_QUOTE, priceiq: { ...PRICEIQ_QUOTE.priceiq, note: "PriceIQ unreachable, last answer 2026-10-18 08:30 UTC." } };
+  assert.equal(buildOffer(priced({ quote: down })).swap.tradeInNote, "PriceIQ unreachable, last answer 2026-10-18 08:30 UTC.");
+  // Expired on an open case: it is being re-quoted — that is the news, not the old figure's age.
+  assert.equal(buildOffer(priced({ quote: stale, quoteExpired: true })).swap.tradeInNote, "Quote expired — re-quoting.");
+  // Closed: the age the trade-in was priced at stays on it.
+  assert.equal(buildOffer(priced({ quote: stale, status: "locked", quoteExpired: true })).swap.tradeInNote, "Refurbished market price, week 2026-W35, 52 days old.");
+});
+
+test("tradeInDetail: a quote typed from the partner's app has nothing to break down; no trade-in, no detail", () => {
+  const manual = buildOffer(priced({ quote: { status: "priced", amount: 41_000, source: { kind: "partner_manual" }, partnerRef: "PQ-12345", lines: [{ label: "Partner quote · ref PQ-12345", amount: 41_000 }] } }));
+  assert.deepEqual(manual.swap.tradeInDetail, { line: null, lines: [], note: null });
+  const none = buildOffer(priced({ quote: { status: "unpriced", amount: null, source: { kind: "partner_ratecard" }, partnerRef: null, reason: "No price." } }));
+  assert.equal(none.swap.tradeInDetail, null);
+  // an older stored quote with no lines still reads
+  assert.deepEqual(buildOffer(priced()).swap.tradeInDetail, { line: null, lines: [], note: null });
+});
+
+test("tradeInDetail: the rate card answered because PriceIQ had no listing — its lines from the best-condition price, and why", () => {
+  const why = "PriceIQ has no refurbished market price for the Galaxy Z Fold6 256GB.";
+  const o = buildOffer(
+    priced({
+      quote: {
+        ...CARD_QUOTE,
+        amount: 46_220,
+        lines: [
+          { label: "Best-condition price on the rate card", amount: 65_100 },
+          { label: "Rear camera faulty", bp: 1_800, amount: -11_718 },
+          { label: "Age: Over 11 months", bp: 800, amount: -5_208 },
+          { label: "Rounded down to ₹10", amount: -1 },
+          { label: "Body: Light scuffs", bp: 300, amount: -1_953 },
+        ],
+        priceiqWhy: why,
+      },
+    })
+  );
+  assert.equal(o.swap.tradeInDetail?.line, null);
+  assert.equal(o.swap.tradeInDetail?.lines[0].label, "Best-condition price on the rate card");
+  assert.equal(o.swap.tradeInDetail?.lines.length, 5);
+  assert.equal(o.swap.tradeInDetail?.note, why);
+  assert.equal(o.swap.tradeInNote, null);
 });
