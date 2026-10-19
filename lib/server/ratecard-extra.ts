@@ -2,7 +2,7 @@ import { HttpError, type SessionUser } from "./auth";
 import { getOrg } from "./scope";
 import { tradeModels } from "./catalog";
 import { activeRateCard } from "./buyback";
-import type { RateCard } from "../domain/ratecard";
+import { RATE_CARD_COLUMNS, type RateCard, type RateEntry } from "../domain/ratecard";
 import { SCREEN_ORDER, BODY_ORDER, SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LABEL, type IssueId, type AgeBand } from "../domain/condition";
 
 /**
@@ -32,23 +32,27 @@ export function tradeModelNames(): Record<string, string> {
 
 /**
  * The upload template: one row per catalogue model × storage, in the exact
- * `model_id,variant,max_price` shape the upload reads.
+ * `model_id,variant,max_price,good_price,fair_price,best_value_price` shape the
+ * upload reads (the grade columns optional).
  *
- * Prices are pre-filled from the partner's ACTIVE card (its own sheet); with no
- * card the template is blank — SwapUp never fills in a price of its own.
+ * Prices are pre-filled from the partner's ACTIVE card (its own sheet), grade
+ * prices included; with no card the template is blank — SwapUp never fills in a
+ * price of its own.
  */
 export function rateCardTemplateCsv(partnerId: string): { csv: string; filename: string; prefilled: number; rows: number } {
   const card = activeRateCard(partnerId);
   const usable = card && card.source.kind === "partner_ratecard" ? card : null;
-  const price = new Map<string, number>();
-  if (usable) for (const e of usable.entries) price.set(`${e.modelId}|${e.variant}`, e.maxPrice);
-  const lines = ["model_id,variant,max_price"];
+  const entry = new Map<string, RateEntry>();
+  if (usable) for (const e of usable.entries) entry.set(`${e.modelId}|${e.variant}`, e);
+  const lines = [RATE_CARD_COLUMNS.join(",")];
   let prefilled = 0;
   for (const m of tradeModels()) {
     for (const v of m.variants) {
-      const p = price.get(`${m.id}|${v}`);
-      if (p !== undefined) prefilled += 1;
-      lines.push(`${m.id},${v},${p ?? ""}`); // the upload splits on plain commas; ids and variants never contain one
+      const e = entry.get(`${m.id}|${v}`);
+      if (e) prefilled += 1;
+      const g = e?.gradePrices ?? {};
+      // The upload splits on plain commas; ids and variants never contain one.
+      lines.push([m.id, v, e?.maxPrice ?? "", g.Good ?? "", g.Fair ?? "", g["Best Value"] ?? ""].join(","));
     }
   }
   const slug = (getOrg(partnerId)?.name ?? "partner").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "partner";

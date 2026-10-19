@@ -6,7 +6,7 @@ import { api } from "@/lib/client/api";
 import { Banner, Card, Empty, ErrorText, Field, Money, fmtDate } from "@/components/ui";
 import { fmtBp, bpToPct, pctToBp } from "@/lib/domain/money";
 import { SCREEN_ORDER, BODY_ORDER, SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LABEL, type IssueId, type AgeBand } from "@/lib/domain/condition";
-import type { RateCard } from "@/lib/domain/ratecard";
+import { gradePricesProblem, type GradePrices, type RateCard } from "@/lib/domain/ratecard";
 import type { RateCardSummary } from "@/lib/server/catalog";
 import type { PartnerMode } from "@/lib/server/buyback";
 
@@ -117,7 +117,7 @@ function checkCsv(csv: string, known: Map<string, string[]> | null): CsvCheck {
   const out: CsvCheck = { priced: 0, blankLines: [], problems: [] };
   const seen = new Set<string>();
   lines.forEach((line, i) => {
-    const [modelId = "", variant = "", priceRaw] = line.split(",").map((x) => (x ?? "").trim());
+    const [modelId = "", variant = "", priceRaw, ...gradeRaw] = line.split(",").map((x) => (x ?? "").trim());
     if (i === 0 && /model/i.test(modelId)) return; // header
     const n = i + 1;
     if (known && !known.has(modelId)) return void out.problems.push(`Line ${n}: unknown model id “${modelId}”.`);
@@ -128,6 +128,14 @@ function checkCsv(csv: string, known: Map<string, string[]> | null): CsvCheck {
     if (!Number.isInteger(price) || price <= 0) return void out.problems.push(`Line ${n}: price must be a whole rupee amount (no commas or paise).`);
     const key = `${modelId}|${variant}`;
     if (seen.has(key)) return void out.problems.push(`Line ${n}: ${modelId} ${variant} appears twice.`);
+    // The optional grade columns, checked the server's way (ratecard.ts gradePricesProblem).
+    const gradePrices: GradePrices = {};
+    (["Good", "Fair", "Best Value"] as const).forEach((g, j) => {
+      const raw = String(gradeRaw[j] ?? "").replace(/[₹\s]/g, "");
+      if (raw !== "") gradePrices[g] = Number(raw);
+    });
+    const bad = gradePricesProblem({ modelId, variant, maxPrice: price, gradePrices });
+    if (bad) return void out.problems.push(`Line ${n}: ${bad}.`);
     seen.add(key);
     out.priced += 1;
   });
@@ -474,7 +482,7 @@ function UploadForm({
 
         <div>
           <div className="flex flex-wrap items-end justify-between gap-2 mb-1.5">
-            <span className="label !mb-0">Prices (CSV: model_id, variant, max_price)</span>
+            <span className="label !mb-0">Prices (CSV: model_id, variant, max_price, good_price, fair_price, best_value_price — the last three optional)</span>
             <span className="flex flex-wrap gap-2">
               <a className="btn btn-sm no-underline" href={`/api/partner/rate-cards/template${qs}`} download>
                 Download template
@@ -500,11 +508,11 @@ function UploadForm({
             value={csv}
             onChange={(e) => setCsv(e.target.value)}
             spellCheck={false}
-            placeholder={"model_id,variant,max_price\ngalaxy-s22,128GB,12345"}
+            placeholder={"model_id,variant,max_price,good_price,fair_price,best_value_price\ngalaxy-s22,128GB,12345,11870,11410,10860"}
             aria-describedby="csv-help"
           />
           <p id="csv-help" className="hint">
-            Model id, storage, best-condition price in whole rupees — e.g. <code className="num">galaxy-s22,128GB,12345</code>.
+            Model id, storage, best-condition (grade A) price in whole rupees — e.g. <code className="num">galaxy-s22,128GB,12345</code> — then, if the sheet has them, the grade B, C and D prices.
           </p>
           {check ? (
             <div className="mt-3 space-y-2">

@@ -2,7 +2,7 @@ import { db, tx, nowIso, newId, parseJson, audit } from "./db";
 import { HttpError, orgSettings, type SessionUser } from "./auth";
 import { adminOrgId, getOrg } from "./scope";
 import { validateCampaign, type Campaign } from "../domain/bonus";
-import type { RateCard, RateEntry } from "../domain/ratecard";
+import { gradePricesProblem, type GradePrices, type RateCard, type RateEntry } from "../domain/ratecard";
 import { PART_LABEL, type PartId } from "../domain/condition";
 import type { SourceRef } from "../domain/repair";
 
@@ -236,10 +236,13 @@ function partnerIdFor(u: SessionUser, requested?: string | null): string {
 }
 
 /**
- * Upload a new rate card. Entries come as CSV `model_id,variant,max_price`
- * (header optional). Deduction rules are copied from the current active card
- * unless supplied. A model_id the catalogue does not know is REJECTED — a typo
- * would silently leave that phone unpriced.
+ * Upload a new rate card. Entries come as CSV
+ * `model_id,variant,max_price,good_price,fair_price,best_value_price` (header
+ * optional; the last three columns optional — an old 3-column sheet reads as
+ * before). Deduction rules are copied from the current active card unless
+ * supplied. A model_id the catalogue does not know is REJECTED — a typo would
+ * silently leave that phone unpriced — and so is a row whose prices rise as the
+ * grade falls (ratecard.ts gradePricesProblem).
  */
 export function uploadRateCard(
   u: SessionUser,
@@ -260,7 +263,7 @@ export function uploadRateCard(
     .map((l) => l.trim())
     .filter(Boolean)
     .forEach((line, i) => {
-      const [modelId, variant, priceRaw] = line.split(",").map((x) => (x ?? "").trim());
+      const [modelId, variant, priceRaw, ...gradeRaw] = line.split(",").map((x) => (x ?? "").trim());
       if (i === 0 && /model/i.test(modelId)) return; // header
       const price = Number(String(priceRaw).replace(/[₹\s]/g, ""));
       if (!known.has(modelId)) return void errors.push(`Line ${i + 1}: unknown model id "${modelId}".`);
@@ -268,8 +271,17 @@ export function uploadRateCard(
       if (!Number.isInteger(price) || price <= 0) return void errors.push(`Line ${i + 1}: price must be a whole rupee amount.`);
       const key = `${modelId}|${variant}`;
       if (seen.has(key)) return void errors.push(`Line ${i + 1}: ${modelId} ${variant} appears twice.`);
+      // The optional grade columns: good (B), fair (C), best value (D). A blank one is simply not listed.
+      const gradePrices: GradePrices = {};
+      for (const [j, g] of (["Good", "Fair", "Best Value"] as const).entries()) {
+        const raw = String(gradeRaw[j] ?? "").replace(/[₹\s]/g, "");
+        if (raw !== "") gradePrices[g] = Number(raw);
+      }
+      const entry: RateEntry = { modelId, variant, maxPrice: price, ...(Object.keys(gradePrices).length ? { gradePrices } : {}) };
+      const bad = gradePricesProblem(entry);
+      if (bad) return void errors.push(`Line ${i + 1}: ${bad}.`);
       seen.add(key);
-      entries.push({ modelId, variant, maxPrice: price });
+      entries.push(entry);
     });
   if (errors.length) throw new HttpError(400, `${errors.length} problem${errors.length > 1 ? "s" : ""} in the sheet — ${errors.slice(0, 3).join(" ")}`);
   if (!entries.length) throw new HttpError(400, "The sheet has no prices.");

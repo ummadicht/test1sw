@@ -16,6 +16,7 @@ import { priceFromCard, type RateCard, type QuoteLine, type PriceSourceKind } fr
 import type { ConditionAnswers } from "../domain/condition";
 import type { Rupees } from "../domain/money";
 import type { PriceiqMeta } from "../domain/priceiqTradeIn";
+import type { MarketGrade } from "../domain/marketSell";
 
 export type PartnerQuote = {
   status: "priced" | "unpriced" | "error";
@@ -31,6 +32,8 @@ export type PartnerQuote = {
   priceiq?: PriceiqMeta;
   /** PriceIQ was asked first and had no price: why (a rate-card quote, or no price at all). */
   priceiqWhy?: string;
+  /** A rate-card row with grade prices: the grade the price is FOR (ratecard.ts priceFromCard). */
+  grade?: MarketGrade;
 };
 
 export type PartnerMode = {
@@ -112,5 +115,6 @@ export async function partnerQuote(input: {
     partnerRef: null,
     quotedAt,
     validUntil: input.whatIf ? null : addDays(quotedAt, validity),
+    ...(q.grade ? { grade: q.grade } : {}),
   };
 }

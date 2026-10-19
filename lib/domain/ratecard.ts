@@ -19,6 +19,8 @@
 import { type Rupees, type BasisPoints, pctOf, roundDown, clamp } from "./money.ts";
 import type { ConditionAnswers, ScreenState, BodyState, IssueId, AgeBand } from "./condition.ts";
 import { SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LABEL } from "./condition.ts";
+// The look the card's grade columns price — rule G1 beside the grade's words, never the grading engine (G49).
+import { MARKET_GRADES, MARKET_GRADE_LETTER, isDefectState, tradeInGrade, type MarketGrade } from "./marketSell.ts";
 
 /**
  * Where a trade-in price came from, best first (lib/server/tradeIn.ts asks in this order): a
@@ -72,7 +74,52 @@ export type RateCard = {
   entries: RateEntry[];
 };
 
-export type RateEntry = { modelId: string; variant: string; maxPrice: Rupees };
+/**
+ * One row of the card. `maxPrice` is the best-condition price — grade A (Superb). A card may also
+ * price grades B–D directly (owner, 2026-10-19: the buyback partner's own grade ladder): then the
+ * phone is priced at its look's grade and only the defects are taken off (priceFromCard).
+ */
+export type RateEntry = { modelId: string; variant: string; maxPrice: Rupees; gradePrices?: GradePrices };
+/** The optional grade columns: good_price (B), fair_price (C), best_value_price (D). */
+export type GradePrices = Partial<Record<Exclude<MarketGrade, "Superb">, Rupees>>;
+
+/** The upload's columns, in order (lib/server/catalog.ts uploadRateCard). The last three are optional. */
+export const RATE_CARD_COLUMNS = ["model_id", "variant", "max_price", "good_price", "fair_price", "best_value_price"] as const;
+/** Which grade each price column is. */
+export const COLUMN_GRADE: readonly MarketGrade[] = ["Superb", "Good", "Fair", "Best Value"];
+
+/** A row's price at each grade it lists, best first: max is Superb; a blank column is absent. */
+export function entryGradePrices(e: RateEntry): { grade: MarketGrade; price: Rupees }[] {
+  const out: { grade: MarketGrade; price: Rupees }[] = [{ grade: "Superb", price: e.maxPrice }];
+  for (const g of COLUMN_GRADE.slice(1) as Exclude<MarketGrade, "Superb">[]) {
+    const p = e.gradePrices?.[g];
+    if (p !== undefined) out.push({ grade: g, price: p });
+  }
+  return out;
+}
+
+/**
+ * A row's prices must never rise as the grade falls: max ≥ good ≥ fair ≥ best value, over the
+ * columns present, each a whole rupee ≥ 1. null = fine; else the reason (the upload names the row).
+ */
+export function gradePricesProblem(e: RateEntry): string | null {
+  const ps = entryGradePrices(e);
+  for (const p of ps) if (!Number.isInteger(p.price) || p.price < 1) return `the ${p.grade} price must be a whole rupee amount`;
+  for (let i = 1; i < ps.length; i++)
+    if (ps[i].price > ps[i - 1].price) return `the ${ps[i].grade} price (${ps[i].price}) is above the ${ps[i - 1].grade} price (${ps[i - 1].price}) — a lower grade can't pay more`;
+  return null;
+}
+
+/** The price at `wanted`, else at the next LOWER grade the row lists — never a higher one. null = none at or below (other than max). */
+function priceAtGrade(e: RateEntry, wanted: MarketGrade): { grade: MarketGrade; price: Rupees } | null {
+  if (!e.gradePrices || !Object.keys(e.gradePrices).length) return null;
+  const listed = entryGradePrices(e);
+  for (const g of MARKET_GRADES.slice(MARKET_GRADES.indexOf(wanted))) {
+    const hit = listed.find((x) => x.grade === g);
+    if (hit) return hit;
+  }
+  return null;
+}
 
 /**
  * SwapUp's % per defect (owner, 2026-10-18: "deductions per defect = SwapUp's % table
@@ -119,6 +166,8 @@ export type RateQuote =
       deductionBp: BasisPoints;
       capped: boolean;
       floored: boolean;
+      /** A row with grade prices: the grade the price is FOR (the phone's look, or the next lower listed). Absent otherwise. */
+      grade?: MarketGrade;
     }
   | { status: "unpriced"; reason: string };
 
@@ -134,15 +183,22 @@ export function priceFromCard(card: RateCard, modelId: string, variant: string, 
       reason: "No rate-card price for this model and storage — ask the partner.",
     };
   }
-  const ceiling = entry.maxPrice;
   const d = card.deductions;
-  const parts = conditionDeductions(d, a);
+  // A row with grade prices: the price at the phone's look (or the next lower grade it lists), and
+  // the looks are NOT taken off again — the grade priced them. Every other deduction applies once.
+  const look = tradeInGrade(a);
+  const at = look ? priceAtGrade(entry, look) : null;
+  const ceiling = at ? at.price : entry.maxPrice;
+  const parts = at ? conditionDeductions(d, a, isDefectState) : conditionDeductions(d, a);
   if (!a.accessories.charger && d.noChargerBp) parts.push({ label: "No original charger", bp: d.noChargerBp });
   if (!a.accessories.box && d.noBoxBp) parts.push({ label: "No original box", bp: d.noBoxBp });
   if (!a.accessories.bill && d.noBillBp) parts.push({ label: "No purchase bill", bp: d.noBillBp });
   if (d.age[a.age]) parts.push({ label: `Age: ${AGE_LABEL[a.age]}`, bp: d.age[a.age] });
-  const out = combineDeductions({ ceiling, start: ceiling, lines: [{ label: "Best-condition price on the rate card", amount: ceiling }], parts, rules: card });
-  return { status: "priced", ceiling, ...out };
+  const base: QuoteLine = at
+    ? { label: `Market price grade ${MARKET_GRADE_LETTER[at.grade]} · ${card.source.label}`, amount: ceiling }
+    : { label: "Best-condition price on the rate card", amount: ceiling };
+  const out = combineDeductions({ ceiling, start: ceiling, lines: [base], parts, rules: card });
+  return { status: "priced", ceiling, ...out, ...(at ? { grade: at.grade } : {}) };
 }
 
 /** One percentage the card takes off, with the words the trace shows. */
