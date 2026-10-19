@@ -23,6 +23,16 @@ echo "▸ gate: no bundled price file"
 stray=$(cd "$ROOT" && find app components lib public -type f -name '*.csv' 2>/dev/null || true)
 if [ -n "$stray" ]; then echo "✗ a CSV in the app — prices come from PriceIQ live, not a bundled file:" >&2; echo "$stray" >&2; exit 1; fi
 
+# The release guard (deploy/release-guard.sh, no override): every browser build and APK that would
+# ship is clean, built from swapup-mobile's HEAD, and no APK reuses a versionCode live on /downloads.
+# The live manifests are read off the VM first (none yet → nothing to compare against).
+MOBILE=${MOBILE:-$ROOT/../swapup-mobile}
+echo "▸ gate: release guard (browser builds + APKs)"
+LIVE_MANIFESTS=$(mktemp -d)
+trap 'rm -rf "$LIVE_MANIFESTS"' EXIT
+scp -q $SSH_OPTS "$VM:/var/www/swapup-downloads/swapup-*.json" "$LIVE_MANIFESTS/" 2>/dev/null || echo "  no live APK manifests on the VM yet"
+bash "$ROOT/deploy/release-guard.sh" "$MOBILE" "${WEB_DIST:-$MOBILE/dist-web}" "${MOBILE_DIST:-$MOBILE/dist}" "$LIVE_MANIFESTS"
+
 # GradeIQ is the grading engine under SwapUp Check (docs/GRADEIQ-INTEGRATION.md).
 # Defaults go into /etc/swapup.env only where a line is missing — an operator's
 # value (e.g. GRADEIQ_ENABLED=0, the labelled kill switch) is never overwritten.
