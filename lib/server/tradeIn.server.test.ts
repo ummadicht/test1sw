@@ -233,6 +233,10 @@ test("an unpriced case is asked again on a plain re-price: a rate card uploaded 
   const partner = userNamed("partner");
   uploadRateCard(partner, { label: "Partner sheet later", effectiveFrom: "2026-10-12", quoteValidityDays: 3, csv: "model_id,variant,max_price\ngalaxy-s24,256GB,40000\n", deductions: DEFECT_DEDUCTIONS, activate: true });
   try {
+    // The desk asks for that re-quote when either case opens (AnswerCard, once per open).
+    const { autoRequoteKey } = await import("../../components/counter/answerAsks.ts");
+    assert.ok(autoRequoteKey(cases.getCase(advisor, c.id)), "the unpriced quote");
+    assert.ok(autoRequoteKey(cases.getCase(advisor, chips0.id)), "the chips, none priced");
     // The desk's quiet re-quote on open, and the store app's: a plain reprice (requote:false).
     const v = await cases.reprice(advisor, c.id);
     assert.equal(v.quote?.status, "priced");

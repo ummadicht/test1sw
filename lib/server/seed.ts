@@ -410,6 +410,7 @@ export function retireOldQuotes(): { relabelled: string[]; cancelled: string[]; 
  * wrote, never anything typed.
  */
 export const REWORDED_QUOTE_TEXTS: readonly (readonly [string, string])[] = [
+  // Under the "No market price yet" title this is no why at all, so it is never shown there (offer.ts noPriceWhy).
   ["No market price yet — enter a quote.", NO_MARKET_PRICE],
   ["No rate-card price for this model and storage — ask the partner.", NOT_ON_CARD],
   // The tail of the Apply flag for a size not on file (phoneLed.ts).

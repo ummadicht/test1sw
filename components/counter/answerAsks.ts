@@ -52,15 +52,19 @@ export function askControl(a: OfferAsk, v: Pick<CaseView, "measuredStorage">, is
 /**
  * The card's one quiet re-quote, as the store app's answer screen does: an open case whose
  * quote has run out — then "Quote expired — re-quoting." is true — or that nothing priced last
- * time (a rate card uploaded since prices it, with nobody touching the case). A plain reprice is
- * enough (reprice re-asks both). Non-null = there is something to re-quote; AnswerCard runs it at
- * most ONCE per page open (a ref), so a quote that comes back already out of date, or still
- * unpriced, is never asked for in a loop.
+ * time (a rate card uploaded since prices it, with nobody touching the case); or, with the
+ * storage not known yet, whose storage chips none has a price (the same card prices them). A
+ * plain reprice is enough (reprice re-asks all three). Non-null = there is something to
+ * re-quote; AnswerCard runs it at most ONCE per page open (a ref), so a quote that comes back
+ * already out of date, or still unpriced, is never asked for in a loop.
  */
 export function autoRequoteKey(v: Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer">): string | null {
+  if (!v.offer?.open) return null;
   const q = v.quote;
-  if (!v.offer?.open || !q || (!v.quoteExpired && q.status === "priced")) return null;
-  return `${v.id} ${q.quotedAt} ${q.validUntil ?? ""}`;
+  if (q && (v.quoteExpired || q.status !== "priced")) return `${v.id} ${q.quotedAt} ${q.validUntil ?? ""}`;
+  const chips = v.offer.asks.find((a) => a.kind === "storage");
+  if (chips?.kind === "storage" && chips.options.length > 0 && chips.options.every((o) => o.tradeIn === null)) return `${v.id} chips`;
+  return null;
 }
 
 /**
@@ -120,6 +124,13 @@ export function heldForReason(patch: CasePatch, error: string | null): { patch: 
 
 /** The held change, sent again with the advisor's reason — the shape updateCase reads (kept with their name). */
 export const withCameraReason = (patch: CasePatch, reason: string): CasePatch => ({ ...patch, cameraOverride: { reason: reason.trim() } });
+
+/**
+ * That resend failed (a dropped connection, a 502): the held change stays, so its reason field
+ * stays open with the typed reason and says the server's sentence. Any other save replaces the
+ * held change (heldForReason) — a resend that went through clears it.
+ */
+export const keepsHeld = (patch: CasePatch, error: string | null): boolean => !!error && !!patch.cameraOverride?.reason && !patch.cameraOverride.identity;
 
 /** The tile's own link when no new phone is chosen. */
 export const CHOOSE_NEW_PHONE_LINK = "Choose new phone";

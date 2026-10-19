@@ -8,7 +8,7 @@
 import "./testing/register.mjs";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -80,7 +80,7 @@ test("template: the 6-column header, pre-filled from the active card's grade pri
   assert.deepEqual(sorted(activeRateCard(partner.orgId)!.entries), before);
 });
 
-test("scripts/activate-rate-card.ts: the page's upload from the shell — active at once, SwapUp's % per defect with nothing off for accessories or age, only counts and the id; a label already used is refused", async () => {
+test("scripts/activate-rate-card.ts: the page's upload from the shell — active at once, SwapUp's % per defect with nothing off for accessories or age, only counts and the id; a label already used is refused; a database that isn't there is refused, never made", async () => {
   const { spawnSync } = await import("node:child_process");
   const { fileURLToPath } = await import("node:url");
   const script = fileURLToPath(new URL("../../scripts/activate-rate-card.ts", import.meta.url));
@@ -88,8 +88,17 @@ test("scripts/activate-rate-card.ts: the page's upload from the shell — active
   const csv = `${HEADER}\ngalaxy-s23-ultra,256GB,34960,33574,32255,30672\ngalaxy-s23-ultra,512GB,38000,,,\ngalaxy-s23,128GB,20000,19000,,\n`;
   const run = (label: string, input = csv) =>
     spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", script, "--label", label], { input, encoding: "utf8", env: { ...process.env, SWAPUP_DB: file } });
+  // No file at that path (a wrong SWAPUP_DB, or the wrong folder): refused, and no database is made.
+  const missing = run("W42 by grade");
+  assert.equal(missing.status, 1);
+  assert.equal(missing.stderr.trim(), `No database at ${file} — nothing uploaded.`);
+  assert.equal(missing.stdout, "");
+  assert.equal(existsSync(file), false);
+  // The app's database is there (the server made it); an empty file stands in, and the script's boot runs over it as the server's would.
+  writeFileSync(file, "");
   const out = run("W42 by grade");
   assert.equal(out.status, 0, out.stderr);
+  assert.ok(out.stderr.split("\n").includes(`Database: ${file}`), "the file used is named on stderr");
   const [counts, id, ...rest] = out.stdout.trim().split("\n");
   assert.equal(counts, "3 rows, 2 models — active.");
   assert.match(id, /^rc_[\w-]+$/);

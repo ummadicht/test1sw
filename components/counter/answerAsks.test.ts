@@ -13,6 +13,7 @@ import {
   cameraReasonOk,
   heldForReason,
   identityReasonOk,
+  keepsHeld,
   requotable,
   requoteSpot,
   swapRefusal,
@@ -194,6 +195,25 @@ test("an unpriced quote on an open case is asked again once on open, expired or 
   assert.equal(autoRequoteKey(unpriced({ offer: buildOffer(input({ status: "walked_away" })) })), null);
 });
 
+test("storage not known and no chip priced (a rate card uploaded since prices them): asked again once on open, as the store app does", () => {
+  const chips = (storageQuotes: OfferInput["storageQuotes"], over: Partial<OfferInput> = {}) =>
+    caseWith(null, { quoteExpired: false, offer: buildOffer(input({ ...NO_STORAGE, storageQuotes, ...over })) });
+  const bare = [
+    { variant: "256GB", amount: null, reason: "No rate card is active yet." },
+    { variant: "512GB", amount: null, reason: "No rate card is active yet." },
+  ];
+  const key = autoRequoteKey(chips(bare));
+  assert.ok(key);
+  assert.equal(autoRequoteKey(chips(bare)), key, "the same chips, the same key: asked once");
+  // None asked yet: the sizes alone, unpriced — the same.
+  assert.equal(autoRequoteKey(chips(null)), key);
+  // A size priced: the chips are the answer, nothing to ask again.
+  assert.equal(autoRequoteKey(chips([{ variant: "256GB", amount: 18800, reason: null }, bare[1]])), null);
+  // The phone measured a size not on file: no chips at all, never a guessed one — nothing to ask.
+  assert.equal(autoRequoteKey(chips(null, { measuredStorage: "1TB" })), null);
+  assert.equal(autoRequoteKey(chips(bare, { status: "walked_away" })), null);
+});
+
 test("nothing to re-quote: a fresh priced quote, no quote, a closed case", () => {
   assert.equal(autoRequoteKey(caseWith({ kind: "partner_ratecard" }, { quoteExpired: false })), null);
   assert.equal(autoRequoteKey(caseWith(null)), null);
@@ -243,7 +263,7 @@ test("the identity override needs at least 8 characters after trimming, like the
   assert.equal(identityReasonOk("12345678"), true);
 });
 
-test("a fault or condition change the camera refuses is held for ONE reason, then sent again with it — the server's rule, the server's shape", () => {
+test("a fault or condition change the camera refuses is held for ONE reason, then sent again with it — the server's rule, the server's shape; a resend that fails stays held", () => {
   const WHY = 'Camera confirmed "Cracked screen", photo 2 — removing it needs a reason.';
   const patch = { faults: [], condition: { powersOn: true } };
   assert.deepEqual(heldForReason(patch, WHY), { patch, why: WHY });
@@ -255,6 +275,14 @@ test("a fault or condition change the camera refuses is held for ONE reason, the
   assert.equal(heldForReason({ ...patch, cameraOverride: { reason: "seen it, no crack" } }, WHY), null);
   // Sent again as updateCase reads it: the same change, plus cameraOverride {reason}, trimmed.
   assert.deepEqual(withCameraReason(patch, "  Glass protector cracked, screen fine  "), { ...patch, cameraOverride: { reason: "Glass protector cracked, screen fine" } });
+  // That resend failing (no connection, a 502) keeps the held change, so its field stays open and says why;
+  // it going through, or any other save failing, does not.
+  const resend = withCameraReason(patch, "Glass protector cracked, screen fine");
+  assert.equal(keepsHeld(resend, "Failed to fetch"), true);
+  assert.equal(keepsHeld(resend, "Request failed (502)"), true);
+  assert.equal(keepsHeld(resend, null), false);
+  assert.equal(keepsHeld(patch, "Request failed (502)"), false);
+  assert.equal(keepsHeld({ cameraOverride: { identity: true, reason: "*#06# matches the box" } }, "Request failed (502)"), false);
   assert.equal(CAMERA_REASON_MIN, 8);
   assert.equal(cameraReasonOk("   1234567   "), false);
   assert.equal(cameraReasonOk("12345678"), true);

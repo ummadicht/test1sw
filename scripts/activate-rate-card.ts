@@ -4,9 +4,11 @@
  *
  *   node --experimental-strip-types scripts/activate-rate-card.ts --label "W42 by grade" < card.csv
  *
- * Run it in the app's folder. The database is the server's own (SWAPUP_DB, else data/swapup.db),
- * opened through the server's db module and booted through its seed, so migrations and boot passes
- * run exactly as the server runs them. The CSV is the page's:
+ * The database is SWAPUP_DB, else the app's own data/swapup.db next to this folder — never one in the
+ * shell's folder, so it can run from anywhere. A database file that isn't there is refused (opening
+ * it would make and seed a new one, and the card would go live there), and the file used is named on
+ * stderr. It is opened through the server's db module and booted through its seed, so migrations and
+ * boot passes run exactly as the server runs them. The CSV is the page's:
  * model_id,variant,max_price,good_price,fair_price,best_value_price (header optional).
  *
  * Deductions: SwapUp's % per defect (DEFECT_DEDUCTIONS), with nothing taken off for a missing
@@ -16,6 +18,8 @@
  */
 // The module hooks the server's tests load lib/server with (extensionless imports, "@/…", next stubs).
 import "../lib/server/testing/register.mjs";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 function fail(message: string): never {
   console.error(message);
@@ -30,6 +34,12 @@ const chunks: Buffer[] = [];
 for await (const c of process.stdin) chunks.push(c as Buffer);
 const csv = Buffer.concat(chunks).toString("utf8");
 if (!csv.trim()) fail("The CSV is empty.");
+
+// The server's db module reads SWAPUP_DB when it loads (else the shell's folder), so set it first.
+const dbFile = process.env.SWAPUP_DB || fileURLToPath(new URL("../data/swapup.db", import.meta.url));
+if (!existsSync(dbFile)) fail(`No database at ${dbFile} — nothing uploaded.`);
+process.env.SWAPUP_DB = dbFile;
+console.error(`Database: ${dbFile}`);
 
 // The server's own boot. Its notes go to stderr, so stdout carries only the counts and the id.
 const log = console.log;

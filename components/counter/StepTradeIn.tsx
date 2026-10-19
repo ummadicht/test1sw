@@ -9,6 +9,7 @@ import { fmtWhen } from "./shared";
 import type { CaseOps, CampaignBand } from "./ops";
 import { requoteSpot, unlistedSize } from "./answerAsks";
 import { quoteSourceLabel, retiredSource } from "@/lib/domain/ratecard";
+import { noPriceWhy } from "@/lib/domain/offer";
 
 /** SourceBadge for a quote: where its price came from. */
 export function QuoteSource({ quote }: { quote: Pick<PartnerQuote, "source"> | null | undefined }) {
@@ -103,7 +104,8 @@ export function StepTradeIn({ ops, isPartner = false, isManager = false, bands =
   let line: string | null;
   let tone: "plain" | "warn" = "plain";
   if (!q) line = needs.length ? needs[0] : "Waiting for the partner.";
-  else if (!priced) line = q.reason ?? null;
+  // Why nothing priced it — never "No market price yet" again under that figure.
+  else if (!priced) line = noPriceWhy(q.reason);
   else if (view.quoteExpired) {
     tone = "warn";
     line = `Expired ${fmtWhen(q.validUntil)} — re-quote first.`;

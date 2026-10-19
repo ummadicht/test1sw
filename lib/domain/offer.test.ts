@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildOffer, EXPIRED_BLOCKER, NO_MARKET_PRICE, type Offer, type OfferInput } from "./offer.ts";
+import { buildOffer, EXPIRED_BLOCKER, NO_MARKET_PRICE, noPriceWhy, type Offer, type OfferInput } from "./offer.ts";
 import { decide, type DecisionInput } from "./decision.ts";
 import { premiumOn } from "./premium.ts";
 import { customerAnswer } from "./answer.ts";
@@ -381,8 +381,24 @@ test("offer 7b: nothing priced it — 'No market price yet' and the reason why, 
     assert.equal(o.actions.walkAway, null);
     assert.equal(o.swap.tradeIn, null);
   }
-  const silent = buildOffer(priced({ quote: { status: "unpriced", amount: null, source: { kind: "none" }, partnerRef: null } }));
-  assert.equal(silent.asks[0].text, NO_MARKET_PRICE, "no reason stored: never a made-up price");
+  // No why of its own — none stored, or a quote from before 0.9.1 whose words now read just "No market price yet."
+  // (seed.ts): the title is never said again under itself; the open case says a re-quote gives the why.
+  for (const reason of [undefined, NO_MARKET_PRICE]) {
+    const silent = buildOffer(priced({ quote: { status: "unpriced", amount: null, source: { kind: "none" }, partnerRef: null, reason } }));
+    assert.deepEqual(silent.asks, [{ kind: "no_price", title: "No market price yet", text: "Re-quote to see why." }], "never a made-up price");
+    assert.equal(silent.headline, "No market price yet");
+    assert.equal(silent.reason, "Re-quote to see why.");
+    assert.equal(silent.swap.why, "Re-quote to see why.");
+    assert.equal(silent.actions.swap, "Re-quote to see why.");
+    // A closed case is never re-quoted: nothing to say there.
+    const closed = buildOffer(priced({ status: "walked_away", quote: { status: "unpriced", amount: null, source: { kind: "none" }, partnerRef: null, reason } }));
+    assert.equal(closed.swap.why, null);
+    assert.ok(![closed.headline, closed.reason].includes(NO_MARKET_PRICE));
+  }
+  assert.equal(noPriceWhy("No rate card is active yet."), "No rate card is active yet.");
+  assert.equal(noPriceWhy(NO_MARKET_PRICE), null);
+  assert.equal(noPriceWhy("  "), null);
+  assert.equal(noPriceWhy(null), null);
 });
 
 test("offer 7c: no price because of the condition — its first problem, never a partner ask", () => {

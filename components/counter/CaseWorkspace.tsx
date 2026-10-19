@@ -20,7 +20,7 @@ import { StoreMargin } from "./StoreMargin";
 import { StepHeader, StepDock } from "./StepNav";
 import { STEP_ANCHOR, canShow, landingStep, stepDone, stepFromAnchor, stepOrder, testedCase, type StepId } from "./caseSteps";
 import { fmtWhen } from "./shared";
-import { CAMERA_REASON_MIN, cameraReasonOk, heldForReason, withCameraReason } from "./answerAsks";
+import { CAMERA_REASON_MIN, cameraReasonOk, heldForReason, keepsHeld, withCameraReason } from "./answerAsks";
 import type { CaseOps, ModelOption, CampaignBand, PickupInfo } from "./ops";
 
 type Held = { patch: CasePatch; why: string };
@@ -144,13 +144,16 @@ export function CaseWorkspace({
     [id]
   );
 
-  // The last change the camera's 409 held back, waiting for its reason; the next save replaces it.
+  // The last change the camera's 409 held back, waiting for its reason; the next save replaces it
+  // (not its own failed resend).
   const [held, setHeld] = useState<Held | null>(null);
 
   const save = useCallback(
     async (patch: CasePatch, optimistic?: Partial<CaseView>) => {
       if (optimistic) setView((v) => ({ ...v, ...optimistic }));
       const e = await run(() => api<CaseView>(`/api/cases/${id}`, { method: "PATCH", body: patch }));
+      // A failed "Save with reason" keeps its field open, and the field says why.
+      if (keepsHeld(patch, e)) return e;
       const h = heldForReason(patch, e);
       setHeld(h);
       // A held change says its sentence once, beside its reason field — not again under the chips.

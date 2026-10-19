@@ -226,6 +226,14 @@ const STORAGE_TEXT_UNTESTED = "See Settings › About phone › Storage.";
 const measuredUnlisted = (size: string) => `Phone measures ${size}, not on file — no trade-in price for that size.`;
 /** Owner, 2026-10-18: nothing priced the phone — never a made-up price. 2026-10-19: and never a typed one. */
 export const NO_MARKET_PRICE = "No market price yet.";
+/**
+ * The line under "No market price yet" is WHY (the card doesn't list it, no card, PriceIQ's why) —
+ * never those words again. A quote with no why of its own (none stored, or one from before 0.9.1,
+ * whose stored words seed.ts cut to NO_MARKET_PRICE) has none: null, and the open case says
+ * REQUOTE_FOR_WHY instead (a re-quote gives the price or the why).
+ */
+export const noPriceWhy = (reason: string | null | undefined): string | null => (reason?.trim() && reason !== NO_MARKET_PRICE ? reason : null);
+const REQUOTE_FOR_WHY = "Re-quote to see why.";
 /** The lock's refusal for an expired quote (cases.ts lockBlockers): every quote is the system's, so re-quoting renews it. */
 export const EXPIRED_BLOCKER = "The trade-in price has expired — re-quote.";
 const NEW_PHONE_TEXT = "No catalogue match — choose one to see the bonus.";
@@ -334,7 +342,7 @@ export function buildOffer(i: OfferInput): Offer {
           : !variant
             ? (unlisted ?? TAP_STORAGE)
             : q && q.status !== "priced"
-              ? (q.reason ?? NO_MARKET_PRICE)
+              ? (noPriceWhy(q.reason) ?? (open ? REQUOTE_FOR_WHY : null))
               : (i.conditionProblems[0] ?? (!i.hasCondition ? NO_CONDITION : NO_TRADE_IN))));
   const up = i.upgrade;
   const b = up ? i.bonus : null;
@@ -383,7 +391,7 @@ export function buildOffer(i: OfferInput): Offer {
     }
     // Nothing priced it: the reason, said once under the title — no form, no button.
     if (device && variant && !i.quoteBlocked && q && q.status !== "priced")
-      asks.push({ kind: "no_price", title: ASK_TITLE.no_price, text: q.reason ?? NO_MARKET_PRICE });
+      asks.push({ kind: "no_price", title: ASK_TITLE.no_price, text: noPriceWhy(q.reason) ?? REQUOTE_FOR_WHY });
     if (device && !nothingToRepair && repairAmount === null && (r?.status === "needs_inspection" || r?.status === "unpriced" || (!r && i.repairNotServiced)))
       asks.push({ kind: "repair_quote", title: ASK_TITLE.repair_quote, text: repairNote ?? NO_REPAIR_PRICE });
     if (device && !up) asks.push({ kind: "new_phone", title: ASK_TITLE.new_phone, text: i.newPhoneMatch ? NO_NEW_PHONE : NEW_PHONE_TEXT });
