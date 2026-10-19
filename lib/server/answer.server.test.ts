@@ -394,8 +394,68 @@ test("All fine: screen OK, body like new, liquid indicator 'Can't see' — by na
   assert.deepEqual(shape(a), { screen: ["ok", "OK", adv.name, false], body: ["like_new", "Like new", adv.name, false], liquid: ["cant_see", "Can't see", adv.name, false] });
   assert.deepEqual(shape(a), shape(b));
   assert.deepEqual([a.faults, a.condition?.screen, a.condition?.body], [b.faults, b.condition?.screen, b.condition?.body]);
+  assert.equal(a.quote?.amount, b.quote?.amount, "the same price");
+  assert.deepEqual(a.offer!.answer.lines, b.offer!.answer.lines, "the same answer");
   const audits = db().prepare(`SELECT detail FROM audit WHERE action = 'case.certify' AND entity_id = ? ORDER BY id`).all(one.caseId) as { detail: string }[];
   assert.deepEqual(audits.map((x) => [JSON.parse(x.detail).row, JSON.parse(x.detail).allFine]), [["screen", true], ["body", true], ["liquid", true]]);
   // Past the counter, refused like any tap.
   await assert.rejects(cases.certifyCase(adv, locked, { allFine: true }), (e: Error & { status?: number }) => e.status === 404 || e.status === 409);
+});
+
+test("All fine: never over a row already tapped — a liquid 'Tripped' from SwapUp Store keeps its water damage and its lower price", async () => {
+  const clean = await testedCase();
+  const desk = await testedCase();
+  const store = await testedCase();
+  const before = cases.getCase(adv, clean.caseId);
+  assert.deepEqual(before.certify?.needed, ["screen", "body", "liquid"], "no camera: the card asks all three");
+  // SwapUp Store: the advisor sees the indicator tripped. The screen and body are still untapped,
+  // so the desk shows "All fine" — and someone taps it.
+  const tripped = await cases.certifyCase(adv, desk.caseId, { row: "liquid", value: "tripped" });
+  assert.ok(tripped.faults.includes("water_damage"));
+  assert.ok(tripped.quote!.amount! < before.quote!.amount!, "water damage lowers the price");
+  const a = await cases.certifyCase(adv, desk.caseId, { allFine: true });
+  assert.equal(a.certification.liquid?.value, "tripped", "the liquid row keeps its tap");
+  assert.deepEqual([a.certification.screen?.value, a.certification.body?.value], ["ok", "like_new"], "the untapped rows are filled in");
+  assert.ok(a.faults.includes("water_damage"), "the water damage stays on the case");
+  assert.ok(a.condition?.issues.includes("liquid"), "and its issue");
+  assert.ok(a.quote!.amount! < before.quote!.amount!, "the lower price stands");
+  // The same phone worked on SwapUp Store tap by tap: the same faults, price and answer.
+  for (const [row, value] of [["liquid", "tripped"], ["screen", "ok"], ["body", "like_new"]] as const) await cases.certifyCase(adv, store.caseId, { row, value });
+  const s = cases.getCase(adv, store.caseId);
+  assert.deepEqual([a.faults, a.condition?.issues, a.quote?.amount], [s.faults, s.condition?.issues, s.quote?.amount]);
+  assert.deepEqual(a.offer!.answer.lines, s.offer!.answer.lines);
+  // Its audit: only the two rows it tapped.
+  const audits = db().prepare(`SELECT detail FROM audit WHERE action = 'case.certify' AND entity_id = ? ORDER BY id`).all(desk.caseId) as { detail: string }[];
+  assert.deepEqual(audits.map((x) => [JSON.parse(x.detail).row, JSON.parse(x.detail).value, JSON.parse(x.detail).allFine ?? false]), [["liquid", "tripped", false], ["screen", "ok", true], ["body", "like_new", true]]);
+  // Every row tapped: "All fine" again changes nothing.
+  const again = await cases.certifyCase(adv, desk.caseId, { allFine: true });
+  assert.deepEqual([again.faults, again.certification.liquid?.value, again.quote?.amount], [a.faults, "tripped", a.quote?.amount]);
+  // A screen the advisor already called cracked stays cracked.
+  const cracked = await testedCase();
+  await cases.certifyCase(adv, cracked.caseId, { row: "screen", value: "cracked" });
+  const c = await cases.certifyCase(adv, cracked.caseId, { allFine: true });
+  assert.deepEqual([c.certification.screen?.value, c.certification.body?.value, c.certification.liquid?.value], ["cracked", "like_new", "cant_see"]);
+  assert.ok(c.faults.includes("screen_cracked"));
+});
+
+test("All fine: the liquid indicator only where the card asks for it", () => {
+  const at = new Date().toISOString();
+  const graded = { by: "GradeIQ", state: "ready", final: true, conclusive: true, needsHumanReview: false, suggested: [], lcd: { cameraChecked: true, verdict: "pass", reason: null } };
+  const caseRow = (camera: Record<string, unknown>, certification: Record<string, unknown> | null = null) => ({
+    status: "quoted",
+    camera_check: JSON.stringify({ testSessionId: null, at, ...camera }),
+    certification: certification ? JSON.stringify(certification) : null,
+    faults: "[]",
+  });
+  const taps = (c: ReturnType<typeof caseRow>) => cases.allFineTaps(c, null).map((t) => `${t.row}:${t.value}`);
+  // The camera graded it all: the card asks nothing, so not the liquid row either.
+  assert.deepEqual(cases.certifyBlock(caseRow(graded), null).block.needed, []);
+  assert.deepEqual(taps(caseRow(graded)), ["screen:ok", "body:like_new"]);
+  // The sweep didn't check the screen: the card asks the screen and the liquid indicator.
+  const noSweep = caseRow({ ...graded, lcd: { cameraChecked: false, verdict: null, reason: null } });
+  assert.deepEqual(cases.certifyBlock(noSweep, null).block.needed, ["screen", "liquid"]);
+  assert.deepEqual(taps(noSweep), ["screen:ok", "body:like_new", "liquid:cant_see"]);
+  // A liquid row already tapped keeps its tap.
+  const seen = caseRow({ ...graded, lcd: { cameraChecked: false, verdict: null, reason: null } }, { liquid: { value: "clean", by: "Asha", at } });
+  assert.deepEqual(taps(seen), ["screen:ok", "body:like_new"]);
 });

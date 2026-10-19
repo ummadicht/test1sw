@@ -1194,7 +1194,11 @@ certify control: change a row there — but it has the one-tap "All fine", below
 fast"): ONE button at the top of the card, in SwapUp Store and on the desk, while the card is waiting
 for a tap. It records the screen **OK**, the body **Like new** and the liquid indicator **Can't see**
 (honest: nobody looked at it), by name, exactly as those three taps would — in one transaction, one
-audit row per row (`allFine: true`) — and opens the answer. The chips stay for anything else.
+audit row per row (`allFine: true`) — and opens the answer. The chips stay for anything else. It
+taps **only the rows nobody has tapped yet**: a row already certified keeps its tap (it was looked
+at — a liquid "Tripped" tapped on SwapUp Store stays, with its water damage and its lower price),
+and the liquid indicator only when the card asks for it (`needed`), as SwapUp Store's `allFineTaps`
+skips it — so the desk's "All fine" never overwrites what the tablet recorded.
 
 Which rows (`needed`) follow exactly what the SwapUp grade can only settle with a look
 (`certifySignals` in `lib/domain/certify.ts`): the screen when the cosmetic grade isn't final, the

@@ -921,7 +921,7 @@ const COLOURS_FRESH_MS = 10 * 60_000;
 /**
  * "All fine — screen OK, body like new" (owner, 2026-10-19: "Skip and get on advisor app fast"):
  * the three taps of "Check the phone" in one, by the same rules — the liquid indicator "Can't see",
- * because nobody looked at it (honest: not inspected).
+ * because nobody looked at it (honest: not inspected). What it actually taps on a case: allFineTaps.
  */
 export const ALL_FINE: readonly { row: CertRow; value: string }[] = [
   { row: "screen", value: "ok" },
@@ -930,10 +930,26 @@ export const ALL_FINE: readonly { row: CertRow; value: string }[] = [
 ];
 
 /**
+ * What "All fine" taps on this case: ALL_FINE in order, only on the rows nobody has tapped yet. As
+ * SwapUp Store's own button (swapup-mobile src/store/certify.ts allFineTaps) skips a liquid row
+ * already tapped, here every row already certified keeps its tap: it was looked at, so an advisor's
+ * liquid "Tripped" (and the water damage it put on the case) or a "Cracked" screen is never
+ * overwritten by "fine" — the desk button doesn't show the rows it would change. The liquid
+ * indicator only where the card asks for it (certifyNeeded). On an untapped card: the three taps.
+ */
+export function allFineTaps(
+  c: { status: string; camera_check: string | null; certification: string | null; faults?: string | null },
+  s: (GiqRow & { phone_phase_at?: string | null }) | null
+): { row: CertRow; value: string }[] {
+  const { needed, rows } = certifyBlock(c, s).block;
+  return ALL_FINE.filter((t) => !rows[t.row] && (t.row !== "liquid" || needed.includes("liquid")));
+}
+
+/**
  * THE ADVISOR CERTIFIES one row of "Check the phone" (lib/domain/certify.ts) —
  * one tap: the screen (while the customer's phone shows the test colours), the
- * body, or the liquid indicator — or all three at once with `allFine: true`
- * (ALL_FINE). By name (the signed-in staff member), with the time and whether
+ * body, or the liquid indicator — or every row still untapped at once with
+ * `allFine: true` (allFineTaps). By name (the signed-in staff member), with the time and whether
  * the phone was showing the colours. The faults, their sources, the condition
  * and the certification move in ONE transaction; then the report follows and
  * the case is re-priced outside it, as an edit is. Tapping the same value again
@@ -945,9 +961,6 @@ export async function certifyCase(u: SessionUser, id: string, input: { row?: unk
   if (!EDITABLE.includes(c.status)) throw new HttpError(409, "The case is past the counter.");
   const allFine = input?.allFine === true;
   if (!allFine && !isCertRow(input?.row)) throw new HttpError(400, "Say which row: screen, body or liquid.");
-  const taps: readonly { row: CertRow; value: string }[] = allFine
-    ? ALL_FINE
-    : [{ row: input.row as CertRow, value: typeof input.value === "string" ? input.value.trim().toLowerCase() : "" }];
   let session: { id: string; phone_phase: string | null; phone_phase_at: string | null } | undefined;
   if (input.testSessionId !== undefined && input.testSessionId !== null) {
     if (typeof input.testSessionId !== "string") throw new HttpError(400, "Send the test session's id.");
@@ -957,11 +970,15 @@ export async function certifyCase(u: SessionUser, id: string, input: { row?: unk
     session = db().prepare(`SELECT id, phone_phase, phone_phase_at FROM test_sessions WHERE case_id = ? ORDER BY created_at DESC LIMIT 1`).get(c.id) as typeof session;
   }
   const withColours = session?.phone_phase === "colours" && !!session.phone_phase_at && Date.now() - Date.parse(session.phone_phase_at) < COLOURS_FRESH_MS;
+  // The session in full: "All fine" reads its card from it (allFineTaps), and the Screen's wait below.
+  const full = session ? ((db().prepare(`SELECT * FROM test_sessions WHERE id = ?`).get(session.id) as (GiqRow & { phone_phase_at?: string | null }) | undefined) ?? null) : null;
+  const taps: readonly { row: CertRow; value: string }[] = allFine
+    ? allFineTaps(c, full)
+    : [{ row: input.row as CertRow, value: typeof input.value === "string" ? input.value.trim().toLowerCase() : "" }];
   // The Screen waits while the customer's phone is still testing and will show the test colours
   // after: a tap now would be a look at the test screens (SwapUp Store holds the row the same way).
-  if (taps.some((t) => t.row === "screen") && session && !withColours) {
-    const full = db().prepare(`SELECT * FROM test_sessions WHERE id = ?`).get(session.id) as (GiqRow & { phone_phase_at?: string | null }) | undefined;
-    if (full && ["waiting", "opened", "joined", "testing"].includes(full.status) && certifyBlock(c, full).block.colours === "waiting")
+  if (taps.some((t) => t.row === "screen") && full && !withColours) {
+    if (["waiting", "opened", "joined", "testing"].includes(full.status) && certifyBlock(c, full).block.colours === "waiting")
       throw new HttpError(409, "Wait for the test colours — the phone is still testing.");
   }
 
@@ -976,7 +993,8 @@ export async function certifyCase(u: SessionUser, id: string, input: { row?: unk
     let r = { faults: prevFaults, sources: reconcileFaultSources(parseJson<FaultSources>(fresh.fault_sources, {}), prevFaults), condition: prevCondition, certification: prevCert as Certification };
     const at = nowIso();
     const done: { row: CertRow; value: string; prev: string | null; faultsAdded: FaultId[]; faultsRemoved: FaultId[] }[] = [];
-    for (const t of taps) {
+    // "All fine" on what is stored now: a row tapped since (SwapUp Store, another desk) keeps its tap.
+    for (const t of allFine ? taps.filter((x) => !prevCert[x.row]) : taps) {
       const step = certifyRow({ ...r, cameraFloor: camera?.floor ?? null }, { row: t.row, value: t.value, by: u.name, userId: u.id, at, withColours, testSessionId: session?.id ?? null });
       if ("error" in step) throw new HttpError(400, step.error);
       if (!step.changed) continue;
