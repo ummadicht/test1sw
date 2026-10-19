@@ -72,7 +72,11 @@ the full contract; where it says more is asked, this paragraph wins.
 5. **Test**: GetReady → automatic tests → swipe squares → charger (unchanged).
 6. **Result**: "Checks complete — the advisor will confirm your price." Ref, store, Passed / Failed /
    Not tested, "Screen and glass: checked by the store's camera" (or by the advisor), battery health %.
-   Never a price or a grade letter. After Apply: the existing "store has your results" + clear-your-phone guide.
+   After Apply the result screen shows the answer, written by the server (`GET /api/device/status` →
+   `answer`, MOBILE-API §4): Current grade · Market price for grade X · We pay you · + bonus if you
+   exchange · or repair it — the same lines on the native app and in the browser, and the same as the
+   advisor's. Before it is priced: "The advisor is working out your price." No partner name, no store
+   margin. The clear-your-phone guide shows once it is traded in.
    **The test colours (≥ 0.8.0)**: while `GET /api/device/status` says `colours: true` (the camera's sweep
    didn't check the screen and the advisor hasn't certified it), the result screen shows white → black →
    red → green → blue → stripes full-screen, about 2.5 s each, looping, brightness up, "The advisor is

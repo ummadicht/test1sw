@@ -299,21 +299,28 @@ advice, bonus and decision never read it (`manualRepair` is the customer's repai
 does). A partner viewing the case sees `refurbCost: null`. Errors: `400` bad amount, `401` session
 over, `403` not a counter role, `404` case not in your store, `409` the case is past the counter.
 
-## 3c. The answer (`offer`) — refurb quote vs trade-in + bonus
+## 3c. The answer (`offer`) — refurb quote vs we pay + bonus
 
 Owner, 2026-10-17: "Why asking questions when we have all tested data ... just refurb quote vs bonus
-+ trade in price." After Apply the case carries **one answer**, worked out on the server
-(`lib/domain/offer.ts` `buildOffer`, called from `toView`) and shown the same way by the store app's
-answer screen and the desk's `?view=answer` card. The app never invents a reason: it shows these
-strings and owns only its labels.
++ trade in price." 2026-10-18: "Current grade C. Market price for grade C is ₹25000 … We pay you
+₹27000 + ₹10000 bonus if you exchange with a new device." After Apply the case carries **one
+answer**, worked out on the server (`lib/domain/offer.ts` `buildOffer`, from the stored rows:
+`cases.ts offerFor`) and printed the same way by the store app's answer screen, the desk's answer
+card and the customer's phone (`offer.answer.lines`, below). The app never invents a word: it prints
+these strings and owns only its labels.
 
 | Label | Figure |
 | --- | --- |
 | **Refurb quote** | What the CUSTOMER pays to fix it: `repair.customerPays` from the price book, or the bench / service-centre quote (`manualRepair`), or ₹0 when covered. The figure `decide()` compares and the bonus's repair-ratio rule reads. **Never** the store's `refurbCost` (§3b). |
-| **Trade-in + bonus** | The as-is price (the case quote — below) + the upgrade bonus for the new phone. |
+| **Market price** M | What the buyback partner pays for this phone in this condition — the case quote (below). The store's credit line holds M at lock; the partner pays M back. |
+| **We pay you** W | M + the **SwapUp premium** P (`lib/domain/premium.ts`): 5% of M up to ₹15,000, 4% to ₹30,000, 3% to ₹50,000, 2% above, floored to the rupee — and never less than the band edge below pays (so W never falls when M rises: ₹15,001 → ₹15,750, as ₹15,000). Programme-funded like the bonus: a claim on `/admin/claims`, never a hold, never a chargeback. |
+| **+ bonus** | The upgrade bonus for the new phone (its basis is M, never W). |
 
-The verdict is `decision.headline`, unchanged (`decide()`, its thresholds and `RULESET_VERSION` did
-not move); the bonus is shown and never a reason.
+The verdict is `decision.headline`. `RULESET_VERSION` is **`2026-10-18.1`**: `decide()`'s as-is value
+is what the customer is paid, W = M + P (a caveat says the premium comes only with a new phone); the
+bonus is shown and never a reason. An open case whose stored decision has an older version is
+re-decided once by the desk and the store app (`{action:"reprice"}` without `requote` — the partner is
+not asked again).
 
 ### Where the trade-in comes from (`quote.source.kind`, since 2026-10-18)
 
@@ -336,7 +343,13 @@ is the case `quote`, and the lock holds exactly that amount on the store's credi
    battery, charging, cameras, speaker, mic, Wi-Fi/Bluetooth, fingerprint, buttons, vibration,
    liquid). Accessories and age are not defects. Full rules: `docs/GRADING.md` §6.
 3. `partner_ratecard` — the partner's uploaded rate card. When PriceIQ was asked first and had no
-   price, the quote says why in `priceiqWhy`.
+   price, the quote says why in `priceiqWhy`. Since 2026-10-19 a card may price each grade
+   (CSV `model_id,variant,max_price,good_price,fair_price,best_value_price`, the last three optional,
+   max ≥ good ≥ fair ≥ best value per row): a row with grade prices prices the phone at its look's
+   grade (A = max, B = good, C = fair, D = best value; an empty column → the next LOWER grade listed,
+   none → max less the card's look %), takes no look off again and every other deduction once, and the
+   quote carries `grade` (the grade the price is for; its first line reads "Market price grade C ·
+   <card label>"). A 3-column row prices as before.
 4. `none` — nothing priced it: `status: "unpriced"`, `reason` "No market price yet — enter a quote."
    (and `priceiqWhy`).
 
@@ -358,6 +371,7 @@ type PartnerQuote = {
     note?: string | null;             // its age and/or "PriceIQ unreachable, last answer …"
   };
   priceiqWhy?: string;                // PriceIQ was asked first and had no price: why
+  grade?: "Superb" | "Good" | "Fair" | "Best Value";   // a rate-card row with grade prices: the grade priced
 };
 ```
 
@@ -385,6 +399,10 @@ CaseView += {
   measuredStorage: string | null;  // the size the phone read off its own disk at Apply, whatever the model's
                                    // list says ("1TB" on an Ultra on file as 256/512GB); null = it didn't measure
   offer: Offer | null;   // null for a partner viewer
+  tradeValue: number | null;       // the market price M frozen at lock (what the line holds)
+  premiumValue: number | null;     // since 2026-10-18: the SwapUp premium frozen at lock; null before lock,
+                                   // on a case locked before premiums (paid M only), and for the partner
+  // The partner also gets payable: null and upgrade.price: null — with them the premium could be worked out.
 };
 
 type VariantSource = "measured" | "catalogue" | "customer" | "advisor";
@@ -412,9 +430,11 @@ type Offer = {
     coverage: "none" | "warranty" | "care_plus";
   };
   swap: {
-    tradeIn: number | null; tradeInNote: string | null;
+    tradeIn: number | null; tradeInNote: string | null;   // tradeIn = the market price M (locked: trade_value)
+    premium: { amount: number; bp: number } | null;       // the SwapUp premium on M; null without M, or locked before premiums
+    wePay: number | null;                 // M + premium; null when tradeIn is null
     bonus: number | null; bonusBp: number | null; bonusWhy: string | null;
-    total: number | null;                 // tradeIn + (bonus ?? 0); null when tradeIn is null
+    total: number | null;                 // wePay + (bonus ?? 0) — CHANGED 2026-10-18 (was tradeIn + bonus)
     why: string | null;                   // why tradeIn is null
     tradeInDetail: {                      // how the trade-in was reached; null when tradeIn is null
       line: string | null;                // PriceIQ only, under the figure: "Refurbished market price ₹51,399 (Good) − 2% − 2 defects · PriceIQ 2026-W35" (+ ", 52 days old" over 14 days)
@@ -427,14 +447,81 @@ type Offer = {
     newPhone: { deviceId: string; label: string; price: number; suggested: boolean; why: string | null } | null;
                                           // label = model + storage, no brand ("Galaxy S26 Ultra 256GB");
                                           // the CaseView's upgrade.label keeps the brand
-    customerPays: number | null;          // decision.upgrade.pays
-    vsRepair: number | null;              // decision.upgrade.extraVsRepair (+ = the swap costs more today)
+    customerPays: number | null;          // new phone − wePay − bonus (premium.ts exchange — what the lock charges;
+                                          //   locked: payable); null when the new phone costs less than wePay + bonus
+    vsRepair: number | null;              // customerPays − the refurb quote (+ = the swap costs more today)
   };
   actions: { repair: string | null; swap: string | null; walkAway: string | null }; // null = allowed, string = why not
+                                          // swap: "The new phone costs less than we pay plus the bonus — choose another phone."
+                                          //   when it does (the lock refuses it too; nothing is floored)
   signals: { text: string; points: "repair" | "upgrade"; strength: "strong" | "soft" }[];
   caveats: string[];
+  answer: Answer;                         // since 2026-10-18 — the lines every screen prints (below)
 };
 ```
+
+### The answer's lines (`offer.answer`, since 2026-10-18 — `lib/domain/answer.ts`)
+
+Every screen prints `lines` **as sent**, in order, each as `text` and, when `note` is set, ` · note`
+in muted ink. Staff screens add their own extras under the line they belong to (the grade report
+under `grade`, how the price was reached under `market`, `staffNotes` and the new phone under
+`we_pay`/`bonus`, the repair detail under `repair`); they never print a figure the lines already carry.
+
+```ts
+type AnswerLine = { key: "grade" | "market" | "we_pay" | "bonus" | "repair"; text: string; note: string | null; amount: number | null };
+type Answer = {
+  ready: boolean;                 // the CUSTOMER may see the figures (staff print lines whatever this says)
+  text: string | null;            // the customer's one sentence when !ready; null when ready
+  final: boolean;                 // the case has left the counter: the figures are the ones locked (or last shown)
+  headline: string;               // the customer's headline (staff keep Offer.headline)
+  grade: { letter: "A"|"B"|"C"|"D"; word: "Superb"|"Good"|"Fair"|"Best Value"; note: string | null } | null;
+  market: { amount: number; letter: …| null; word: … | null; source: string } | null;  // letter/word = the grade the line names
+  premium: { amount: number; bp: number; rule: string } | null;                       // rule "2026-10-18.1"
+  wePay: number | null;
+  bonus: { amount: number; bp: number } | null;          // only with a new phone and amount > 0
+  newPhone: { label: string; price: number } | null;     // label without the brand
+  repair: { amount: number | null; covered: boolean; coverage: "none"|"warranty"|"care_plus"; nothingToRepair: boolean };
+  lines: AnswerLine[];
+  staffNotes: { market: string | null; we_pay: string | null; bonus: string | null };   // staff only
+  test: boolean;                  // a test programme: every surface adds "Test programme — no real money"
+};
+```
+
+| key | when | `text` | `note` |
+| --- | --- | --- | --- |
+| `grade` | the case has a condition | `Current grade C (Fair)`; with a defect `Current grade A` | the defects, at most two then `+N more` ("screen cracked", "back glass cracked", "doesn't switch on" alone…); never scratches, scuffs, dents or a bent frame |
+| `market` | there is a market price | `Market price for grade C ₹25,000`; `Market price ₹25,000` when the price came from a lower grade than the phone's (or no grade is known) | — |
+| `we_pay` | with `market` | `We pay you ₹26,000`; traded `We paid you ₹26,000` | — |
+| `bonus` | a new phone, a bonus > 0, a market price; not after "repair chosen" | `+ ₹6,199 bonus if you exchange with a new device`; traded `+ ₹6,199 bonus with the Galaxy S26 Ultra 256GB` | the new phone's label (open) |
+| `repair` | something to repair, not traded | `or repair it for ₹34,096` · `or repair it free — covered by warranty` / `… Care+` · `or repair it — the advisor will quote the price`; repair chosen `Repair ₹34,096` / `Repair — covered by warranty` | — |
+
+The grade is the worse of the look the trade-in is priced at (rule G1, defects set aside) and the
+grade after refurb — display only, so a cracked back never reads better than the report's
+after-repair grade. The market line names the phone's own grade; the "priced at grade C — none listed
+at grade B" detail is `staffNotes.market`.
+
+| status | ready | final | lines | customer text when not ready |
+| --- | --- | --- | --- | --- |
+| `draft` / `quoted` | a market price from the **partner** (`partner_manual` or `partner_ratecard`), not lapsed, not blocked | false | grade, market, we_pay, bonus, repair | "The advisor is working out your price." — or, for a PriceIQ estimate, "The advisor is confirming your price." (staff note: "Estimate from the refurbished market — enter the buyback partner's quote to show it to the customer.") |
+| traded (`locked` … `not_received`) | true | true | grade, market, we_pay, bonus — from `trade_value`, `premium_value`, `bonus_value` | — |
+| `repair_chosen` | true | true | grade, repair | — |
+| `walked_away` | as the partner's price allows | true | as last worked out | "This case is closed." |
+| `cancelled` | false | true | none | "This trade-in was cancelled." |
+
+Headlines: open — decide()'s ("Repair it — it's covered", "Repair recommended", "An upgrade is worth
+considering", "Either works — your choice", "Nothing to repair — a straight trade-in", else "Your
+offer"); traded "Traded in"; "Repair chosen". Staff notes: `we_pay` "Includes ₹1,000 SwapUp premium
+(4%)." (", lifted to what ₹15,000 earns" at a band edge; null when there is no premium); `bonus`
+"Upgrade bonus · 4%" / "Upgrade bonus · capped at ₹6,000", or `swap.bonusWhy` with no bonus.
+
+**Worked example (fixture F1):** S23 Ultra 256GB, cracked screen on a dented body, partner quote
+₹25,000, the S26 Ultra 256GB at ₹1,54,999 with a 4% bonus → `Current grade C · screen cracked` ·
+`Market price for grade C ₹25,000` · `We pay you ₹26,000` · `+ ₹6,199 bonus if you exchange with a new
+device · Galaxy S26 Ultra 256GB` · `or repair it for ₹34,096`; `swap` = `{ tradeIn: 25000, premium:
+{amount: 1000, bp: 400}, wePay: 26000, total: 32199, customerPays: 122800 }`. At lock: `trade_value
+25000`, `premium_value 1000`, `premium_bp 400`, `payable 122800`, a hold of ₹25,000; the programme
+claims ₹1,000 + ₹6,199. Cleared: no chargeback. Regraded to ₹22,000: a chargeback of ₹3,000 (M −
+accepted, never W − accepted).
 
 The offer is worked out for every status; `open` says whether it can still be acted on. Once the
 case is closed (`repair_chosen`, `walked_away`, `locked` and later) `asks` is `[]` and every action
@@ -685,19 +772,48 @@ At **Apply** (`POST /api/test-sessions/<id>/apply`):
 
 `POST /api/device/results` `{ results: [{ testId, outcome, detail?, at }] }` — batch;
 idempotent per `testId` (the latest `at` wins). The app sends after every test and retries
-its queue until acknowledged → `{ ok: true, received: n, progress }`.
+its queue until acknowledged → `{ ok: true, received: n, progress }`. Same phone, same answer
+(since 2026-10-18): from the browser build (`appVersion` "web-…"), a `fail` on `speaker`, `vibration`
+or `flash` — the customer's own count, buzz or light, where the native app measures and skips — is
+stored as `skip` with `detail.reason` "Not measured in the browser": never a fault, a repair line or
+a deduction. Measured browser tests (touch, camera, connectivity…) keep their verdicts.
 
 `POST /api/device/complete` `{}` → `{ ok: true, summary }`.
 
-`GET /api/device/status` → `{ status, progress, storeName, caseRef, reportPath, grading, colours }` (lets the
+`GET /api/device/status` → `{ status, progress, storeName, caseRef, reportPath, grading, colours, answer }` (lets the
 app show "The store has your results"; `colours: true` = show the test colours on the result screen
 for the advisor — "The test colours for the advisor", below). Since 2026-10-17, once the session is `applied`:
 `reportPath` = the path of the phone's public grade report, `"/r/<token>"` — open it on the
 session's `server` origin ("See your phone's report", §9); `grading` = `{ status, label, grade,
 letter, final }` of the version that link opens on (the latest issued one, never the live grade) —
-the customer's "Grade: Good (B)". No reasons and never a price. Both `null` before Apply, or when
+the customer's "Grade: Good (B)". No reasons and no price. Both `null` before Apply, or when
 nothing was reported. The app reads them through `src/check/report.ts` `customerReport`; after a
 restart on the "store has your results" screen it reads the status once more for them.
+
+`answer` (since 2026-10-18 — owner: the answer on the customer's phone too, native and browser
+alike): `null` before Apply, for a closed ticket and when the case is gone; else the customer's
+slice of `offer.answer` (§3c, `lib/domain/answer.ts customerAnswer`) — a **whitelist** copy:
+
+```ts
+type CustomerAnswer =
+  | { ready: false; final: boolean; text: string; test: boolean }      // "The advisor is working out your price."
+  | { ready: true; final: boolean; headline: string;
+      grade: { letter; word; note } | null; market: { amount; letter; word } | null; wePay: number | null;
+      bonus: { amount } | null; newPhone: { label } | null;
+      repair: { amount: number | null; covered: boolean; nothingToRepair: boolean };
+      lines: AnswerLine[]; test: boolean };
+```
+
+- **Read only.** It is built from the stored case rows: it never re-prices, never asks the partner,
+  PriceIQ or GradeIQ, and never writes — a phone polling every few seconds never loops a partner with
+  the IMEI. The response is `cache-control: no-store`.
+- **Polling:** while `answer` is present and not `final`, poll every 5 s (the advisor may change the
+  new phone or the storage at the counter); once `final`, stop (the figures are frozen at lock). An
+  older server sends no `answer` key: keep the old 15 s.
+- **Never in it:** the source, the premium (it shows only as We pay − Market price), any %, staff
+  notes, the new phone's price, asks, the trade-in trace, PriceIQ's base/markdown/week, the store's
+  sell price or refurb cost, the partner's name or reference, the campaign or its funder, the IMEI, the
+  customer's name or mobile. The money in the whole response lives only under `answer`.
 
 ### Phone-led flow (SwapUp Check ≥ 0.6.0 — `docs/PHONE-LED-FLOW.md`)
 
@@ -997,8 +1113,14 @@ card (above, "The answer, by itself") while it can still be tapped (`canEdit`); 
 never blocked: a row left untapped keeps the grade provisional, and the answer screen then shows the
 card until it is tapped. Once every row is tapped the answer keeps it **closed, one tap away** —
 "Checked by Asha · change" — until the trade-in is locked, so a wrong last tap (the answer opens
-half a second after it) is put right on SwapUp Store's answer screen. (The desk has no certify
-control: change a row there.)
+half a second after it) is put right on SwapUp Store's answer screen. (The desk has no per-row
+certify control: change a row there — but it has the one-tap "All fine", below.)
+
+**One tap — "All fine — screen OK, body like new"** (owner, 2026-10-19: "Skip and get on advisor app
+fast"): ONE button at the top of the card, in SwapUp Store and on the desk, while the card is waiting
+for a tap. It records the screen **OK**, the body **Like new** and the liquid indicator **Can't see**
+(honest: nobody looked at it), by name, exactly as those three taps would — in one transaction, one
+audit row per row (`allFine: true`) — and opens the answer. The chips stay for anything else.
 
 Which rows (`needed`) follow exactly what the SwapUp grade can only settle with a look
 (`certifySignals` in `lib/domain/certify.ts`): the screen when the cosmetic grade isn't final, the
@@ -1028,6 +1150,7 @@ SwapUp Check and nobody certified.
 | `liquid` | `clean` Clean · `tripped` Tripped · `cant_see` Can't see | nothing · `water_damage` · nothing (the report says it wasn't checked) |
 
 `POST /api/cases/<id>/action` `{ "action": "certify", "row": "screen"|"body"|"liquid", "value": "<chip value>", "testSessionId": "ts_…" }`
+— or `{ "action": "certify", "allFine": true, "testSessionId": "ts_…" }` for the three taps above —
 (`testSessionId` optional — default the case's latest session) → the CaseView, with `certification`
 `{ screen?|body?|liquid?: { value, label, by, at, withColours } }` and the new `grading`, `faults`,
 `condition` and re-priced `offer`.

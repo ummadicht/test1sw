@@ -10,6 +10,15 @@ the old phone and that trade-in value is **held on the store's credit line** unt
 partner **collects** (or **clears**) it. At the limit the store cannot take more trade-ins
 until a pickup frees the line.
 
+**The SwapUp premium (2026-10-18).** The trade-in value is the **market price** M — what the
+buyback partner pays for the phone. SwapUp pays the customer **M + P**, the premium P being 5% / 4% /
+3% / 2% of M by band (`lib/domain/premium.ts`, never less than the band edge below pays), plus the
+bonus, off the new phone. The credit line holds **T = M** only — what the partner pays back — so a
+regrade charges back M − accepted, never the premium. P, like the bonus, is the programme's: frozen
+at lock (`premium_value`, `premium_bp`, `premium_funded_by`) and claimed on `/admin/claims` ("Bonus
+and premium claims"), never a hold and never a chargeback. A new phone that costs less than M + P +
+the bonus is refused (nothing is floored).
+
 The domain, database and services are DONE and tested. You build pages, client
 components and API routes on top of them. **Do not change files under `lib/domain/` or
 `lib/server/`** except where your task explicitly says so — if a service is missing
@@ -97,7 +106,7 @@ href there must exist when you are done (between all builders).
 - `reprice(u, id, {requote?: boolean}) → Promise<CaseView>`
 - `setBonusOverride(u, id, {bp: number|null, reason?}) → Promise<CaseView>` (store_manager+)
 - `chooseRepair(u, id)`, `walkAway(u, id, reason?)`, `lockTradeIn(u, id, {customer: {name, phone, idType, idLast4}, checks: {ownership, simRemoved, imeiMatches, noFinanceLock, kym, imeiCheckAck?}})`, `cancelTradeIn(u, id, reason)` (store_manager+), `recordDataClear(u, id, {accountsSignedOut, resetDone, setupScreenSeen, noPreviousAccount, note?})` (store staff, `locked`/`in_pickup`, once — the customer's own factory reset after acceptance, labelled "not a certified erasure"; factory reset + account sign-out moved here from the lock checks on 2026-10-16)
-- `CaseView` fields: `id ref status storeName storeCode advisorName customer device{modelId brand model series variant releaseYear supportEndYear ageYears} imei imeiCheck faults coverage condition conditionProblems manualRepair partnerManual repairNotServiced repair(RepairEstimate) quote(PartnerQuote) quoteExpired repairedQuote upgrade{deviceId label model series variant price supportEndYear} bonus{bp amount basisAmount steps[] clampedBy fundedBy campaignName override} decision(Decision) checks tradeValue bonusValue payable pickupId clearance{outcome accepted shortfall reason by at} settledAt demo createdAt updatedAt lockedAt closedAt partner{kind label why partnerName} creditCheck lockBlockers[]`
+- `CaseView` fields: `id ref status storeName storeCode advisorName customer device{modelId brand model series variant releaseYear supportEndYear ageYears} imei imeiCheck faults coverage condition conditionProblems manualRepair partnerManual repairNotServiced repair(RepairEstimate) quote(PartnerQuote) quoteExpired repairedQuote upgrade{deviceId label model series variant price supportEndYear} bonus{bp amount basisAmount steps[] clampedBy fundedBy campaignName override} decision(Decision) checks tradeValue premiumValue bonusValue payable pickupId clearance{outcome accepted shortfall reason by at} settledAt demo createdAt updatedAt lockedAt closedAt partner{kind label why partnerName} creditCheck lockBlockers[]`
 - `PartnerQuote`: `status amount lines[{label bp? amount}] source{kind label effectiveFrom?} partner partnerRef quotedAt validUntil reason?`
 - `Decision`: `recommendation("repair"|"upgrade"|"either"|"no_repair"|"cannot_say") headline favoursCustomer("keep"|"let_go"|"level"|null) repair{pays keepsValue net covered} upgrade{label newPrice tradeIn bonus pays extraVsRepair} metrics{repairRatio valueAddedByRepair yearsLeftOld yearsLeftNew costPerYearRepair costPerYearUpgrade} signals[{code points strength text}] missing[] caveats[]`
 
