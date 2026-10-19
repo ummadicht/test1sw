@@ -347,7 +347,9 @@ is the case `quote`, and the lock holds exactly that amount on the store's credi
    (CSV `model_id,variant,max_price,good_price,fair_price,best_value_price`, the last three optional,
    max ≥ good ≥ fair ≥ best value per row): a row with grade prices prices the phone at its look's
    grade (A = max, B = good, C = fair, D = best value; an empty column → the next LOWER grade listed,
-   none → max less the card's look %), takes no look off again and every other deduction once, and the
+   none → max less the card's look %), takes no look off again and every other deduction once (a
+   grade's price with nothing taken off is used exactly — the card's ₹10 step rounds only what it
+   worked out: W42's grade B S23 Ultra 256GB is ₹33,574), and the
    quote carries `grade` (the grade the price is for; its first line reads "Market price grade C ·
    <card label>"). A 3-column row prices as before.
 4. `none` — nothing priced it: `status: "unpriced"`, `reason` "No market price yet — enter a quote."

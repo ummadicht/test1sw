@@ -40,16 +40,17 @@ test("per-grade card: the price at the phone's look — A max, B good, C fair, D
   ];
   for (const [over, price, grade] of rows) {
     const r = q("galaxy-s23-ultra", "256GB", c(over));
-    // The card's own cash step still applies (₹10, rounded down).
-    assert.equal(r.amount, Math.floor(price / 10) * 10, JSON.stringify(over));
+    // The grade's own price, exactly: the card's ₹10 step rounds only a price with something taken off.
+    assert.equal(r.amount, price, JSON.stringify(over));
     assert.equal(r.grade, grade);
     assert.equal(r.ceiling, price);
     assert.ok(!r.lines.some((l) => /^(Screen|Body):/.test(l.label)), "a look is the grade's, never a deduction too");
   }
-  assert.deepEqual(q("galaxy-s23-ultra", "256GB", c({ body: "dented" })).lines, [
-    { label: "Market price grade C · Week 42", amount: 32_255 },
-    { label: "Rounded down to ₹10", amount: -5 },
-  ]);
+  assert.deepEqual(q("galaxy-s23-ultra", "256GB", c({ body: "dented" })).lines, [{ label: "Market price grade C · Week 42", amount: 32_255 }]);
+  // Something taken off: the card's ₹10 step rounds what it worked out, as every card does.
+  const noBox = q("galaxy-s23-ultra", "256GB", c({ body: "scuffed", accessories: { charger: true, box: false, bill: true } }));
+  assert.equal(noBox.amount, Math.floor((33_574 - Math.floor((33_574 * GRADED.deductions.noBoxBp) / 10_000)) / 10) * 10);
+  assert.equal(linesSum(noBox.lines), noBox.amount);
 });
 
 test("per-grade card: every non-look defect is taken off once, on top of the grade's price", () => {
