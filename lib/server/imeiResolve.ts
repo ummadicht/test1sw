@@ -165,14 +165,23 @@ export const BLACKLISTED = "This phone is reported lost or stolen. It can't be t
 
 export type KymEarly = { status: "clear" | "blacklisted" | "duplicate" | "in_use"; reference: string | null; by: string; at: string };
 
-/** GSMA says blacklisted for any IMEI ever saved on the case (blacklistedLookup), or the early KYM answer is anything but clear. */
+/**
+ * GSMA says blacklisted for any IMEI ever saved on the case (blacklistedLookup), or the early KYM
+ * answer is anything but clear — no test starts. The lock asks only GSMA's half (gsmaBlacklisted):
+ * there the advisor's own KYM answer, which must be clear, supersedes the early one.
+ */
 export function isBlacklisted(c: CaseImeis & { kym_early?: string | null }): boolean {
-  if (blacklistedLookup(c)) return true;
+  if (gsmaBlacklisted(c)) return true;
   const k = parseJson<KymEarly | null>(c.kym_early ?? null, null);
   return !!k && k.status !== "clear";
 }
 
-/** 409 when the case's phone is blacklisted — test sessions and the lock both refuse with it. */
+/** GSMA's half of isBlacklisted: a stop nothing the advisor says can lift. */
+export function gsmaBlacklisted(c: CaseImeis): boolean {
+  return !!blacklistedLookup(c);
+}
+
+/** 409 when the case's phone is blacklisted — test sessions refuse with it (the lock: lockTradeIn). */
 export function assertNotBlacklisted(caseId: string): void {
   const c = db().prepare(`SELECT imei, imei2, imei_lookup, kym_early FROM cases WHERE id = ?`).get(caseId) as
     | { imei: string | null; imei2: string | null; imei_lookup: string | null; kym_early: string | null }

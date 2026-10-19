@@ -195,14 +195,17 @@ CaseView += {
 government KYM answer right after the IMEI (`Text KYM to 14422`, then the chips); `null` clears it. It
 needs an IMEI on the case (`400 "Record the IMEI first (dial *#06#)."`), is stored with the advisor's
 name, and goes when either IMEI changes. Lock pre-fills its KYM chip and reference from it — still
-editable, still required to be `clear` at lock. GSMA does not cover India's CEIR: KYM stays mandatory.
+editable, still required to be `clear` at lock. The lock's own KYM answer (`checks.kym`, which must be
+`clear`) supersedes `kymEarly` — a mis-tap there is corrected at the lock — and is stored back as
+`kymEarly` for the record. GSMA does not cover India's CEIR: KYM stays mandatory.
 
 **Blacklisted** (`imeiLookup.blacklist === "blacklisted"` — for any IMEI the case ever had — or
 `kymEarly.status !== "clear"` when set):
 `POST /api/test-sessions { caseId }` → `409 { "error": "This phone is reported lost or stolen. It can't be
-traded in.", "reason": "blacklisted" }` and no session is made; the lock refuses with the same sentence
-(and the reason), and it is the first of `lockBlockers`. Show the sentence in a red banner on the IMEI
-card and disable Start.
+traded in.", "reason": "blacklisted" }` and no session is made. On GSMA's `blacklisted` the lock refuses
+with the same sentence (and the reason) whatever it sends, and it is the first of `lockBlockers`; a
+non-clear `kymEarly` is not a lock blocker — the lock's own KYM answer decides. Show the sentence in a
+red banner on the IMEI card and disable Start.
 
 **The model at the phone:** a case whose model the IMEI named (`modelSource: "imei"`) is what the join
 tells the phone (`identity.match: "exact"`), so an iPhone or a browser — which can't name itself — skips

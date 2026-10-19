@@ -49,7 +49,7 @@ import { CERT_ROWS, certChoices, certifyNeeded, certifyRow, certifySignals, isCe
 import { cameraEvidence, type GiqRow } from "./gradeiqBridge";
 import type { DeviceReport } from "../domain/diagnostics";
 import type { ImeiLookup } from "./gradeiq";
-import { BLACKLISTED, blacklistWarning, caseLookupView, isBlacklisted, lookupFor, resolveImei, tradeModelRefs, withLookup, type KymEarly, type StoredImeiLookup } from "./imeiResolve";
+import { BLACKLISTED, blacklistWarning, caseLookupView, gsmaBlacklisted, lookupFor, resolveImei, tradeModelRefs, withLookup, type KymEarly, type StoredImeiLookup } from "./imeiResolve";
 
 /* ─────────────────────────── types ─────────────────────────── */
 
@@ -653,9 +653,10 @@ function kymEarlyView(raw: string | null): CaseView["kymEarly"] {
 
 function lockBlockers(v: CaseView): string[] {
   const out: string[] = [];
-  // GSMA's blacklist (for any IMEI ever saved on the case — the view says it), or an early KYM
-  // answer that isn't clear: the trade-in stops here.
-  if (v.imeiLookup?.blacklist === "blacklisted" || (v.kymEarly && v.kymEarly.status !== "clear")) out.push(BLACKLISTED);
+  // GSMA's blacklist (for any IMEI ever saved on the case — the view says it): the trade-in stops
+  // here. An early KYM answer that isn't clear is not a blocker: it stopped the tests, and at the
+  // lock the advisor's own KYM answer — which must be clear — supersedes it (lockTradeIn).
+  if (v.imeiLookup?.blacklist === "blacklisted") out.push(BLACKLISTED);
   if (!v.device || !v.device.variant) out.push("Choose the phone's model and storage.");
   if (!v.imei) out.push("Record the IMEI (dial *#06#).");
   if (!v.condition) out.push("Record the condition.");
@@ -1711,8 +1712,9 @@ export type LockInput = {
  */
 export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseView {
   requireCounter(u);
-  // Reported lost or stolen (GSMA, or the early KYM answer): refused before anything else is asked.
-  if (isBlacklisted(caseInScope(u, id).c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
+  // Reported lost or stolen (GSMA, for any IMEI the case ever had): refused before anything else is
+  // asked, whatever the lock says. The early KYM answer is not asked here: the lock's own is.
+  if (gsmaBlacklisted(caseInScope(u, id).c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
   const name = String(input?.customer?.name || "").trim();
   const phone = digitsOnly(input?.customer?.phone);
   const idType = String(input?.customer?.idType || "");
@@ -1732,6 +1734,8 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
   if (missing.length) throw new HttpError(400, `Confirm first: ${missing.join(", ")}.`);
   // Since 22 Oct 2025 a buyer of a used phone must check the national IMEI
   // register before completing the purchase. A flagged phone is never bought.
+  // This answer supersedes the early one (kymEarly, tapped right after the IMEI):
+  // a mis-tap there is corrected here, and the lock's answer is stored back.
   const kymStatus = ch.kym.status;
   if (!(kymStatus in KYM_LABEL)) throw new HttpError(400, "Record the KYM IMEI check result.");
   if (kymStatus !== "clear")
@@ -1740,7 +1744,7 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
 
   return tx(() => {
     const { c, store } = caseInScope(u, id);
-    if (isBlacklisted(c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
+    if (gsmaBlacklisted(c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
     const view = toView(c, store);
     assertTransition(c.status, "locked");
     // A claimed storage is enough to SHOW a price; moving money needs it seen —
@@ -1786,13 +1790,21 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
       by: u.name,
     };
 
+    // The early KYM answer, superseded by the lock's (clear) one — stored back, so the record
+    // never says "duplicate" on a phone taken as clear. None tapped early → none written.
+    const early = parseJson<KymEarly | null>(c.kym_early, null);
+    const supersede = !!early && (early.status !== "clear" || (early.reference ?? null) !== kymRef);
+    const kymEarly = supersede ? JSON.stringify({ status: "clear", reference: kymRef, by: u.name, at: now } satisfies KymEarly) : c.kym_early;
+
     const upd = db()
       .prepare(
-        `UPDATE cases SET status = 'locked', customer = ?, checks = ?, trade_value = ?, premium_value = ?, premium_bp = ?, premium_funded_by = ?, bonus_value = ?, payable = ?, locked_at = ?, updated_at = ?
+        `UPDATE cases SET status = 'locked', customer = ?, checks = ?, kym_early = ?, trade_value = ?, premium_value = ?, premium_bp = ?, premium_funded_by = ?, bonus_value = ?, payable = ?, locked_at = ?, updated_at = ?
          WHERE id = ? AND status = 'quoted'`
       )
-      .run(JSON.stringify(customer), JSON.stringify(checks), M, x.premium, x.premiumBp, premiumFundedBy, B, payable, now, now, id);
+      .run(JSON.stringify(customer), JSON.stringify(checks), kymEarly, M, x.premium, x.premiumBp, premiumFundedBy, B, payable, now, now, id);
     if (upd.changes !== 1) throw new HttpError(409, "This case changed — reload.");
+    if (supersede)
+      audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.kym_early", entity: "case", entityId: id, detail: { status: "clear", reference: kymRef, supersedes: early!.status, at: "lock" } });
     postEvents(store.id, [{ kind: "hold", caseId: id, amount: x.hold, at: now, note: `Trade-in ${c.ref}` }], u.id);
     // The report as it stands at hand-over, frozen: the partner's evidence at pickup and clearance.
     // Inside this transaction, so it is exactly the phone that was locked (issuing reads only the database).

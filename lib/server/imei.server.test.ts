@@ -323,6 +323,37 @@ test("kymEarly: recorded with the advisor's name, needs an IMEI, refuses an unkn
   assert.equal(cleared.kymEarly, null);
 });
 
+test("at the lock, the advisor's KYM answer (it must be clear) supersedes a non-clear early one and is stored back; GSMA's blacklisted still refuses", async () => {
+  const c = fresh();
+  await cases.updateCase(adv, c.id, { modelId: "galaxy-s23-ultra", variant: "256GB", imei: imeiOn(S23U), faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256 });
+  // A mis-tap while the phone tested; the answer opened by itself, so the IMEI card is gone.
+  await cases.updateCase(adv, c.id, { kymEarly: { status: "duplicate", reference: null } });
+  const priced = await cases.updateCase(adv, c.id, { partnerQuote: { amount: 25_000, reference: "QX-KYMFIX", validDays: 3 } });
+  assert.deepEqual(priced.kymEarly, { status: "duplicate", reference: null });
+  assert.ok(!priced.lockBlockers.includes(BLACKLISTED), `the lock's own KYM answer decides: ${priced.lockBlockers.join(" | ")}`);
+  assert.deepEqual(priced.lockBlockers, []);
+  assert.throws(() => sessions.createTestSession(adv, { caseId: c.id }), (e: Error & { status?: number }) => e.status === 409, "no new test on it, as before");
+  // The lock's answer must itself be clear.
+  assert.throws(() => cases.lockTradeIn(adv, c.id, { customer: CUSTOMER, checks: { ...CHECKS, kym: { status: "duplicate" as never, reference: null } } }), (e: Error & { status?: number }) => e.status === 409 && /IMEI register says/.test(e.message));
+  const locked = cases.lockTradeIn(adv, c.id, { customer: CUSTOMER, checks: { ...CHECKS, kym: { status: "clear", reference: "SMS-OK-1" } } });
+  assert.equal(locked.status, "locked");
+  assert.deepEqual(locked.kymEarly, { status: "clear", reference: "SMS-OK-1" }, "stored back for the record");
+  const stored = JSON.parse((db().prepare(`SELECT kym_early FROM cases WHERE id = ?`).get(c.id) as { kym_early: string }).kym_early);
+  assert.deepEqual([stored.status, stored.reference, stored.by], ["clear", "SMS-OK-1", adv.name]);
+  const rows = db().prepare(`SELECT detail FROM audit WHERE action = 'case.kym_early' AND entity_id = ? ORDER BY rowid`).all(c.id) as { detail: string }[];
+  assert.deepEqual(JSON.parse(rows.at(-1)!.detail), { status: "clear", reference: "SMS-OK-1", supersedes: "duplicate", at: "lock" });
+
+  // GSMA blacklisted, with a clear early KYM and a clear lock answer: still refused.
+  const imei = imeiOn(S23U);
+  fake.infos.set(imei, { imei, brand: "Samsung", model: "Galaxy S23 Ultra", modelNumber: "SM-S918B", blacklist: "blacklisted", source: "gsma" });
+  const d = fresh();
+  await withGiq(() => cases.updateCase(adv, d.id, { imei }));
+  await cases.updateCase(adv, d.id, { variant: "256GB", faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256, kymEarly: { status: "clear", reference: "SS-2" } });
+  const bad = await cases.updateCase(adv, d.id, { partnerQuote: { amount: 25_000, reference: "QX-KYMFIX2", validDays: 3 } });
+  assert.equal(bad.lockBlockers[0], BLACKLISTED);
+  assert.throws(() => cases.lockTradeIn(adv, d.id, { customer: CUSTOMER, checks: CHECKS }), (e: Error & { status?: number; extra?: Record<string, string> }) => e.status === 409 && e.message === BLACKLISTED && e.extra?.reason === "blacklisted");
+});
+
 test("the duplicate is said as soon as the IMEI is saved (the lock still refuses); the partner gets no lookup and no warnings", async () => {
   const imei = imeiOn(S23U);
   const a = fresh();
