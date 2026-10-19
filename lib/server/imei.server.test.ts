@@ -402,6 +402,42 @@ test("Apply: a phone code that DISAGREES with the IMEI's model is a flag, not an
   assert.ok(!w.camera?.flags.some((f) => f.startsWith("Model:")), w.camera?.flags.join(" | "));
 });
 
+test("Apply: a phone whose code names nothing, joined on the IMEI's model, settles that model's storage from its own reading ('measured')", async () => {
+  const c = fresh();
+  const named = await cases.updateCase(adv, c.id, { imei: imeiOn("Oneplus 12") });
+  assert.deepEqual([named.device?.modelId, named.modelSource], ["oneplus-12", "imei"]);
+  const s = sessions.createTestSession(adv, { caseId: c.id });
+  const j = joinWith(s.session.code, { brand: "OnePlus", manufacturer: "OnePlus", modelName: "CPH2581", osVersion: "14", totalDiskBytes: 256e9, isPhysicalDevice: true }, "0.9.0");
+  assert.deepEqual([j.session.identity.match, j.session.identity.modelId, j.session.identity.variant], ["exact", "oneplus-12", "256GB"], "no picker: the Check app sends no pick");
+  await runTests(`Ticket ${j.ticket}`, s.session.id);
+  const v = cases.getCase(adv, c.id);
+  assert.deepEqual([v.device?.modelId, v.modelSource, v.device?.variant, v.variantSource], ["oneplus-12", "imei", "256GB", "measured"]);
+  assert.ok(!v.camera?.flags.some((f) => f.startsWith("Storage:") || f.startsWith("Model:")), v.camera?.flags.join(" | "));
+});
+
+test("a case with no IMEI joins exactly as 0.8.0: staff's model is not told to the phone, and a pick settles the measured storage", async () => {
+  const vivo = { brand: "vivo", manufacturer: "vivo", modelName: "V2250", osVersion: "14", totalDiskBytes: 128e9, isPhysicalDevice: true };
+  const c = fresh();
+  await cases.updateCase(adv, c.id, { modelId: "vivo-v29", variant: "256GB" });
+  const s = sessions.createTestSession(adv, { caseId: c.id });
+  const j = joinWith(s.session.code, vivo, "0.9.0");
+  assert.deepEqual([j.session.identity.match, j.session.identity.modelId], ["none", null], "the phone's own answer: the customer's picker");
+  sessions.deviceDeclare(`Ticket ${j.ticket}`, { identityConfirmed: null, picked: { modelId: "vivo-v29", variant: null } });
+  await runTests(`Ticket ${j.ticket}`, s.session.id);
+  const v = cases.getCase(adv, c.id);
+  assert.deepEqual([v.device?.modelId, v.device?.variant, v.variantSource], ["vivo-v29", "128GB", "measured"], "the phone's reading beats staff's 256GB");
+
+  // No pick: staff's size stands, as before — the case's model is not used to settle storage.
+  const d = fresh();
+  await cases.updateCase(adv, d.id, { modelId: "vivo-v29", variant: "256GB" });
+  const s2 = sessions.createTestSession(adv, { caseId: d.id });
+  const j2 = joinWith(s2.session.code, vivo, "0.9.0");
+  assert.equal(j2.session.identity.match, "none");
+  await runTests(`Ticket ${j2.ticket}`, s2.session.id);
+  const w = cases.getCase(adv, d.id);
+  assert.deepEqual([w.device?.modelId, w.modelSource, w.device?.variant, w.variantSource], ["vivo-v29", "advisor", "256GB", "advisor"]);
+});
+
 /* ─────────────────────────── I3: POST /api/imei/read ─────────────────────────── */
 
 const PHOTO = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD";

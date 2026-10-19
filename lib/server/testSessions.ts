@@ -579,8 +579,10 @@ export async function applyTestSession(u: SessionUser, id: string, opts: { auto?
   // a pick on the second test must not undo what the phone measured on the first.
   const measuredNow = storageVariant(v.device?.totalDiskBytes);
   const claim = picked && pick ? { modelId: picked.id, variant: pick.variant ?? null } : null;
-  const caseModel = { caseModelId: c.device?.modelId ?? null, caseVariant: c.device?.variant ?? null };
-  const sizesOf = storageModelId({ match, picked: claim, caseModelId: caseModel.caseModelId });
+  // The join told the phone the IMEI's model (caseModelForJoin) because its own code named
+  // nothing, and nobody picked: the phone's reading settles THAT model's storage.
+  const caseModel = { caseModelId: c.device?.modelId ?? null, caseVariant: c.device?.variant ?? null, caseModelJoined: !s.model.modelId && !claim && !!byImei };
+  const sizesOf = storageModelId({ match, picked: claim, ...caseModel });
   const earlier = sizesOf && sizesOf === caseModel.caseModelId ? c.measuredStorage : null;
   const measured = measuredNow ?? earlier;
   const storage = storageFromTest({
@@ -1127,28 +1129,24 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
 }
 
 /**
- * The model the join tells the phone (owner, 2026-10-19: "IMEI first"). The case's own model when it
- * has one — the IMEI or the advisor named it, so an iPhone or a browser (which can't name themselves)
- * skips the customer's picker — reported as a match. The phone's own code still wins when it matched,
- * except against a model the IMEI named: then the case's model is shown and Apply flags the code.
+ * The model the join tells the phone (owner, 2026-10-19: "IMEI first"). The case's own model when its
+ * IMEI named it — so an iPhone or a browser (which can't name themselves) skips the customer's picker —
+ * reported as a match; Apply then settles that model's storage from the phone's reading
+ * (storageModelId, caseModelJoined). The phone's own code still wins when it matched the same model;
+ * a code naming another model is shown the IMEI's, and Apply flags it. Any other case — no IMEI, or a
+ * model staff, the phone or the customer named — joins exactly as 0.8.0: the phone's own answer.
  */
 function caseModelForJoin(phone: ModelMatch, caseId: string, refs: TradeModelRef[], measured: string | null): ModelMatch {
   const row = db().prepare(`SELECT model_id, variant, model_source FROM cases WHERE id = ?`).get(caseId) as
     | { model_id: string | null; variant: string | null; model_source: string | null }
     | undefined;
-  if (!row?.model_id) return phone;
-  if (phone.modelId && (phone.modelId === row.model_id || row.model_source !== "imei")) return phone;
+  if (!row?.model_id || row.model_source !== "imei") return phone;
+  if (phone.modelId === row.model_id) return phone;
   const m = refs.find((x) => x.id === row.model_id);
   if (!m) return phone;
   const size = measured ?? row.variant;
   const variant = size && m.variants.includes(size) ? size : null;
-  return {
-    modelId: m.id,
-    label: `${m.brand} ${m.model}`,
-    variant,
-    match: "exact",
-    why: row.model_source === "imei" ? `The store has this phone as the ${m.model} (from its IMEI).` : `The store has this phone as the ${m.model}.`,
-  };
+  return { modelId: m.id, label: `${m.brand} ${m.model}`, variant, match: "exact", why: `The store has this phone as the ${m.model} (from its IMEI).` };
 }
 
 /**

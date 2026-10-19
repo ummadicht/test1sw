@@ -204,9 +204,12 @@ traded in.", "reason": "blacklisted" }` and no session is made; the lock refuses
 (and the reason), and it is the first of `lockBlockers`. Show the sentence in a red banner on the IMEI
 card and disable Start.
 
-**The model at the phone:** a case whose model is set (by the IMEI or staff) is what the join tells the
-phone (`identity.match: "exact"`), so an iPhone or a browser — which can't name itself — skips the
-customer's picker; the storage is still asked when the phone can't measure it. The phone's own model
+**The model at the phone:** a case whose model the IMEI named (`modelSource: "imei"`) is what the join
+tells the phone (`identity.match: "exact"`), so an iPhone or a browser — which can't name itself — skips
+the customer's picker; the storage is still asked when the phone can't measure it, and when it did
+measure, Apply settles that model's storage from the reading (`variantSource: "measured"`) — no pick is
+needed. Any other case (no IMEI, or a model staff, the phone or the customer named) joins exactly as
+0.8.0: the phone's own answer, the picker when its code names nothing. The phone's own model
 code still wins when it matched, except against a model the IMEI named: at Apply a code that disagrees
 is a flag in `camera.flags` (`Model: phone code says Samsung Galaxy S23; the IMEI says Samsung Galaxy
 S23 Ultra — check Settings › About phone.`), never an overwrite. A code that agrees makes

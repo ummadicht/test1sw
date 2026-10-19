@@ -166,12 +166,21 @@ export type StorageFromTest = {
 
 /**
  * The model whose storage Apply is settling: the phone's own match, else the
- * customer's pick when the case has no model yet or already has that one. null =
- * no model to put a size on (the pick would replace a model the case has).
+ * customer's pick when the case has no model yet or already has that one, else the
+ * case's own model when the join told the phone it (`caseModelJoined`: a model the
+ * IMEI named, the phone's code naming nothing, and no pick — the Check app skips
+ * Identify on that "exact", so a pick never comes). null = no model to put a size on
+ * (the pick would replace a model the case has).
  */
-export function storageModelId(i: { match: { modelId: string | null }; picked: { modelId: string } | null; caseModelId: string | null }): string | null {
+export function storageModelId(i: {
+  match: { modelId: string | null };
+  picked: { modelId: string } | null;
+  caseModelId: string | null;
+  caseModelJoined?: boolean;
+}): string | null {
   if (i.match.modelId) return i.match.modelId;
   if (i.picked && (!i.caseModelId || i.caseModelId === i.picked.modelId)) return i.picked.modelId;
+  if (i.caseModelJoined && !i.picked && i.caseModelId) return i.caseModelId;
   return null;
 }
 
@@ -206,6 +215,8 @@ export function storageFromTest(i: {
   measured?: string | null;
   /** Where the case's current size came from — a customer's claim gives way to a reading. */
   caseSource?: VariantSource | null;
+  /** The join told the phone the case's own model (storageModelId). */
+  caseModelJoined?: boolean;
 }): StorageFromTest {
   const none: StorageFromTest = { variant: null, source: null, flag: null };
   const model = storageModelId(i);

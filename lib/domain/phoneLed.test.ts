@@ -256,6 +256,25 @@ test("storage at Apply: the disk reading counts however the model was named — 
   assert.equal(storageFromTest({ match: { ...S22, variant: "128GB" }, picked: null, variants: SIZES, caseModelId: null, caseVariant: null, measured: "128GB" }).source, "measured");
 });
 
+test("storage at Apply: the join told the phone the case's own model (its code named nothing, nobody picked) — that model's storage is settled", () => {
+  const unmatched = { modelId: null, variant: null };
+  const joined = { match: unmatched, picked: null, caseModelId: "galaxy-s22", caseModelJoined: true };
+  assert.equal(storageModelId(joined), "galaxy-s22");
+  assert.deepEqual(storageFromTest({ ...joined, variants: SIZES, caseVariant: null, measured: "256GB" }), { variant: "256GB", source: "measured", flag: null });
+  // A reading beats a size already on the case, as for any match; a size not on file is said.
+  assert.equal(storageFromTest({ ...joined, variants: SIZES, caseVariant: "128GB", caseSource: "advisor", measured: "256GB" }).variant, "256GB");
+  assert.match(storageFromTest({ ...joined, variants: SIZES, caseVariant: null, measured: "1TB" }).flag ?? "", /phone measures 1TB, not on file/);
+  // Nothing measured: the rules after the reading (the case's size stays; one size; nothing).
+  assert.deepEqual(storageFromTest({ ...joined, variants: SIZES, caseVariant: "128GB" }), NONE);
+  assert.deepEqual(storageFromTest({ ...joined, variants: ["256GB"], caseVariant: null }), { variant: "256GB", source: "catalogue", flag: null });
+  // Not the join's model (the 0.8.0 rule): no phone match and no pick settles nothing.
+  assert.equal(storageModelId({ ...joined, caseModelJoined: false }), null);
+  assert.equal(storageModelId({ match: unmatched, picked: null, caseModelId: "galaxy-s22" }), null);
+  // The phone's own match, or the customer's pick, still decide first.
+  assert.equal(storageModelId({ ...joined, match: { modelId: "galaxy-a54" } }), "galaxy-a54");
+  assert.equal(storageModelId({ ...joined, picked: { modelId: "galaxy-a54" } }), null, "a pick of another model is not the join's model");
+});
+
 /* ─────────────────────────── storage on a save ─────────────────────────── */
 
 test("storage on a save: re-saving the size already there keeps where it came from (a claim stays a claim)", () => {
