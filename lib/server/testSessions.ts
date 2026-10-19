@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import { db, tx, nowIso, newId, parseJson, audit } from "./db";
 import { HttpError, type SessionUser } from "./auth";
 import { getStore, getOrg, canSeeStore, ownStore, storeInScope, type StoreRow } from "./scope";
-import { createCase, getCase, updateCase, recordCameraCheck, markLcdOverride, certifyBlock, type CertifyBlock } from "./cases";
+import { createCase, getCase, updateCase, recordCameraCheck, markLcdOverride, certifyBlock, deviceAnswer, type CertifyBlock } from "./cases";
 import { customerGradingFor, issueQuietly, reportPathFor } from "./gradingReport";
 import {
   initialGradeiqState,
@@ -46,6 +46,7 @@ import {
   matchModel,
   storageVariant,
   batteryHealthResult,
+  browserVerdict,
   type PlanItem,
   type TestResults,
   type Declared,
@@ -1289,7 +1290,10 @@ function resultsTx(authorization: string | null, raw: { results?: unknown }) {
     const read = readResults(raw?.results, plan, now);
     const existing = parseJson<TestResults>(r.results, {});
     // battery_health is the server's reading; the phone may only report a skip (phoneMayPost).
-    const items = read.items.filter((it) => phoneMayPost(it.testId, it.outcome, existing));
+    // In a browser, a fail that is only the customer's own yes/no is not a measurement: a skip,
+    // as the native app's measured verdict would be (browserVerdict) — same phone, same answer.
+    const device = parseJson<DeviceReport | null>(r.device, null);
+    const items = read.items.filter((it) => phoneMayPost(it.testId, it.outcome, existing)).map((it) => browserVerdict(it, device));
     const ignored = [...read.ignored, ...read.items.filter((it) => !items.includes(it)).map((it) => it.testId)];
     const merged = mergeResults(existing, items);
     const status: SessionStatus = r.status === "joined" && items.length ? "testing" : r.status;
@@ -1313,7 +1317,7 @@ export function deviceStatus(authorization: string | null) {
   if (!m) throw new HttpError(401, "This phone is not connected to a store session.");
   const r0 = db().prepare(`SELECT * FROM test_sessions WHERE ticket_hash = ?`).get(sha(m[1])) as Row | undefined;
   // Cancelled, expired or re-joined elsewhere: the ticket is gone, so the session is closed for this phone.
-  if (!r0) return { status: "closed" as const, progress: null, storeName: null, caseRef: null, reportPath: null, grading: null, colours: false };
+  if (!r0) return { status: "closed" as const, progress: null, storeName: null, caseRef: null, reportPath: null, grading: null, colours: false, answer: null };
   const r = expireIfDue(r0);
   // The phone asks every few seconds once it has finished: the results go on the case as soon as
   // everything is in, whether or not anyone has the Session screen open (autoApply).
@@ -1334,6 +1338,9 @@ export function deviceStatus(authorization: string | null) {
     reportPath: applied ? reportPathFor(r0.case_id) : null,
     grading: applied ? customerGradingFor(r0.case_id) : null,
     colours,
+    // Once applied, the answer — the server's lines, the customer's whitelist slice (owner, 2026-10-18:
+    // the answer on the customer's phone too). Read only: never a re-price or a partner call.
+    answer: applied ? deviceAnswer(r0.case_id) : null,
   };
 }
 

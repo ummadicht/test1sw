@@ -24,6 +24,9 @@ import {
   readWifi,
   CODE_ALPHABET,
   BROWSER_NOTE,
+  BROWSER_JUDGED,
+  NOT_MEASURED_IN_BROWSER,
+  browserVerdict,
   isBrowserReport,
   type DeviceReport,
   type TradeModelRef,
@@ -585,4 +588,29 @@ test("camera display fold: the phone's own display FAIL is still a phone-test fa
   const r = resultsWithCameraDisplay(selfFail, passLcd, AT);
   assert.equal(r.display?.outcome, "fail");
   assert.deepEqual(faultIds(summarise(DEFAULT_PLAN, r, NO_DAMAGE, DEVICE, MODELS)), ["display_lines"]);
+});
+
+test("browser parity: a FAIL that is only the customer's yes/no (beeps, buzzes, the light) is a skip — never a fault; measured tests keep theirs", () => {
+  const web = { appVersion: "web-0.9.0" };
+  const app = { appVersion: "0.9.0" };
+  const at = "2026-10-19T10:00:00.000Z";
+  assert.deepEqual([...BROWSER_JUDGED], ["speaker", "vibration", "flash"]);
+  for (const testId of BROWSER_JUDGED) {
+    const fail = { testId, outcome: "fail" as const, detail: { beeps: 2 }, at };
+    assert.deepEqual(browserVerdict(fail, web), { testId, outcome: "skip", detail: { beeps: 2, reason: NOT_MEASURED_IN_BROWSER }, at }, testId);
+    assert.equal(browserVerdict(fail, app), fail, "the native app's verdict is a measurement");
+    assert.equal(browserVerdict({ ...fail, outcome: "pass" as const }, web).outcome, "pass", "a pass stands");
+  }
+  for (const testId of ["touch", "camera", "connectivity", "mic", "display"]) {
+    const fail = { testId, outcome: "fail" as const, detail: null, at };
+    assert.equal(browserVerdict(fail, web), fail, testId);
+  }
+  assert.equal(NOT_MEASURED_IN_BROWSER, "Not measured in the browser");
+  // No fault, no priced issue from the skips: the summary of a browser run with those "fails" equals the native run's skips.
+  const results = (o: "fail" | "skip") => Object.fromEntries(BROWSER_JUDGED.map((id) => [id, { outcome: o, detail: null, at }]));
+  const fromWeb = Object.fromEntries(BROWSER_JUDGED.map((id) => [id, browserVerdict({ testId: id, outcome: "fail" as const, detail: null, at }, web)])) as never;
+  const sw = summarise(DEFAULT_PLAN, fromWeb, null, null, []);
+  const sn = summarise(DEFAULT_PLAN, results("skip") as never, null, null, []);
+  assert.deepEqual([sw.faults, sw.issues], [sn.faults, sn.issues]);
+  assert.deepEqual(sw.faults, []);
 });

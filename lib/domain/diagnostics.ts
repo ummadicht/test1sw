@@ -314,6 +314,21 @@ export function isBrowserReport(device: Pick<DeviceReport, "appVersion"> | null 
   return typeof device?.appVersion === "string" && device.appVersion.trim().toLowerCase().startsWith("web-");
 }
 
+/**
+ * Same phone, same answer (owner, 2026-10-18: "Why swapup check in browser doesn't follow same").
+ * In a browser these tests are the customer's own yes/no — count the beeps, "Did you feel two
+ * buzzes?", "Did the light come on?" — where the native app measures them (loopback audio, the
+ * accelerometer, the camera's luminance) and SKIPS when it can't tell. So a browser FAIL on them is
+ * recorded as a skip, never a fault, a repair line or a deduction. Measured browser tests (touch,
+ * camera, connectivity…) keep their verdicts, and a pass stands.
+ */
+export const BROWSER_JUDGED: readonly string[] = ["speaker", "vibration", "flash"];
+export const NOT_MEASURED_IN_BROWSER = "Not measured in the browser";
+export function browserVerdict<T extends Pick<ResultItem, "testId" | "outcome" | "detail">>(item: T, device: Pick<DeviceReport, "appVersion"> | null | undefined): T {
+  if (item.outcome !== "fail" || !BROWSER_JUDGED.includes(item.testId) || !isBrowserReport(device)) return item;
+  return { ...item, outcome: "skip", detail: { ...(item.detail ?? {}), reason: NOT_MEASURED_IN_BROWSER } };
+}
+
 const FAULT_ORDER: FaultId[] = FAULTS.map((f) => f.id);
 
 /**

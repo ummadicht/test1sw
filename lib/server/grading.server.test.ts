@@ -244,7 +244,10 @@ test("the customer's phone gets its report link and the grade on both scales onc
   assert.match(String(s.reportPath), /^\/r\/[A-Za-z0-9_-]{22}$/);
   // The grade the link opens on (the latest issued version): the SwapUp grade, its letter, nothing else.
   assert.deepEqual(s.grading, { status: "graded", label: "Superb (A) · provisional", grade: "Superb", letter: "A", final: false });
-  assert.doesNotMatch(JSON.stringify(s), MONEY);
+  // Owner, 2026-10-18 — a deliberate reversal of "never a price on the phone": the money lives ONLY
+  // under `answer` (the server's lines, lib/domain/answer.ts customerAnswer); nothing else carries any.
+  assert.ok("answer" in s);
+  assert.doesNotMatch(JSON.stringify({ ...s, answer: undefined }), MONEY);
   // Before Apply there is neither.
   const fresh = sessions.createTestSession(adv, {});
   const j = sessions.joinByCode(
@@ -254,7 +257,9 @@ test("the customer's phone gets its report link and the grade on both scales onc
   const before = sessions.deviceStatus(`Ticket ${j.ticket}`);
   assert.equal(before.reportPath, null);
   assert.equal(before.grading, null);
+  assert.equal(before.answer, null, "no answer before Apply");
   assert.equal(sessions.deviceStatus("Ticket nope-nope-nope-nope-nope-nope").grading, null);
+  assert.equal(sessions.deviceStatus("Ticket nope-nope-nope-nope-nope-nope").answer, null, "a closed ticket has no answer");
 });
 
 test("versioning: an edit that moves the grade is v2; the same edit again is still v2", async () => {
