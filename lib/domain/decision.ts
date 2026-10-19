@@ -16,6 +16,11 @@
  *     rupees, as `favoursCustomer`, even when the answer earns the centre nothing;
  *   • the upgrade BONUS is shown but is never a signal — a promotion is not a
  *     reason to give up a phone that is worth repairing;
+ *   • "let go" is what the customer is PAID for the phone as it is: the market
+ *     price plus the SwapUp premium (lib/domain/premium.ts, at most 5% of the
+ *     market price). The premium comes only with a new phone, like the bonus —
+ *     but it is SwapUp's price for THIS phone, so it is in the money question,
+ *     and a caveat says it is conditional;
  *   • a repair that is free under cover is always recommended;
  *   • with no repair quote, or no partner value for the phone, it declines
  *     (`cannot_say`) rather than compare against a guess.
@@ -28,7 +33,7 @@ import type { PriceSourceKind } from "./ratecard.ts";
 
 /** The one caveat that is never behind a toggle: the answer shows it under its headline (Offer.safety). */
 export const SWOLLEN_BATTERY_CAVEAT = "Swollen battery is a safety risk — stop using and charging it.";
-export const RULESET_VERSION = "2026-10-15.2";
+export const RULESET_VERSION = "2026-10-18.1";
 
 export type Thresholds = {
   /**
@@ -60,8 +65,13 @@ export type DecisionInput = {
   repairCovered: boolean;
   /** Partner value of the phone once repaired. */
   repairedValue: Rupees | null;
-  /** Partner value of the phone as it is — the trade-in. */
+  /**
+   * What the customer is paid for the phone as it is — the market price plus the SwapUp premium
+   * (lib/domain/premium.ts). Never the bonus.
+   */
   asIsValue: Rupees | null;
+  /** The SwapUp premium inside asIsValue — for its caveat only (it comes with a new phone). Default 0. */
+  premium?: Rupees;
   valueSource: PriceSourceKind | null;
   upgrade: { label: string; newPrice: Rupees; bonus: Rupees; supportEndYear: number | null } | null;
   old: { ageYears: number | null; supportEndYear: number | null };
@@ -131,6 +141,9 @@ export function decide(input: DecisionInput): Decision {
 
   if (input.upgrade && input.upgrade.bonus > 0) {
     caveats.push("The bonus is a promotion, never a reason to upgrade.");
+  }
+  if ((input.premium ?? 0) > 0 && input.asIsValue !== null) {
+    caveats.push(`The trade-in includes a ${r(input.premium!)} SwapUp premium, paid only with a new phone.`);
   }
 
   const upgradeBlock = (repairPays: Rupees | null): Decision["upgrade"] => {

@@ -23,6 +23,11 @@
  * the bonus is shown and never a reason. When a number is missing, `asks` says
  * which ONE thing would fill it — never a form, never a guessed size.
  *
+ * "We pay you" is the market price (the trade-in quote) plus the SwapUp premium
+ * (lib/domain/premium.ts); `swap.customerPays` is exchange()'s, the same formula the
+ * lock charges. `answer` is the same answer in the lines every screen prints
+ * (lib/domain/answer.ts).
+ *
  * Pure: no database, no clock. The app mirrors these types (src/store/offer.ts)
  * and shows these strings; it owns only the labels.
  */
@@ -30,8 +35,12 @@
 import { SWOLLEN_BATTERY_CAVEAT, type Decision, type Recommendation } from "./decision.ts";
 import type { Coverage, ManualQuote, RepairEstimate } from "./repair.ts";
 import type { PriceSourceKind, QuoteLine } from "./ratecard.ts";
+import type { ConditionAnswers } from "./condition.ts";
+import type { MarketGrade } from "./marketSell.ts";
 import { fmtBp } from "./money.ts";
 import { tradeInLine, type PriceiqMeta } from "./priceiqTradeIn.ts";
+import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP } from "./premium.ts";
+import { buildAnswer, TRADED_STATUSES, type Answer } from "./answer.ts";
 
 /* ─────────────────────────── the contract (docs/MOBILE-API.md §3c) ─────────────────────────── */
 
@@ -79,12 +88,17 @@ export type Offer = {
     coverage: Coverage;
   };
   swap: {
+    /** The market price M — the buyback partner's quote (locked: trade_value). */
     tradeIn: number | null;
     tradeInNote: string | null;
+    /** The SwapUp premium on M (premium.ts); null without M, or on a case locked before premiums. */
+    premium: { amount: number; bp: number } | null;
+    /** What we pay for the phone: tradeIn + premium; null when tradeIn is null. */
+    wePay: number | null;
     bonus: number | null;
     bonusBp: number | null;
     bonusWhy: string | null;
-    /** tradeIn + (bonus ?? 0); null when tradeIn is null. */
+    /** wePay + (bonus ?? 0); null when tradeIn is null. */
     total: number | null;
     /** Why tradeIn is null. */
     why: string | null;
@@ -100,9 +114,9 @@ export type Offer = {
      */
     tradeInDetail: { line: string | null; lines: { label: string; pct: string | null; amount: number }[]; note: string | null } | null;
     newPhone: { deviceId: string; label: string; price: number; suggested: boolean; why: string | null } | null;
-    /** decision.upgrade.pays */
+    /** newPrice − wePay − bonus (premium.ts exchange; locked: payable). null without both phones priced, or when the new phone costs less than we pay + the bonus. */
     customerPays: number | null;
-    /** decision.upgrade.extraVsRepair (+ = the swap costs more today). */
+    /** customerPays − the refurb quote (+ = the swap costs more today). */
     vsRepair: number | null;
   };
   /** null = allowed; a string = why not. */
@@ -112,6 +126,8 @@ export type Offer = {
   safety: string | null;
   /** Every other caveat — behind "Why this answer" / "?". */
   caveats: string[];
+  /** The answer in the lines every screen prints as sent (lib/domain/answer.ts). */
+  answer: Answer;
 };
 
 /* ─────────────────────────── what toView hands in ─────────────────────────── */
@@ -135,6 +151,8 @@ export type OfferQuote = {
   priceiq?: PriceiqMeta;
   /** A rate-card quote where PriceIQ was asked first: why it had no price. */
   priceiqWhy?: string;
+  /** A rate-card row with grade prices: the grade the price is for. */
+  grade?: MarketGrade;
 };
 
 export type OfferInput = {
@@ -163,8 +181,15 @@ export type OfferInput = {
   hasCondition: boolean;
   /** The chosen new phone (cases.ts UpgradeChoice fits). With `model` and `variant`, the answer names it without the brand. */
   upgrade: { deviceId: string; label: string; model?: string; variant?: string; price: number; suggested?: boolean; why?: string } | null;
-  bonus: { amount: number; bp: number; override: { bp: number; amount: number } | null } | null;
+  /** cases.ts BonusApplied fits; `clampedBy`/`basisAmount` say when the campaign's ₹ cap set the amount. */
+  bonus: { amount: number; bp: number; override: { bp: number; amount: number } | null; clampedBy?: string | null; basisAmount?: number } | null;
   decision: Decision | null;
+  /** The case's condition, for the answer's grade line. Default null (no grade line). */
+  condition?: ConditionAnswers | null;
+  /** A case past the counter: what was frozen at lock (trade_value, premium_value, premium_bp, bonus_value, payable). They win over the quote and bonus JSON. */
+  locked?: { trade: number | null; premium: number | null; premiumBp: number | null; bonus: number | null; payable: number | null } | null;
+  /** The programme is a test one (org.demo): every surface says "Test programme — no real money". */
+  testProgramme?: boolean;
   /**
    * The asks' words must be true for THIS case, not only for a tested one.
    *   tested         a phone test was applied to the case (false = a desk-only case: no test to blame
@@ -332,6 +357,27 @@ export function buildOffer(i: OfferInput): Offer {
   const bonus = b ? (b.override?.amount ?? b.amount) : null;
   const bonusBp = b ? (b.override?.bp ?? b.bp) : null;
   const bonusWhy = !up ? NO_NEW_PHONE : bonus === null ? NO_CAMPAIGN : null;
+  // The campaign's ₹ cap set the amount (an override is capped the same way).
+  const capped = !!b && (b.override ? b.basisAmount !== undefined && b.override.amount < Math.floor((b.basisAmount * b.override.bp) / 10_000) : b.clampedBy === "cap");
+
+  // ── We pay: the market price + the SwapUp premium; once traded, the figures frozen at lock ──
+  const frozen = i.locked && i.locked.trade !== null && TRADED_STATUSES.concat("cancelled").includes(i.status) ? i.locked : null;
+  const market = frozen ? frozen.trade : tradeIn;
+  const p = frozen ? (frozen.premium && frozen.premium > 0 ? { amount: frozen.premium, bp: frozen.premiumBp ?? 0 } : null) : premiumOn(market);
+  const premium = market === null || !p ? null : { amount: p.amount, bp: p.bp };
+  const wePay = market === null ? null : market + (premium?.amount ?? 0);
+  const B = frozen ? (frozen.bonus ?? 0) : (bonus ?? 0);
+  // What the customer pays for the new phone — the one formula the lock charges (premium.ts exchange).
+  let customerPays: number | null = null;
+  let tooCheap = false;
+  if (frozen) customerPays = frozen.payable;
+  else if (market !== null && up) {
+    try {
+      customerPays = exchange({ market, bonus: B, newPrice: up.price }).customerPays;
+    } catch {
+      tooCheap = true;
+    }
+  }
 
   // ── What is still missing — one thing each, in order ──
   const asks: OfferAsk[] = [];
@@ -395,17 +441,19 @@ export function buildOffer(i: OfferInput): Offer {
       coverage: i.coverage,
     },
     swap: {
-      tradeIn,
+      tradeIn: market,
       tradeInNote,
-      bonus,
+      premium,
+      wePay,
+      bonus: frozen ? (B > 0 ? B : null) : bonus,
       bonusBp,
       bonusWhy,
-      total: tradeIn === null ? null : tradeIn + (bonus ?? 0),
+      total: wePay === null ? null : wePay + B,
       why: swapWhy,
       tradeInDetail: tradeIn !== null && q ? tradeInDetail(q) : null,
       newPhone: up ? { deviceId: up.deviceId, label: phoneLabel(up), price: up.price, suggested: up.suggested === true, why: up.why ?? null } : null,
-      customerPays: decision?.upgrade?.pays ?? null,
-      vsRepair: decision?.upgrade?.extraVsRepair ?? null,
+      customerPays,
+      vsRepair: customerPays !== null && repairAmount !== null ? customerPays - repairAmount : null,
     },
     actions: {
       repair: !open ? CLOSED : nothingToRepair ? NOTHING_TO_REPAIR : repairAmount === null ? repairWhy : status === "draft" ? NOT_PRICED : null,
@@ -419,13 +467,33 @@ export function buildOffer(i: OfferInput): Offer {
             ? stale
             : !up
               ? CHOOSE_NEW_PHONE
-              : status !== "quoted"
-                ? NOT_PRICED
-                : null,
+              : tooCheap
+                ? NEW_PHONE_TOO_CHEAP
+                : status !== "quoted"
+                  ? NOT_PRICED
+                  : null,
       walkAway: !open ? CLOSED : null,
     },
     signals,
     safety: decision?.caveats.includes(SWOLLEN_BATTERY_CAVEAT) ? SWOLLEN_BATTERY_CAVEAT : null,
     caveats: (decision?.caveats ?? []).filter((c) => c !== SWOLLEN_BATTERY_CAVEAT),
+    answer: buildAnswer({
+      status,
+      condition: i.condition ?? null,
+      market:
+        market === null
+          ? null
+          : { amount: market, source: q?.source.kind ?? "none", priceGrade: q?.source.kind === "priceiq" ? (q.priceiq?.grade ?? null) : (q?.grade ?? null) },
+      stale: !!stale,
+      quoteExpired: i.quoteExpired,
+      quoteBlocked: !!i.quoteBlocked,
+      repair: { amount: repairAmount, covered, coverage: i.coverage, nothingToRepair },
+      newPhone: up ? { label: phoneLabel(up), price: up.price } : null,
+      bonus: bonus !== null ? { amount: bonus, bp: bonusBp ?? 0, cap: capped ? bonus : null } : null,
+      bonusWhy,
+      recommendation,
+      locked: frozen,
+      testProgramme: i.testProgramme === true,
+    }),
   };
 }

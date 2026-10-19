@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { decide, type DecisionInput } from "./decision.ts";
 import { canHold, position, exposure, checkLedger, pickupAdvice, type CreditEvent, type CreditPolicy } from "./credit.ts";
 import { canTransition, collectionEvents, clearanceEvents, cancelEvents, type ClearanceOutcome } from "./lifecycle.ts";
+import { exchange } from "./premium.ts";
 
 const BASE: DecisionInput = {
   repairPays: 15000,
@@ -164,9 +165,19 @@ test("credit: random walk of many cases never breaks the ledger", () => {
   for (const releaseOn of ["collected", "cleared"] as const) {
     const ev: CreditEvent[] = [];
     let expectedOpen = 0;
+    let claims = 0;
+    const marketOf = new Map<string, number>();
     for (let i = 0; i < 300; i++) {
       const id = `c${i}`;
-      const T = 1000 + Math.floor(rnd() * 40000);
+      // Each case: a market price M, a bonus B and a new phone N; the line holds exchange().hold (= M) only.
+      const M = 1000 + Math.floor(rnd() * 40000);
+      const B = Math.floor(rnd() * 6000);
+      const N = M * 2 + B + Math.floor(rnd() * 100000);
+      const x = exchange({ market: M, bonus: B, newPrice: N });
+      assert.equal(x.hold, M);
+      claims += x.claim;
+      marketOf.set(id, M);
+      const T = x.hold;
       ev.push({ kind: "hold", caseId: id, amount: T, at: String(i) });
       const roll = rnd();
       if (roll < 0.15) { ev.push(...cancelEvents(id, T, String(i))); continue; }
@@ -182,7 +193,25 @@ test("credit: random walk of many cases never breaks the ledger", () => {
     }
     assert.deepEqual(checkLedger(ev), []);
     assert.equal(exposure(ev), expectedOpen);
+    // The premium and the bonus are the programme's claim: never an amount on the line, never exposure.
+    for (const e of ev) assert.ok(e.amount <= marketOf.get(e.caseId)!, `${e.kind} ${e.caseId} over its market price`);
+    assert.ok(claims > 0 && exposure(ev) === expectedOpen);
   }
+});
+
+test("lifecycle: we pay ≠ the market price — after the verdict, exposure is M − accepted or 0, never the premium", () => {
+  const x = exchange({ market: 10_000, bonus: 400, newPrice: 50_000 });
+  assert.deepEqual([x.premium, x.wePay, x.hold], [500, 10_500, 10_000]);
+  for (const releaseOn of ["collected", "cleared"] as const)
+    for (const liab of ["store", "partner"] as const)
+      for (const { o, accepted } of [{ o: "cleared", accepted: 0 }, { o: "regraded", accepted: 7000 }, { o: "rejected", accepted: 0 }, { o: "not_received", accepted: 0 }] as { o: ClearanceOutcome; accepted: number }[]) {
+        const ev: CreditEvent[] = [{ kind: "hold", caseId: "c", amount: x.hold, at: "1" }, ...collectionEvents(releaseOn, "c", x.hold, "2")];
+        const r = clearanceEvents({ releaseOn, caseId: "c", held: x.hold, outcome: o, accepted, shortfallLiability: liab, at: "3" });
+        ev.push(...r.events);
+        const expected = o === "not_received" || liab === "store" ? x.hold - r.accepted : 0;
+        assert.equal(exposure(ev), expected, `${releaseOn}/${liab}/${o}`);
+        assert.ok(ev.every((e) => e.amount <= x.hold), "nothing on the line involves the premium");
+      }
 });
 
 test("decision: a cheap repair is repair even when it does not pay back at resale", () => {
@@ -209,4 +238,21 @@ test("decision: swollen battery is a safety caveat, not a sales hook", () => {
   const d = decide({ ...BASE, repairPays: 2500, repairedValue: 11000, asIsValue: 9800, swollenBattery: true, faultCount: 1 });
   assert.equal(d.recommendation, "repair");
   assert.ok(d.caveats[0].includes("safety"));
+});
+
+test("decision: the premium is in the money question — what the customer is paid for the phone as it is (ruleset 2026-10-18.1)", () => {
+  // R ₹5,000 to fix a phone worth ₹15,600 repaired. Against the market price alone (₹10,000) the
+  // repair adds ₹5,600 — over R + the ₹500 gap, a strong reason to repair. Against what SwapUp
+  // pays (₹10,000 + a ₹500 premium) it adds ₹5,100: no longer a reason either way.
+  const base = { ...BASE, repairPays: 5000, repairedValue: 15600, upgrade: { label: "Galaxy S25", newPrice: 80999, bonus: 0, supportEndYear: 2032 }, old: { ageYears: 2, supportEndYear: 2030 } };
+  const atMarket = decide({ ...base, asIsValue: 10000 });
+  const atWePay = decide({ ...base, asIsValue: 10500, premium: 500 });
+  assert.ok(atMarket.signals.some((s) => s.code === "repair_adds_value" && s.strength === "strong"));
+  assert.ok(!atWePay.signals.some((s) => s.code === "repair_adds_value" || s.code === "repair_destroys_value"));
+  assert.equal(atWePay.version, "2026-10-18.1");
+  // The premium comes only with a new phone: said, like the bonus.
+  assert.ok(atWePay.caveats.includes("The trade-in includes a ₹500 SwapUp premium, paid only with a new phone."));
+  assert.ok(!atMarket.caveats.some((c) => /premium/.test(c)));
+  // The customer pays the new phone less what we pay — the lock's own formula.
+  assert.equal(atWePay.upgrade!.pays, 80999 - 10500);
 });

@@ -128,12 +128,15 @@ test("the owner's case: S23 Ultra 256GB, Good, rear camera failed, battery under
   assert.equal(w.tradeInNote, AGE52, "over 14 days old: shown WITH its age");
   assert.ok(s25u, "the seeded catalogue has the Galaxy S25 Ultra");
   assert.ok(w.bonus !== null && w.bonus > 0, "the upgrade bonus still applies");
-  assert.equal(w.total, 36_490 + w.bonus!);
+  // We pay = the market price + the SwapUp premium (3% up to ₹50,000); the total adds the bonus.
+  assert.deepEqual(w.premium, { amount: 1_094, bp: 300 });
+  assert.equal(w.total, 36_490 + 1_094 + w.bonus!);
   // Old data is still a price: the lock is not blocked by its age.
   assert.ok(!v.lockBlockers.some((b) => /old|PriceIQ/i.test(b)), v.lockBlockers.join(" | "));
   // No partner's name on the answer, no "sample" anywhere.
   assert.ok(!namesBrand(JSON.stringify(v.offer)));
-  assert.doesNotMatch(JSON.stringify(v.offer), /Buyback Partner|sample/i);
+  // (The staff note may say "the buyback partner's quote" — the role, never the partner org's name.)
+  assert.doesNotMatch(JSON.stringify(v.offer), /Buyback Partner \(demo\)|sample/i);
 });
 
 test("PriceIQ has no price and there is no rate card: no price at all — 'No market price yet — enter a quote', and why", async () => {

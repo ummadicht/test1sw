@@ -190,7 +190,8 @@ export function buildAnswer(i: AnswerInput): Answer {
   let premium: Answer["premium"] = null;
   let premiumEdge: Rupees | null = null;
   if (traded) {
-    M = i.locked?.trade ?? null;
+    // The figures frozen at lock (absent only for a caller with none: then the quote, and no premium).
+    M = i.locked ? i.locked.trade : (i.market?.amount ?? null);
     // A case locked before premiums has premium_value NULL: the customer was paid the market price.
     const p = i.locked?.premium ?? null;
     if (M !== null && p !== null && p > 0) premium = { amount: p, bp: i.locked?.premiumBp ?? 0, rule: PREMIUM_RULE_VERSION };
@@ -203,7 +204,7 @@ export function buildAnswer(i: AnswerInput): Answer {
     }
   }
   const wePay = M === null ? null : M + (premium?.amount ?? 0);
-  const bonusAmount = traded ? (i.locked?.bonus ?? 0) : (i.bonus?.amount ?? 0);
+  const bonusAmount = traded && i.locked ? (i.locked.bonus ?? 0) : (i.bonus?.amount ?? 0);
   const bonus = i.newPhone && wePay !== null && bonusAmount > 0 && !chosen && !cancelled ? { amount: bonusAmount, bp: i.bonus?.bp ?? 0 } : null;
 
   // ── The market line's grade: the phone's own, unless the price came from a lower one ──

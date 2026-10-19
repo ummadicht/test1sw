@@ -2,8 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildOffer, expiredQuoteBlocker, type Offer, type OfferInput } from "./offer.ts";
 import { decide, type DecisionInput } from "./decision.ts";
+import { premiumOn } from "./premium.ts";
+import { customerAnswer } from "./answer.ts";
 import { estimateRepair, type Coverage, type RepairBookEntry } from "./repair.ts";
-import type { FaultId } from "./condition.ts";
+import { HEALTHY, type FaultId } from "./condition.ts";
 
 /* ─────────────────────────── fixtures: the spec's worked example (§3.4) ─────────────────────────── */
 // org_samsung_svc, the partner's rate card, the seeded campaign and the S23 Ultra price book;
@@ -24,16 +26,19 @@ const CARD_QUOTE = { status: "priced" as const, amount: 18800, source: { kind: "
 const BONUS = { amount: 6199, bp: 400, override: null };
 const REPAIRED_VALUE = 34800;
 
-/** decide() exactly as reprice() calls it. */
+/** decide() exactly as reprice() calls it: the as-is value is what we pay — the market price + the SwapUp premium. */
 function decisionFor(o: Pick<OfferInput, "repair" | "quote" | "upgrade" | "bonus" | "faultCount" | "manualRepair">, repairedValue: number | null = REPAIRED_VALUE) {
   const repairPays = o.repair?.status === "quoted" ? o.repair.customerPays : null;
-  const asIs = o.quote?.status === "priced" ? o.quote.amount : null;
+  const market = o.quote?.status === "priced" ? o.quote.amount : null;
+  const premium = premiumOn(market)?.amount ?? 0;
+  const asIs = market === null ? null : market + premium;
   const bonus = o.bonus ? (o.bonus.override?.amount ?? o.bonus.amount) : 0;
   const input: DecisionInput = {
     repairPays,
     repairCovered: o.repair?.status === "quoted" && o.repair.customerPays === 0 && o.repair.coverage !== "none" && o.repair.basis === "book",
     repairedValue: asIs === null ? null : repairedValue,
     asIsValue: asIs,
+    premium,
     valueSource: o.quote?.source.kind ?? null,
     upgrade: o.upgrade ? { label: o.upgrade.label, newPrice: o.upgrade.price, bonus, supportEndYear: 2033 } : null,
     old: { ageYears: 3, supportEndYear: 2028 },
@@ -99,18 +104,21 @@ test("offer 1: fully priced — refurb quote vs trade-in + bonus, nothing to ask
   assert.equal(o.repair.covered, false);
   assert.equal(o.repair.detail, "Display assembly + labour + GST");
   assert.equal(o.repair.why, null);
-  // Trade-in + bonus.
+  // The market price, the SwapUp premium on it (4%), what we pay, + bonus.
   assert.equal(o.swap.tradeIn, 18800);
+  assert.deepEqual(o.swap.premium, { amount: 752, bp: 400 });
+  assert.equal(o.swap.wePay, 18800 + 752);
   assert.equal(o.swap.bonus, 6199);
   assert.equal(o.swap.bonusBp, 400);
   assert.equal(o.swap.bonusWhy, null);
-  assert.equal(o.swap.total, 24999);
-  assert.equal(o.swap.total, o.swap.tradeIn! + o.swap.bonus!);
+  assert.equal(o.swap.total, 25751);
+  assert.equal(o.swap.total, o.swap.wePay! + o.swap.bonus!);
   assert.equal(o.swap.why, null);
   assert.deepEqual(o.swap.newPhone, { deviceId: "nd_s26u_256", label: "Galaxy S26 Ultra 256GB", price: 154999, suggested: true, why: "Newest Galaxy S Ultra, same storage (256GB)." });
-  assert.equal(o.swap.customerPays, 130000);
+  // What the customer pays is the lock's own formula (premium.ts exchange) — and decide() agrees.
+  assert.equal(o.swap.customerPays, 154999 - 19552 - 6199);
   assert.equal(o.swap.customerPays, priced().decision!.upgrade!.pays);
-  assert.equal(o.swap.vsRepair, 95904);
+  assert.equal(o.swap.vsRepair, 129248 - 34096);
   assert.equal(o.swap.tradeInNote, null, "a rate-card quote: nothing to mark");
   // The verdict is decide()'s, unchanged.
   assert.equal(o.recommendation, "either");
@@ -122,7 +130,8 @@ test("offer 1: fully priced — refurb quote vs trade-in + bonus, nothing to ask
   );
   assert.match(o.signals[0].text, /22% of a new phone's price/);
   assert.match(o.signals[1].text, /98% of the repaired phone's value/);
-  assert.match(o.signals[2].text, /adds only ₹16,000/);
+  // The money question compares what we pay (₹19,552), not the market price alone.
+  assert.match(o.signals[2].text, /adds only ₹15,248/);
   assert.equal(o.reason, o.signals[0].text, "no strong signal: the first one");
   assert.ok(!o.caveats.some((c) => /sample/i.test(c)), "no price is ever called a sample");
   assert.deepEqual(allowed(o), { repair: null, swap: null, walkAway: null });
@@ -430,8 +439,8 @@ test("offer 8: a manager's bonus override is the bonus shown", () => {
   const o = buildOffer(priced({ bonus: { amount: 6199, bp: 400, override: { bp: 500, amount: 7500 } } }));
   assert.equal(o.swap.bonus, 7500);
   assert.equal(o.swap.bonusBp, 500);
-  assert.equal(o.swap.total, 18800 + 7500);
-  assert.equal(o.swap.customerPays, 154999 - 18800 - 7500);
+  assert.equal(o.swap.total, 19552 + 7500);
+  assert.equal(o.swap.customerPays, 154999 - 19552 - 7500);
 });
 
 /* ─────────────────────────── 9. no new phone ─────────────────────────── */
@@ -444,7 +453,7 @@ test("offer 9: no new phone — ask for one, the trade-in alone is the total, th
   assert.notEqual(o.reason, o.asks[0].text);
   assert.equal(o.swap.bonus, null);
   assert.equal(o.swap.bonusWhy, "Choose the new phone to see the bonus.");
-  assert.equal(o.swap.total, 18800);
+  assert.equal(o.swap.total, 19552, "we pay alone");
   assert.equal(o.swap.newPhone, null);
   // The catalogue has a phone for it (staff cleared the suggestion, or none ran): "nothing matches" would be untrue.
   assert.deepEqual(buildOffer({ ...input, newPhoneMatch: true }).asks, [{ kind: "new_phone", title: "Choose the new phone", text: "Choose the new phone to see the bonus." }]);
@@ -461,7 +470,7 @@ test("offer 9: no new phone — ask for one, the trade-in alone is the total, th
   // A new phone, but no campaign covers it.
   const none = buildOffer(priced({ bonus: null }));
   assert.equal(none.swap.bonusWhy, "No bonus campaign today.");
-  assert.equal(none.swap.total, 18800);
+  assert.equal(none.swap.total, 19552);
   // A staff pick is not "suggested".
   assert.equal(buildOffer(priced({ upgrade: { deviceId: "nd_s25u", label: "Galaxy S25 Ultra 256GB", price: 114999, suggested: false } })).swap.newPhone?.suggested, false);
   assert.equal(buildOffer(priced({ upgrade: { deviceId: "nd_s25u", label: "Galaxy S25 Ultra 256GB", price: 114999 } })).swap.newPhone?.why, null);
@@ -490,8 +499,16 @@ test("offer 11: a locked case is closed — every action says so, nothing is ask
   }
   // The numbers are still there for the finished screen.
   const locked = buildOffer(priced({ status: "locked" }));
-  assert.equal(locked.swap.total, 24999);
-  assert.equal(locked.swap.customerPays, 130000);
+  assert.equal(locked.swap.total, 25751);
+  assert.equal(locked.swap.customerPays, 129248);
+  // With the figures frozen at lock, they win over the quote and bonus JSON — a case locked before premiums was paid the market price.
+  const frozen = buildOffer(priced({ status: "locked", locked: { trade: 18800, premium: null, premiumBp: null, bonus: 6199, payable: 130000 } }));
+  assert.equal(frozen.swap.premium, null);
+  assert.equal(frozen.swap.wePay, 18800);
+  assert.equal(frozen.swap.total, 24999);
+  assert.equal(frozen.swap.customerPays, 130000);
+  const after = buildOffer(priced({ status: "cleared", quote: { ...CARD_QUOTE, amount: 99999 }, locked: { trade: 18800, premium: 752, premiumBp: 400, bonus: 6199, payable: 129248 } }));
+  assert.deepEqual([after.swap.tradeIn, after.swap.premium, after.swap.wePay, after.swap.customerPays], [18800, { amount: 752, bp: 400 }, 19552, 129248]);
 });
 
 /* ─────────────────────────── 12. storage the customer typed ─────────────────────────── */
@@ -644,4 +661,74 @@ test("tradeInDetail: the rate card answered because PriceIQ had no listing — i
   assert.equal(o.swap.tradeInDetail?.lines.length, 5);
   assert.equal(o.swap.tradeInDetail?.note, why);
   assert.equal(o.swap.tradeInNote, null);
+});
+
+/* ─────────────────────────── we pay: the market price + the SwapUp premium ─────────────────────────── */
+
+test("we pay: the same market price earns the same premium whatever priced it — a typed quote, PriceIQ or the rate card", () => {
+  for (const kind of ["partner_manual", "priceiq", "partner_ratecard"] as const) {
+    const o = buildOffer(priced({ quote: { status: "priced", amount: 25_000, source: { kind }, partnerRef: kind === "partner_manual" ? "QX-1" : null } }));
+    assert.deepEqual(o.swap.premium, { amount: 1_000, bp: 400 }, kind);
+    assert.equal(o.swap.wePay, 26_000, kind);
+    assert.equal(o.answer.wePay, 26_000, kind);
+    assert.equal(o.swap.total, 26_000 + 6_199, kind);
+  }
+});
+
+test("the answer through buildOffer: the owner's lines for the case on the counter (fixture F1 / F6)", () => {
+  const o = buildOffer(
+    priced({
+      condition: { ...HEALTHY, issues: [], screen: "cracked", body: "dented", accessories: { charger: true, box: false, bill: false }, age: "gt11m" },
+      quote: { status: "priced", amount: 25_000, source: { kind: "partner_manual" }, partnerRef: "QX-1" },
+    })
+  );
+  assert.deepEqual(
+    o.answer.lines.map((l) => [l.text, l.note]),
+    [
+      ["Current grade C", "screen cracked"],
+      ["Market price for grade C ₹25,000", null],
+      ["We pay you ₹26,000", null],
+      ["+ ₹6,199 bonus if you exchange with a new device", "Galaxy S26 Ultra 256GB"],
+      ["or repair it for ₹34,096", null],
+    ]
+  );
+  assert.equal(o.answer.ready, true);
+  assert.deepEqual(o.answer.staffNotes, { market: null, we_pay: "Includes ₹1,000 SwapUp premium (4%).", bonus: "Upgrade bonus · 4%" });
+  // F6's swap block.
+  assert.deepEqual([o.swap.tradeIn, o.swap.premium, o.swap.wePay, o.swap.total, o.swap.customerPays], [25_000, { amount: 1_000, bp: 400 }, 26_000, 32_199, 1_22_800]);
+});
+
+test("a quote from a retired source (an older build's) is never 'ready' for the customer, and a lapsed one neither", () => {
+  const retired = buildOffer(priced({ quote: { status: "priced", amount: 25_000, source: { kind: "retired" as never }, partnerRef: null }, quoteExpired: true }));
+  assert.equal(retired.answer.ready, false);
+  assert.deepEqual(customerAnswer(retired.answer), { ready: false, final: false, text: "The advisor is working out your price.", test: false });
+  const lapsed = buildOffer(priced({ quote: { status: "priced", amount: 25_000, source: { kind: "partner_manual" }, partnerRef: "QX-1" }, quoteExpired: true }));
+  assert.equal(lapsed.answer.ready, false);
+});
+
+test("a new phone cheaper than we pay + the bonus: the swap is refused in the lock's words, and nothing is floored", () => {
+  const cheap = { deviceId: "nd_a17", label: "Samsung Galaxy A17 5G 128GB", model: "Galaxy A17 5G", variant: "128GB", price: 24_000 };
+  const o = buildOffer(priced({ upgrade: cheap }));
+  assert.equal(o.swap.customerPays, null);
+  assert.equal(o.swap.vsRepair, null);
+  assert.equal(o.actions.swap, "The new phone costs less than we pay plus the bonus — choose another phone.");
+  // Exactly enough: the customer pays nothing, and the swap is allowed.
+  const exact = buildOffer(priced({ upgrade: { ...cheap, price: 19_552 + 6_199 } }));
+  assert.equal(exact.swap.customerPays, 0);
+  assert.equal(exact.actions.swap, null);
+});
+
+test("a bonus the campaign's ₹ cap set says so to staff; the line is the same either way", () => {
+  const o = buildOffer(priced({ bonus: { amount: 6_000, bp: 400, override: null, clampedBy: "cap", basisAmount: 154_999 } }));
+  assert.equal(o.answer.staffNotes.bonus, "Upgrade bonus · capped at ₹6,000");
+  assert.equal(o.answer.lines.find((l) => l.key === "bonus")!.text, "+ ₹6,000 bonus if you exchange with a new device");
+  // A manager's override the cap cut short.
+  const ov = buildOffer(priced({ bonus: { amount: 6_000, bp: 400, override: { bp: 500, amount: 6_000 }, clampedBy: "cap", basisAmount: 154_999 } }));
+  assert.equal(ov.answer.staffNotes.bonus, "Upgrade bonus · capped at ₹6,000");
+  assert.equal(buildOffer(priced()).answer.staffNotes.bonus, "Upgrade bonus · 4%");
+});
+
+test("a test programme: the answer carries test: true", () => {
+  assert.equal(buildOffer(priced({ testProgramme: true })).answer.test, true);
+  assert.equal(buildOffer(priced()).answer.test, false);
 });
