@@ -624,6 +624,9 @@ export async function applyTestSession(u: SessionUser, id: string, opts: { auto?
     // The phone's other number fills the second IMEI, whichever order it was typed in.
     const other = [said?.imei, said?.imei2].find((x) => !!x && x !== first) ?? null;
     if (other && !c.imei2 && first) patch.imei2 = other;
+    // A new IMEI 1 takes the case's IMEI 2 off unless the patch says it (updateCase): keep the
+    // case's own when it isn't the number now in IMEI 1, else the phone's other one.
+    if (patch.imei !== undefined && patch.imei2 === undefined) patch.imei2 = c.imei2 && c.imei2 !== patch.imei ? c.imei2 : other;
   }
   // A customer who started the trade-in alone typed their own name and number.
   // They fill the case only where it is empty — never over what the advisor has.

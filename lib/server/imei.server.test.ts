@@ -370,6 +370,42 @@ test("the duplicate is said as soon as the IMEI is saved (the lock still refuses
   assert.ok(cases.getCase(adv, a.id).imeiLookup, "staff still see it");
 });
 
+test("a new IMEI 1 without an IMEI 2 clears the old phone's IMEI 2; an IMEI 1 equal to the case's IMEI 2 is a clear 400", async () => {
+  const [a, b, c1, d] = [imeiOn(S23U), imeiOn(S23U), imeiOn(S23U), imeiOn(S23U)];
+  const c = fresh();
+  await cases.updateCase(adv, c.id, { imei: a, imei2: b });
+  // "Change IMEI": another phone's IMEI 1, typed (no IMEI 2 sent).
+  const changed = await cases.updateCase(adv, c.id, { imei: c1 });
+  assert.deepEqual([changed.imei, changed.imei2, changed.imei2Check], [c1, null, null], "the old phone's IMEI 2 goes with its IMEI 1");
+  // The same IMEI 1 saved again is no change: IMEI 2 stays.
+  await cases.updateCase(adv, c.id, { imei2: d });
+  const same = await cases.updateCase(adv, c.id, { imei: c1 });
+  assert.deepEqual([same.imei, same.imei2, same.imei2Check], [c1, d, "valid"]);
+  // IMEI 1 = the case's IMEI 2, with no IMEI 2 sent: refused, nothing changes, nothing is paid for.
+  const n = imeiCalls().length;
+  await assert.rejects(withGiq(() => cases.updateCase(adv, c.id, { imei: d })), (e: Error & { status?: number }) => e.status === 400 && e.message === "IMEI 1 can't be the same as IMEI 2 — that number is this case's IMEI 2.");
+  assert.equal(imeiCalls().length, n, "a refused save is never looked up");
+  const kept = cases.getCase(adv, c.id);
+  assert.deepEqual([kept.imei, kept.imei2], [c1, d]);
+  // Both numbers sent: swapped, as asked.
+  const swapped = await cases.updateCase(adv, c.id, { imei: d, imei2: c1 });
+  assert.deepEqual([swapped.imei, swapped.imei2], [d, c1]);
+  // IMEI 1 cleared: IMEI 2 goes too.
+  const cleared = await cases.updateCase(adv, c.id, { imei: null });
+  assert.deepEqual([cleared.imei, cleared.imei2, cleared.imei2Check], [null, null, null]);
+
+  // Apply filling IMEI 1 on a case that has only an IMEI 2 keeps both numbers, never one twice.
+  const [z, y] = [imeiOn(S23U), imeiOn(S23U)];
+  const e = fresh();
+  await cases.updateCase(adv, e.id, { imei2: z });
+  const s = sessions.createTestSession(adv, { caseId: e.id });
+  const j = joinWith(s.session.code, { brand: "samsung", manufacturer: "samsung", modelName: "SM-S918B", modelCode: "SM-S918B", osVersion: "14", totalDiskBytes: 256e9, isPhysicalDevice: true }, "0.9.0");
+  sessions.deviceDeclare(`Ticket ${j.ticket}`, { imei: z, imei2: y });
+  await runTests(`Ticket ${j.ticket}`, s.session.id);
+  const w = cases.getCase(adv, e.id);
+  assert.deepEqual([w.imei, w.imei2], [z, y]);
+});
+
 test("PATCH /api/cases/<id> {imei, imei2} answers with the case view and its new fields", async () => {
   const c = fresh();
   const imei = imeiOn(S23U);

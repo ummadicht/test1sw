@@ -165,7 +165,10 @@ synchronously (≤ 10 s) and answers with the whole `CaseView`. The same IMEI sa
 before (`imeiCheck: "invalid"`) but not resolved — a misread is never paid for. GradeIQ off
 (`GRADEIQ_ENABLED=0`), no `GRADEIQ_SERVER_KEY`, or no answer in 10 s → the type code's model only and
 `blacklist: "unknown"`, with no retry. The model is set ONLY when the case has none (or one an earlier
-IMEI set); never the storage.
+IMEI set); never the storage. A NEW `imei` with no `imei2` in the patch clears the case's IMEI 2 (it
+was the other phone's; saving the IMEI 1 the case already has keeps it). An `imei` equal to the case's
+IMEI 2 with no `imei2` in the patch → `400 "IMEI 1 can't be the same as IMEI 2 — that number is this
+case's IMEI 2."` (not looked up); send both numbers to swap them.
 
 ```ts
 CaseView += {

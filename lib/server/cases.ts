@@ -1114,12 +1114,14 @@ export type UpdateInternal = {
  * (a misread is never paid for). Once per case + IMEI: an IMEI the case had before is answered
  * from cases.imei_lookup, with no call (fresh: false). Saving the IMEI the case already has → null.
  */
-async function resolveNewImei(u: SessionUser, id: string, raw: unknown): Promise<{ rec: StoredImeiLookup; fresh: boolean } | null> {
+async function resolveNewImei(u: SessionUser, id: string, raw: unknown, withImei2: boolean): Promise<{ rec: StoredImeiLookup; fresh: boolean } | null> {
   if (typeof raw !== "string" || !raw) return null;
   const r = readImei(raw);
   if (!r.ok || r.checkDigit !== "valid") return null;
   const { c } = caseInScope(u, id);
   if (!EDITABLE.includes(c.status) || r.imei === c.imei) return null;
+  // The case's IMEI 2 as IMEI 1 with no IMEI 2 sent: updateCase refuses it — never paid for.
+  if (!withImei2 && r.imei === c.imei2) return null;
   const cached = lookupFor(c.imei_lookup, r.imei);
   if (cached) return { rec: cached, fresh: false };
   return { rec: await resolveImei(r.imei, tradeModelRefs(), nowIso()), fresh: true };
@@ -1134,7 +1136,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   // THE IMEI FIRST: a new IMEI is resolved once (lib/server/imeiResolve.ts) — the free TAC model and
   // GradeIQ's lookup (≤ 10 s) — BEFORE the case is read for the save, so no network call sits
   // between that read and the write.
-  const resolved = await resolveNewImei(u, id, patch.imei);
+  const resolved = await resolveNewImei(u, id, patch.imei, patch.imei2 !== undefined);
   const { c, store } = caseInScope(u, id);
   if (!EDITABLE.includes(c.status)) throw new HttpError(409, "The case is past the counter.");
 
@@ -1188,8 +1190,17 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     } else {
       const r = readImei(patch.imei);
       if (!r.ok) throw new HttpError(400, r.reason);
+      // The case's own IMEI 2 as IMEI 1, with no IMEI 2 sent, would be one number twice: send both to swap them.
+      if (patch.imei2 === undefined && r.imei !== c.imei && r.imei === c.imei2)
+        throw new HttpError(400, "IMEI 1 can't be the same as IMEI 2 — that number is this case's IMEI 2.");
       sets.imei = r.imei;
       sets.imei_check = r.checkDigit;
+    }
+    // A new IMEI 1 is another phone (or a corrected read): the old IMEI 2 was that phone's, so it
+    // goes unless this patch says the IMEI 2 too. Saving the IMEI 1 the case has keeps it.
+    if (patch.imei2 === undefined && sets.imei !== c.imei && (c.imei2 || c.imei2_check)) {
+      sets.imei2 = null;
+      sets.imei2_check = null;
     }
   }
   if (patch.imei2 !== undefined) {
