@@ -1,17 +1,17 @@
 /**
  * THE CASE'S TRADE-IN PRICE — one place decides where it comes from. Owner, 2026-10-18: "prices
- * come from PriceIQ, an uploaded partner rate card, or a quote staff type in; none → No market
- * price yet — enter a quote. Never a made-up price." Best first:
+ * come from PriceIQ or an uploaded partner rate card. Never a made-up price." 2026-10-19: never a
+ * typed one either — the price is the system's, and staff change it only by changing what's wrong
+ * with the phone. Best first:
  *
- *   1. partner_manual    a quote staff typed in from the partner's own app — binding as entered,
- *                        never re-asked (cases.ts reprice keeps it; this file is not consulted)
- *   2. priceiq           PriceIQ's lowest refurbished-market listing at the phone's grade, less the
+ *   1. priceiq           PriceIQ's lowest refurbished-market listing at the phone's grade, less the
  *                        5%→2% markdown, less SwapUp's % for each defect
  *                        (lib/domain/priceiqTradeIn.ts), asked live (lib/server/priceiq.ts): an
  *                        answer over an hour old is refreshed first, waiting 6 s at most; PriceIQ
  *                        unreachable → its last good answer, labelled; over 90 days old → none
- *   3. partner_ratecard  the partner's uploaded rate card (buyback.ts)
- *   4. none              "No market price yet — enter a quote."
+ *   2. partner_ratecard  the partner's uploaded rate card (buyback.ts)
+ *   3. none              no price, and the reason why: the active card doesn't list the phone
+ *                        (NOT_ON_CARD); else PriceIQ's own why when it was asked; else NO_RATE_CARD
  *
  * When PriceIQ can't price the phone the quote carries `priceiqWhy` — the trace says why, it is
  * never silent. Whatever this returns is the case quote: the lock holds THAT value on the store's
@@ -19,11 +19,14 @@
  */
 import { nowIso } from "./db";
 import { partnerMode, partnerQuote, type PartnerQuote } from "./buyback";
-import { cachedMarket, freshMarket, type MarketAsk } from "./priceiq";
+import { cachedMarket, freshMarket, priceiqConfig, type MarketAsk } from "./priceiq";
 import { priceiqLabel, priceiqTradeIn, SWAPUP_DEDUCTIONS_LABEL, type PriceiqMeta, type PriceiqTradeIn } from "../domain/priceiqTradeIn";
 import { gradeAfterRefurb } from "../domain/marketSell";
-import { NO_MARKET_PRICE } from "../domain/offer";
+import { NOT_ON_CARD } from "../domain/ratecard";
 import { healedCondition, type ConditionAnswers, type FaultId } from "../domain/condition";
+
+/** Nothing priced the phone and no rate card is active (PriceIQ off, or it gave no reason). */
+export const NO_RATE_CARD = "No rate card is active yet.";
 
 /** How long a PriceIQ trade-in quote binds when the programme sets no quote validity of its own. */
 export const PRICEIQ_QUOTE_VALIDITY_DAYS = 3;
@@ -87,14 +90,16 @@ export async function priceiqQuote(input: Ask, partnerName: string): Promise<{ q
   };
 }
 
-/** The case's trade-in quote, in the order above (a quote typed from the partner's app is handled by the caller). */
+/** The case's trade-in quote, in the order above. */
 export async function tradeInQuote(input: Ask): Promise<PartnerQuote> {
   const mode = partnerMode(input.partnerId);
   const p = await priceiqQuote(input, mode.partnerName);
   if (p.quote) return p.quote;
   const q = await partnerQuote(input);
   if (q.status === "priced") return { ...q, priceiqWhy: p.reason };
-  // Nothing priced it — no price at all, never a made-up one: staff enter a quote.
+  // Nothing priced it — no price at all, never a made-up or typed one. The reason is the specific one,
+  // said under "No market price yet": the card doesn't list it, else PriceIQ's why, else no card.
+  const reason = mode.kind === "partner_ratecard" ? (q.reason ?? NOT_ON_CARD) : priceiqConfig().ok ? p.reason : NO_RATE_CARD;
   return {
     status: "unpriced",
     amount: null,
@@ -104,7 +109,7 @@ export async function tradeInQuote(input: Ask): Promise<PartnerQuote> {
     partnerRef: null,
     quotedAt: q.quotedAt,
     validUntil: null,
-    reason: NO_MARKET_PRICE,
+    reason,
     priceiqWhy: p.reason,
   };
 }

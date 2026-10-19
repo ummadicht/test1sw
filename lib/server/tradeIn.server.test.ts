@@ -1,9 +1,9 @@
 /**
  * The trade-in's source order through the REAL server services on a throwaway database, with a
- * stand-in PriceIQ on 127.0.0.1 (testing/fakePriceiq.ts): a quote typed from the partner's app
- * wins → PriceIQ's lowest listing at the grade, less the 5%→2% markdown, less SwapUp's % per
- * defect → the partner's uploaded rate card → "No market price yet — enter a quote". Never a
- * made-up price. The case quote is what the answer shows and what the lock holds on the credit line.
+ * stand-in PriceIQ on 127.0.0.1 (testing/fakePriceiq.ts): PriceIQ's lowest listing at the grade,
+ * less the 5%→2% markdown, less SwapUp's % per defect → the partner's uploaded rate card → no
+ * price, "No market price yet" with the reason why. Never a made-up price, never a typed one. The
+ * case quote is what the answer shows and what the lock holds on the credit line.
  *
  * Run: node --test --experimental-strip-types --no-warnings lib/server/*.test.ts
  */
@@ -139,21 +139,38 @@ test("the owner's case: S23 Ultra 256GB, Good, rear camera failed, battery under
   assert.doesNotMatch(JSON.stringify(v.offer), /Buyback Partner \(demo\)|sample/i);
 });
 
-test("PriceIQ has no price and there is no rate card: no price at all — 'No market price yet — enter a quote', and why", async () => {
+test("PriceIQ has no price and there is no rate card: no price at all — 'No market price yet' and PriceIQ's own why, text only", async () => {
   const v = await caseFor("galaxy-z-fold6", "256GB", ["rear_camera"], ["rear_camera"]);
   const q = v.quote!;
+  const why = "PriceIQ has no refurbished market price for the Galaxy Z Fold6 256GB.";
   assert.equal(q.status, "unpriced");
   assert.equal(q.amount, null);
   assert.equal(q.source.kind, "none");
-  assert.equal(q.reason, "No market price yet — enter a quote.");
-  assert.equal(q.priceiqWhy, "PriceIQ has no refurbished market price for the Galaxy Z Fold6 256GB.");
+  assert.equal(q.reason, why, "PriceIQ was asked and said why: its why is the reason");
+  assert.equal(q.priceiqWhy, why);
   assert.equal(v.offer!.swap.tradeIn, null);
-  assert.equal(v.offer!.swap.why, "No market price yet — enter a quote.");
-  assert.deepEqual(v.offer!.asks.find((a) => a.kind === "partner_quote"), { kind: "partner_quote", title: "Enter the partner's quote", text: "No market price yet — enter a quote." });
+  assert.equal(v.offer!.swap.why, why);
+  assert.deepEqual(v.offer!.asks.find((a) => a.kind === "no_price"), { kind: "no_price", title: "No market price yet", text: why });
+  assert.ok(!v.offer!.asks.some((a) => (a.kind as string) === "partner_quote"), "the old kind is gone: an installed app drops what it doesn't know");
   // Nothing to swap on: the answer refuses with the same words (and a quoted case's lock says "No trade-in price yet.").
-  assert.equal(v.offer!.actions.swap, "No market price yet — enter a quote.");
+  assert.equal(v.offer!.actions.swap, why);
+  assert.equal(v.offer!.actions.walkAway, null, "the customer can still walk away");
   if (v.status === "quoted") assert.ok(v.lockBlockers.includes("No trade-in price yet."));
   assert.equal(v.marketSell.amount, null);
+});
+
+test("an active rate card that doesn't list the phone: 'This phone isn't on the rate card yet.' — the card's reason, not PriceIQ's", async () => {
+  const partner = userNamed("partner");
+  uploadRateCard(partner, { label: "Partner sheet one row", effectiveFrom: "2026-10-12", quoteValidityDays: 3, csv: "model_id,variant,max_price\ngalaxy-s24,256GB,40000\n", deductions: DEFECT_DEDUCTIONS, activate: true });
+  try {
+    const v = await caseFor("galaxy-z-fold6", "256GB", [], []);
+    assert.equal(v.quote?.status, "unpriced");
+    assert.equal(v.quote?.reason, "This phone isn't on the rate card yet.");
+    assert.equal(v.offer!.reason, "This phone isn't on the rate card yet.");
+    assert.equal(v.offer!.headline, "No market price yet");
+  } finally {
+    db().prepare(`UPDATE rate_cards SET active = 0`).run();
+  }
 });
 
 test("over 90 days old: no PriceIQ price — the partner's rate card answers if it lists the phone, and says why", async () => {
@@ -186,15 +203,83 @@ test("the PriceIQ repaired value keeps deducting what the repair doesn't explain
   assert.ok(v.repairedQuote!.amount! < 50_370);
 });
 
-test("a quote typed from the partner's app still wins over PriceIQ", async () => {
+test("a typed trade-in price is refused before anything is saved — the price stays the system's; partnerQuote null changes nothing", async () => {
   const v0 = await caseFor("galaxy-s23-ultra", "256GB", ["rear_camera"], ["rear_camera"]);
-  const v = await cases.updateCase(advisor, v0.id, { partnerQuote: { amount: 41_000, reference: "PQ-12345" } });
-  assert.equal(v.quote?.source.kind, "partner_manual");
-  assert.equal(v.quote?.amount, 41_000);
-  assert.deepEqual(v.offer!.swap.tradeInDetail, { line: null, lines: [], note: null });
-  // Removing it hands the price back to PriceIQ.
-  const back = await cases.updateCase(advisor, v0.id, { partnerQuote: null });
-  assert.equal(back.quote?.source.kind, "priceiq");
+  assert.equal(cases.PRICE_NOT_TYPED, "Prices can't be typed in — change what's wrong to change the price.");
+  const before = db().prepare(`SELECT * FROM cases WHERE id = ?`).get(v0.id);
+  for (const partnerQuote of [{ amount: 41_000, reference: "PQ-12345" }, { amount: 41_000, reference: "PQ-12345", repairedAmount: 50_000 }, "41000", 0]) {
+    // With a real change beside it: nothing of the patch is saved, not even the faults.
+    await assert.rejects(cases.updateCase(advisor, v0.id, { faults: [], partnerQuote } as never), (e: Error & { status?: number }) => {
+      assert.equal(e.status, 400);
+      assert.equal(e.message, cases.PRICE_NOT_TYPED);
+      return true;
+    });
+  }
+  assert.deepEqual(db().prepare(`SELECT * FROM cases WHERE id = ?`).get(v0.id), before, "the case is exactly as it was");
+  // null — an older app's "Remove" — is a silent no-op: the system's price stands.
+  const same = await cases.updateCase(advisor, v0.id, { partnerQuote: null });
+  assert.equal(same.quote?.source.kind, "priceiq");
+  assert.equal(same.quote?.amount, v0.quote?.amount);
+  assert.equal((db().prepare(`SELECT partner_manual FROM cases WHERE id = ?`).get(v0.id) as { partner_manual: string | null }).partner_manual, null);
+});
+
+test("an unpriced case is asked again on a plain re-price: a rate card uploaded since prices it, with nobody touching the case", async () => {
+  const c = cases.createCase(advisor, { customerName: "Card later" });
+  const v0 = await cases.updateCase(advisor, c.id, { modelId: "galaxy-s24", variant: "256GB", faults: [], condition: COND({ body: "flawless" }) });
+  assert.equal(v0.quote?.status, "unpriced");
+  const chips0 = await cases.updateCase(advisor, cases.createCase(advisor, { customerName: "Chips later" }).id, { modelId: "galaxy-s24", faults: [], condition: COND({ body: "flawless" }) });
+  const chipAsk0 = chips0.offer!.asks.find((a) => a.kind === "storage");
+  assert.ok(chipAsk0?.kind === "storage" && chipAsk0.options.every((o) => o.tradeIn === null), "no size priced yet");
+  const partner = userNamed("partner");
+  uploadRateCard(partner, { label: "Partner sheet later", effectiveFrom: "2026-10-12", quoteValidityDays: 3, csv: "model_id,variant,max_price\ngalaxy-s24,256GB,40000\n", deductions: DEFECT_DEDUCTIONS, activate: true });
+  try {
+    // The desk's quiet re-quote on open, and the store app's: a plain reprice (requote:false).
+    const v = await cases.reprice(advisor, c.id);
+    assert.equal(v.quote?.status, "priced");
+    assert.equal(v.quote?.source.kind, "partner_ratecard");
+    assert.equal(v.offer!.asks.some((a) => a.kind === "no_price"), false);
+    // The storage chips, all unpriced before, are asked again the same way.
+    const chips = await cases.reprice(advisor, chips0.id);
+    const chipAsk = chips.offer!.asks.find((a) => a.kind === "storage");
+    assert.ok(chipAsk?.kind === "storage" && chipAsk.options.some((o) => o.variant === "256GB" && o.tradeIn !== null), JSON.stringify(chipAsk));
+    // A priced, unexpired quote is not asked again on a plain re-price.
+    const again = await cases.reprice(advisor, c.id);
+    assert.equal(again.quote?.quotedAt, v.quote?.quotedAt);
+  } finally {
+    db().prepare(`UPDATE rate_cards SET active = 0`).run();
+  }
+});
+
+test("conditions change the price: a fault the camera confirmed is removed only with a reason — the desk's resend saves it, by name, and re-prices", async () => {
+  const { heldForReason, withCameraReason } = await import("../../components/counter/answerAsks.ts");
+  const { blankCameraCheck } = await import("../domain/gradeiqMap.ts");
+  const v0 = await caseFor("galaxy-s23-ultra", "256GB", ["rear_camera"], ["rear_camera"]);
+  const camera = { ...blankCameraCheck(new Date().toISOString()), state: "ready", faults: [{ id: "rear_camera", because: "Lens cracked", photoIndex: 1, confidence: 0.9 }] };
+  db().prepare(`UPDATE cases SET camera_check = ? WHERE id = ?`).run(JSON.stringify(camera), v0.id);
+  const WHY = 'Camera confirmed "Rear camera faulty", photo 2 — removing it needs a reason.';
+  // The desk's tap on the fault: refused 409 with the camera's sentence, nothing saved.
+  const patch = { faults: [], condition: COND({ issues: [] }) };
+  let refused = "";
+  await assert.rejects(cases.updateCase(advisor, v0.id, patch), (e: Error & { status?: number }) => {
+    assert.equal(e.status, 409);
+    refused = e.message;
+    return true;
+  });
+  assert.equal(refused, WHY);
+  assert.deepEqual(cases.getCase(advisor, v0.id).faults, ["rear_camera"]);
+  // The desk keeps that change for one reason field; too short is refused the same way.
+  const held = heldForReason(patch, refused);
+  assert.ok(held);
+  await assert.rejects(cases.updateCase(advisor, v0.id, withCameraReason(held.patch, "ok")), (e: Error & { status?: number }) => e.status === 409);
+  const v = await cases.updateCase(advisor, v0.id, withCameraReason(held.patch, "  Lens protector cracked, camera tested fine  "));
+  assert.deepEqual(v.faults, []);
+  assert.equal(v.quote?.source.kind, "priceiq");
+  assert.ok(v.quote!.amount! > v0.quote!.amount!, "the rear camera's deduction comes off: the condition moved the price");
+  assert.ok(!v.quote!.lines.some((l) => /camera/i.test(l.label)));
+  assert.deepEqual(
+    v.camera?.overrides.map((o) => [o.by, o.reason, o.items]),
+    [[advisor.name, "Lens protector cracked, camera tested fine", ["fault:rear_camera"]]]
+  );
 });
 
 test("storage unknown: each size's chip is priced the way the trade-in will be, asked together, with the data's age under them", async () => {
@@ -217,7 +302,7 @@ test("PriceIQ not connected (no key): no price — never a guess — and the tra
   try {
     const v = await caseFor("galaxy-s23-ultra", "512GB", [], []);
     assert.equal(v.quote?.status, "unpriced");
-    assert.equal(v.quote?.reason, "No market price yet — enter a quote.");
+    assert.equal(v.quote?.reason, "No rate card is active yet.", "PriceIQ wasn't asked, and no card is active");
     assert.equal(v.quote?.priceiqWhy, "No refurbished market price yet — PriceIQ isn't connected.");
     assert.equal(v.marketSell.amount, null);
     assert.equal(v.marketSell.why, "No refurbished market price yet — PriceIQ isn't connected.");

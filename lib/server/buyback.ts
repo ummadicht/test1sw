@@ -2,11 +2,10 @@
  * THE BUYBACK PARTNER SEAM — the programme's buyback partner (its org row).
  *
  * The partner collects and pays for the phones. Where the trade-in PRICE comes from is
- * lib/server/tradeIn.ts, best first: a quote staff typed in from the partner's own app,
- * PriceIQ's refurbished market price at the phone's grade, then — this file — the partner's
- * RATE CARD: the price sheet its operations team uploads on /partner/rate-cards. SwapUp has
- * no partner quote API (none exists to call) and keeps no built-in prices of its own: with
- * no card, the partner simply has no price ("No market price yet — enter a quote").
+ * lib/server/tradeIn.ts, best first: PriceIQ's refurbished market price at the phone's grade,
+ * then — this file — the partner's RATE CARD: the price sheet its operations team uploads on
+ * /partner/rate-cards. SwapUp has no partner quote API (none exists to call), keeps no built-in
+ * prices of its own and takes no typed ones: with no card, the partner simply has no price.
  *
  * Every answer records where it came from, so the UI never has to guess whether a number is real.
  */
@@ -62,7 +61,7 @@ export function partnerMode(partnerId: string): PartnerMode {
   const p = db().prepare(`SELECT name FROM orgs WHERE id = ? AND kind = 'partner'`).get(partnerId) as { name: string } | undefined;
   const partnerName = p?.name ?? "Buyback partner";
   const card = activeRateCard(partnerId);
-  if (!card) return { partnerId, partnerName, kind: "none", label: "No rate card", why: "No rate card loaded — PriceIQ or a typed quote prices each phone.", rateCardId: null };
+  if (!card) return { partnerId, partnerName, kind: "none", label: "No rate card", why: "No rate card loaded — a phone PriceIQ can't price gets no trade-in price.", rateCardId: null };
   return { partnerId, partnerName, kind: "partner_ratecard", label: card.source.label, why: `${partnerName}'s rate card from ${card.source.effectiveFrom}.`, rateCardId: card.id };
 }
 

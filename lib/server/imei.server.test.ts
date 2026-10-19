@@ -109,6 +109,10 @@ function who(id: string): U {
 const adv = who("usr_adv_and");
 const partner = who((db().prepare(`SELECT id FROM users WHERE username = 'partner'`).get() as { id: string }).id);
 const S26U_256 = (db().prepare(`SELECT id FROM new_devices WHERE org_id = ? AND model = 'Galaxy S26 Ultra' AND variant = '256GB'`).get(adv.orgId) as { id: string }).id;
+// The partner's card prices the S23 Ultra these lock tests trade in: the price is always the system's, never typed.
+const { uploadRateCard } = await import("./catalog.ts");
+const { DEFECT_DEDUCTIONS } = await import("../domain/ratecard.ts");
+uploadRateCard(partner, { label: "Week 41 (test)", effectiveFrom: "2026-10-05", quoteValidityDays: 3, csv: "model_id,variant,max_price\ngalaxy-s23-ultra,256GB,40000\n", deductions: DEFECT_DEDUCTIONS, activate: true });
 
 /* IMEIs on real TACs (the offline list's own first TAC for each name), each one new. */
 const TACS = JSON.parse(readFileSync(new URL("../domain/tacdb.json", import.meta.url), "utf8")) as Record<string, string>;
@@ -260,7 +264,7 @@ test("blacklisted (GSMA): test sessions refuse 409 {error, reason:'blacklisted'}
   assert.equal(res.status, 409);
   assert.deepEqual(await res.json(), { error: "This phone is reported lost or stolen. It can't be traded in.", reason: "blacklisted" });
   assert.equal((db().prepare(`SELECT COUNT(*) AS n FROM test_sessions WHERE case_id = ?`).get(c.id) as { n: number }).n, 0, "no session made");
-  const priced = await cases.updateCase(adv, c.id, { partnerQuote: { amount: 25_000, reference: "QX-BLACK1", validDays: 3 } });
+  const priced = await cases.reprice(adv, c.id);
   assert.equal(priced.lockBlockers[0], BLACKLISTED);
   assert.throws(() => cases.lockTradeIn(adv, c.id, { customer: CUSTOMER, checks: CHECKS }), (e: Error & { status?: number; extra?: Record<string, string> }) => e.status === 409 && e.message === BLACKLISTED && e.extra?.reason === "blacklisted");
 });
@@ -283,7 +287,7 @@ test("blacklisted is the CASE's, and sticky: GSMA's answer for any IMEI ever sav
   assert.ok(swapped.imeiWarnings.includes(`IMEI 2 (${x}) is reported lost or stolen (GSMA).`), swapped.imeiWarnings.join(" | "));
   await cases.updateCase(adv, c.id, { variant: "256GB", faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256 });
   assert.throws(() => sessions.createTestSession(adv, { caseId: c.id }), refused);
-  const priced = await cases.updateCase(adv, c.id, { partnerQuote: { amount: 25_000, reference: "QX-STICKY1", validDays: 3 } });
+  const priced = await cases.reprice(adv, c.id);
   assert.equal(priced.lockBlockers[0], BLACKLISTED);
   assert.throws(() => cases.lockTradeIn(adv, c.id, { customer: CUSTOMER, checks: CHECKS }), refused);
 
@@ -328,7 +332,7 @@ test("at the lock, the advisor's KYM answer (it must be clear) supersedes a non-
   await cases.updateCase(adv, c.id, { modelId: "galaxy-s23-ultra", variant: "256GB", imei: imeiOn(S23U), faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256 });
   // A mis-tap while the phone tested; the answer opened by itself, so the IMEI card is gone.
   await cases.updateCase(adv, c.id, { kymEarly: { status: "duplicate", reference: null } });
-  const priced = await cases.updateCase(adv, c.id, { partnerQuote: { amount: 25_000, reference: "QX-KYMFIX", validDays: 3 } });
+  const priced = await cases.reprice(adv, c.id);
   assert.deepEqual(priced.kymEarly, { status: "duplicate", reference: null });
   assert.ok(!priced.lockBlockers.includes(BLACKLISTED), `the lock's own KYM answer decides: ${priced.lockBlockers.join(" | ")}`);
   assert.deepEqual(priced.lockBlockers, []);
@@ -349,7 +353,7 @@ test("at the lock, the advisor's KYM answer (it must be clear) supersedes a non-
   const d = fresh();
   await withGiq(() => cases.updateCase(adv, d.id, { imei }));
   await cases.updateCase(adv, d.id, { variant: "256GB", faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256, kymEarly: { status: "clear", reference: "SS-2" } });
-  const bad = await cases.updateCase(adv, d.id, { partnerQuote: { amount: 25_000, reference: "QX-KYMFIX2", validDays: 3 } });
+  const bad = await cases.reprice(adv, d.id);
   assert.equal(bad.lockBlockers[0], BLACKLISTED);
   assert.throws(() => cases.lockTradeIn(adv, d.id, { customer: CUSTOMER, checks: CHECKS }), (e: Error & { status?: number; extra?: Record<string, string> }) => e.status === 409 && e.message === BLACKLISTED && e.extra?.reason === "blacklisted");
 });
@@ -358,7 +362,6 @@ test("the duplicate is said as soon as the IMEI is saved (the lock still refuses
   const imei = imeiOn(S23U);
   const a = fresh();
   await cases.updateCase(adv, a.id, { modelId: "galaxy-s23-ultra", variant: "256GB", imei, faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256 });
-  await cases.updateCase(adv, a.id, { partnerQuote: { amount: 25_000, reference: "QX-DUP001", validDays: 3, repairedAmount: 40_000 } });
   const locked = cases.lockTradeIn(adv, a.id, { customer: CUSTOMER, checks: CHECKS });
   assert.deepEqual(locked.imeiWarnings, [], "a case past the counter isn't warned about itself");
   const b = await cases.updateCase(adv, fresh().id, { imei });

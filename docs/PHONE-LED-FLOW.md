@@ -115,7 +115,7 @@ available), Battery (file input via expo-image-picker web), then today's interac
   always wins (a different size the customer picked is only flagged) — it is the disk reading of the session's
   device, so it counts however the model was named (code match or the customer's pick). A measured size that
   isn't on the model's list fills nothing and is never replaced by a pick, the model's single size or a guess:
-  flagged "Storage: phone measures 1TB, not on file — check Settings, then enter the partner's quote." and kept on the case (`measuredStorage`, migration 12),
+  flagged "Storage: phone measures 1TB, not on file — no trade-in price for that size." and kept on the case (`measuredStorage`, migration 12),
   so the answer says the same instead of "couldn't measure" (MOBILE-API §3c). A size the case already has is kept; a
   model sold in one size takes it; otherwise the customer's pick of that model's size fills it as a CLAIM —
   even when the model code matched — flagged "Storage: the customer said X — the phone couldn't measure it.

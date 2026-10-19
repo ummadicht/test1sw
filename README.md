@@ -40,7 +40,8 @@ and the desk (`/desk`, `/cases/:id`) — the fewest steps that keep the law, the
      **SwapUp's % for each defect** (e.g. "Refurbished market price ₹51,399 (Good) − 2% − 2
      defects · PriceIQ 2026-W35"). Market data over 14 days old is shown with its age; over 90
      days old is no price. Otherwise the partner's uploaded rate card; with none of them, "No
-     market price yet — enter a quote". Never a made-up price. Rules: `docs/GRADING.md` §6.
+     market price yet" and the reason why. Never a made-up price and never a typed one: staff
+     change the price only by changing what's wrong with the phone. Rules: `docs/GRADING.md` §6.
    - The recommendation follows the rules that fired (the 50% rule against the new phone's
      price, repair vs resale value, update support, age). The bonus (2–5% of the new price,
      clamped, optionally capped) is shown but never counted as a reason; a covered repair is
@@ -81,7 +82,7 @@ After the counter:
 | Labour per job | Samsung India out-of-warranty repair charges: Galaxy Z ₹525, S ₹425, others ₹350 (L2, taxes extra) |
 | Care+ plan fee | Samsung Care+ smartphone terms (ADLD processing fee per repair, tax incl.) where published per model; otherwise the programme default |
 | New phone prices | samsung.com/in selling prices, read 2026-10-15 — `scripts/research-samsung-lineup-2026-10-15.csv` |
-| Trade-in values | a quote staff read off the partner's app, else PriceIQ's lowest refurbished-market listing at the grade (live, `GET /api/market-grades`) less the 5%→2% markdown and SwapUp's % per defect, else the partner's uploaded rate card, else no price ("No market price yet — enter a quote") |
+| Trade-in values | PriceIQ's lowest refurbished-market listing at the grade (live, `GET /api/market-grades`) less the 5%→2% markdown and SwapUp's % per defect, else the partner's uploaded rate card, else no price ("No market price yet", with why). Never typed in |
 | Update support | release year + Samsung's update policy per series (approximate; check Samsung's security-update page) |
 
 Regenerate the seed after refreshing the snapshots: `python3 scripts/build-seed-data.py`.
@@ -105,12 +106,13 @@ price file: `deploy/deploy.sh` checks PriceIQ answers 200 for a known phone befo
 
 The buyback partner publishes no partner API. Besides PriceIQ, stores use:
 
-- **Read the quote off the partner's app** — on the case, "Enter the partner's quote":
-  amount + reference code (+ optional repaired-condition value). Expires after the
-  stated days; any change to the device description clears it.
-- **Rate card** — the partner's operations team uploads its sheet (`model_id,variant,max_price`)
-  on `/partner/rate-cards`; SwapUp applies the card's condition deductions. It prices what
-  PriceIQ can't.
+- **Rate card** — the partner's operations team uploads its sheet (`model_id,variant,max_price`,
+  optional grade columns) on `/partner/rate-cards`; SwapUp applies the card's condition
+  deductions. It prices what PriceIQ can't. From the server's shell, the same upload:
+  `node --experimental-strip-types scripts/activate-rate-card.ts --label "W42 by grade" < card.csv`.
+
+No price is ever typed in at the counter (0.9.1): the trade-in is the system's, and what's
+wrong with the phone is the only thing that changes it.
 
 Screens never name the partner company: they say "the partner" or the partner org's own
 name. The test programmes' partner is **Buyback Partner (demo)** (login `partner`); a

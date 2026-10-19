@@ -85,11 +85,34 @@ const CUSTOMER = { name: "Asha Rao", phone: "9820012345", idType: "aadhaar", idL
 const CHECKS = { ownership: true, simRemoved: true, imeiMatches: true, noFinanceLock: true, kym: { status: "clear" as const, reference: "SS-1" } };
 const COND = { powersOn: true, calls: true, screen: "cracked", body: "dented", issues: [] as string[], accessories: { charger: true, box: false, bill: false }, age: "gt11m" };
 
-/** Fixture F1's case at the counter: S23 Ultra 256GB, cracked screen on a dented body, the partner's ₹25,000 quote, the S26 Ultra 256GB. */
-async function f1Case(over: { amount?: number; ref?: string } = {}) {
+/**
+ * The partner's one-row rate card F1 is priced from — its grade C (Fair) price ₹25,000, nothing taken
+ * off — active only while `fn` prices, with PriceIQ away so the card answers (the price is always the
+ * system's: no quote is typed in). Then put away, so later tests see no card.
+ */
+const ZERO = JSON.parse(JSON.stringify(DEFECT_DEDUCTIONS, (_k, v) => (typeof v === "number" ? 0 : v))) as typeof DEFECT_DEDUCTIONS;
+async function withF1Card<T>(fn: () => Promise<T>): Promise<T> {
+  disconnectPriceiq();
+  uploadRateCard(partner, {
+    label: "Week 41 (test)",
+    effectiveFrom: "2026-10-05",
+    quoteValidityDays: 3,
+    csv: "model_id,variant,max_price,good_price,fair_price,best_value_price\ngalaxy-s23-ultra,256GB,40000,30000,25000,20000\n",
+    deductions: ZERO,
+    activate: true,
+  });
+  try {
+    return await fn();
+  } finally {
+    db().prepare(`UPDATE rate_cards SET active = 0`).run();
+    connectPriceiq();
+  }
+}
+
+/** Fixture F1's case at the counter: S23 Ultra 256GB, cracked screen on a dented body, ₹25,000 off the partner's card at grade C, the S26 Ultra 256GB. */
+async function f1Case() {
   const c = cases.createCase(adv, { customerName: CUSTOMER.name, customerPhone: CUSTOMER.phone });
-  await cases.updateCase(adv, c.id, { modelId: "galaxy-s23-ultra", variant: "256GB", imei: nextImei(), faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256 });
-  return cases.updateCase(adv, c.id, { partnerQuote: { amount: over.amount ?? 25_000, reference: over.ref ?? `QX-${c.ref.replace(/\D/g, "")}`, validDays: 3, repairedAmount: 40_000 } });
+  return withF1Card(() => cases.updateCase(adv, c.id, { modelId: "galaxy-s23-ultra", variant: "256GB", imei: nextImei(), faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256 }));
 }
 const bonusOf = (v: { bonus: { amount: number; override: { amount: number } | null } | null }) => (v.bonus ? (v.bonus.override?.amount ?? v.bonus.amount) : 0);
 const rowOf = (id: string) =>
@@ -274,8 +297,8 @@ test("device status: applied but no partner price — one sentence ('confirming'
 test("device status: priced, then locked — the same lines as the desk, read only (no PriceIQ call, no write), and nothing leaks", async () => {
   const t = await testedCase();
   const imei = nextImei();
-  await cases.updateCase(adv, t.caseId, { imei, faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256 });
-  const v = await cases.updateCase(adv, t.caseId, { partnerQuote: { amount: 25_000, reference: "QX-LEAK-7", validDays: 3, repairedAmount: 40_000 } });
+  const v = await withF1Card(() => cases.updateCase(adv, t.caseId, { imei, faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256 }));
+  assert.equal(v.quote?.source.kind, "partner_ratecard");
   const s1 = sessions.deviceStatus(t.ticket);
   assert.ok(s1.answer && s1.answer.ready, JSON.stringify(s1.answer));
   if (!s1.answer?.ready) return;
@@ -301,7 +324,7 @@ test("device status: priced, then locked — the same lines as the desk, read on
   // Never leaks: no partner, IMEI, customer, store margin, premium, source or new-phone price.
   for (const s of [s1, s2]) {
     const json = JSON.stringify(s);
-    for (const bad of ["Buyback Partner (demo)", "QX-LEAK-7", "PriceIQ", imei, imei.slice(-4), CUSTOMER.name, CUSTOMER.phone, "refurb", "marketSell", "listing", "markdown", "fundedBy", "Repair-to-upgrade bonus", "premium", "source", "asks", "154999", "1,54,999"])
+    for (const bad of ["Buyback Partner (demo)", "Week 41 (test)", "PriceIQ", imei, imei.slice(-4), CUSTOMER.name, CUSTOMER.phone, "refurb", "marketSell", "listing", "markdown", "fundedBy", "Repair-to-upgrade bonus", "premium", "source", "asks", "154999", "1,54,999"])
       assert.ok(!json.toLowerCase().includes(bad.toLowerCase()), `device status carries "${bad}"`);
     const keys = new Set<string>();
     const walk = (x: unknown) => {
@@ -322,9 +345,14 @@ test("parity: the same phone through the browser (the customer's 'no' on beeps, 
   const judged = ["speaker", "vibration", "flash", "multitouch", "buttons", "bluetooth"] as const;
   const native = await testedCase({ appVersion: "0.9.0", results: Object.fromEntries(judged.map((id) => [id, "skip" as const])) });
   const web = await testedCase({ appVersion: "web-0.9.0", results: Object.fromEntries(judged.map((id) => [id, "fail" as const])) });
-  const price = { partnerQuote: { amount: 25_000, reference: "QX-PAR-1", validDays: 3, repairedAmount: null } };
-  const n = await cases.updateCase(adv, native.caseId, { ...price, upgradeDeviceId: S26U_256 });
-  const w = await cases.updateCase(adv, web.caseId, { ...price, partnerQuote: { ...price.partnerQuote, reference: "QX-PAR-2" }, upgradeDeviceId: S26U_256 });
+  // Both priced the same way — the partner's card, asked again — then the same new phone.
+  const priceOf = async (id: string) => {
+    await withF1Card(() => cases.reprice(adv, id, { requote: true }));
+    return cases.updateCase(adv, id, { upgradeDeviceId: S26U_256 });
+  };
+  const n = await priceOf(native.caseId);
+  const w = await priceOf(web.caseId);
+  assert.equal(n.quote?.source.kind, "partner_ratecard");
   assert.deepEqual(w.faults, n.faults, "no speaker, touch or buttons fault from a customer's tap");
   assert.deepEqual(w.faults, []);
   assert.deepEqual(w.condition?.issues, n.condition?.issues, "no vibration or Wi-Fi/Bluetooth issue from a customer's 'no'");

@@ -79,3 +79,43 @@ test("template: the 6-column header, pre-filled from the active card's grade pri
   upload(lines.filter((l, i) => i === 0 || !/^[^,]+,[^,]+,,/.test(l)).join("\n"), "Round trip");
   assert.deepEqual(sorted(activeRateCard(partner.orgId)!.entries), before);
 });
+
+test("scripts/activate-rate-card.ts: the page's upload from the shell — active at once, SwapUp's % per defect with nothing off for accessories or age, only counts and the id; a label already used is refused", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const script = fileURLToPath(new URL("../../scripts/activate-rate-card.ts", import.meta.url));
+  const file = join(dir, "script.db");
+  const csv = `${HEADER}\ngalaxy-s23-ultra,256GB,34960,33574,32255,30672\ngalaxy-s23-ultra,512GB,38000,,,\ngalaxy-s23,128GB,20000,19000,,\n`;
+  const run = (label: string, input = csv) =>
+    spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", script, "--label", label], { input, encoding: "utf8", env: { ...process.env, SWAPUP_DB: file } });
+  const out = run("W42 by grade");
+  assert.equal(out.status, 0, out.stderr);
+  const [counts, id, ...rest] = out.stdout.trim().split("\n");
+  assert.equal(counts, "3 rows, 2 models — active.");
+  assert.match(id, /^rc_[\w-]+$/);
+  assert.deepEqual(rest, [], "nothing else on stdout");
+  assert.doesNotMatch(out.stdout, /34960|34,960|33574/, "never a price");
+  // Through the server's own module, on the database the script wrote.
+  const Database = (await import("better-sqlite3")).default;
+  const other = new Database(file, { readonly: true });
+  try {
+    const rows = other.prepare(`SELECT id, active, data FROM rate_cards`).all() as { id: string; active: number; data: string }[];
+    assert.deepEqual(rows.map((x) => [x.id, x.active]), [[id, 1]]);
+    const card = JSON.parse(rows[0].data);
+    assert.equal(card.source.label, "W42 by grade");
+    assert.deepEqual(card.deductions, { ...DEFECT_DEDUCTIONS, noChargerBp: 0, noBoxBp: 0, noBillBp: 0, age: { lt3m: 0, "3to11m": 0, gt11m: 0 } });
+    assert.equal(card.entries.length, 3);
+    // The same label again: refused, nothing written.
+    const again = run("W42 by grade");
+    assert.equal(again.status, 1);
+    assert.match(again.stderr, /already exists — nothing uploaded/);
+    assert.equal(again.stdout, "");
+    assert.equal((other.prepare(`SELECT COUNT(*) n FROM rate_cards`).get() as { n: number }).n, 1);
+    // A sheet the page would refuse is refused the same way.
+    const bad = run("W43", "galaxy-s23-ultra,999GB,1\n");
+    assert.equal(bad.status, 1);
+    assert.match(bad.stderr, /"999GB" is not a variant of galaxy-s23-ultra/);
+  } finally {
+    other.close();
+  }
+});

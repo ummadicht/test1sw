@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client/api";
-import { Banner, StatusPill } from "@/components/ui";
+import { Banner, ErrorText, Field, StatusPill } from "@/components/ui";
 import { CASE_STATUS_LABEL } from "@/lib/domain/lifecycle";
 import type { CaseView, CasePatch } from "@/lib/server/cases";
 import type { Role } from "@/lib/server/auth";
@@ -20,7 +20,43 @@ import { StoreMargin } from "./StoreMargin";
 import { StepHeader, StepDock } from "./StepNav";
 import { STEP_ANCHOR, canShow, landingStep, stepDone, stepFromAnchor, stepOrder, testedCase, type StepId } from "./caseSteps";
 import { fmtWhen } from "./shared";
+import { CAMERA_REASON_MIN, cameraReasonOk, heldForReason, withCameraReason } from "./answerAsks";
 import type { CaseOps, ModelOption, CampaignBand, PickupInfo } from "./ops";
+
+type Held = { patch: CasePatch; why: string };
+
+/**
+ * The camera confirmed the phone worse than the advisor's change says ("Camera confirmed "Cracked
+ * screen", photo 2 — removing it needs a reason."): the change waits here for ONE reason, kept with
+ * their name, and goes again with it (cases.ts updateCase records it and covers it from then on).
+ */
+function CameraReason({ held, onSave }: { held: Held; onSave: (patch: CasePatch) => Promise<string | null> }) {
+  const [reason, setReason] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const ok = cameraReasonOk(reason);
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    if (!ok) return;
+    setSaving(true);
+    setErr(await onSave(withCameraReason(held.patch, reason)));
+    setSaving(false);
+  }
+
+  return (
+    <form onSubmit={send} className="card px-4 py-3 mt-3 space-y-2">
+      <p className="text-[14px] text-ink leading-snug">{held.why}</p>
+      <Field label="Why it's better" hint={`${CAMERA_REASON_MIN}+ characters, kept with your name.`}>
+        <textarea className="textarea" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} autoFocus />
+      </Field>
+      <button className="btn btn-sm btn-primary" disabled={!ok || saving}>
+        {saving ? "Saving…" : "Save with reason"}
+      </button>
+      <ErrorText error={err} />
+    </form>
+  );
+}
 
 const COUNTER: Role[] = ["advisor", "store_manager"];
 const AT_COUNTER = ["draft", "quoted"];
@@ -46,6 +82,8 @@ const AT_COUNTER = ["draft", "quoted"];
  *
  * Every change is saved at once and the case comes back re-priced; saves run one at a time, in
  * order, so the server always ends on the advisor's last tap. Only the latest answer is painted.
+ * The price itself is never typed in: what's wrong with the phone is what changes it. A fault or
+ * condition change the store camera contradicts is kept for one reason (CameraReason), not lost.
  */
 export function CaseWorkspace({
   initial,
@@ -106,10 +144,17 @@ export function CaseWorkspace({
     [id]
   );
 
+  // The last change the camera's 409 held back, waiting for its reason; the next save replaces it.
+  const [held, setHeld] = useState<Held | null>(null);
+
   const save = useCallback(
-    (patch: CasePatch, optimistic?: Partial<CaseView>) => {
+    async (patch: CasePatch, optimistic?: Partial<CaseView>) => {
       if (optimistic) setView((v) => ({ ...v, ...optimistic }));
-      return run(() => api<CaseView>(`/api/cases/${id}`, { method: "PATCH", body: patch }));
+      const e = await run(() => api<CaseView>(`/api/cases/${id}`, { method: "PATCH", body: patch }));
+      const h = heldForReason(patch, e);
+      setHeld(h);
+      // A held change says its sentence once, beside its reason field — not again under the chips.
+      return h ? null : e;
     },
     [id, run]
   );
@@ -271,6 +316,7 @@ export function CaseWorkspace({
           <div hidden={current !== "faults"} data-step="faults">
             {/* Phonecheck changes the faults, so it sits in this step's details (store staff, at the counter only). */}
             <StepFaults ops={ops} phonecheck={<PhonecheckPanel ops={ops} role={role} run={run} />} />
+            {held && editable ? <CameraReason key={held.why} held={held} onSave={save} /> : null}
           </div>
           <div hidden={current !== "repair"} data-step="repair">
             <StepRepair ops={ops} />

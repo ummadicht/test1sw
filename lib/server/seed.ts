@@ -4,7 +4,8 @@ import { postEvents } from "./credit";
 import seedData from "./seed-data.json";
 import type { Campaign } from "../domain/bonus";
 import { cancelEvents, OPEN_TRADE_STATUSES } from "../domain/lifecycle";
-import { RETIRED_QUOTE_LABEL, RETIRED_SOURCE_KIND, retiredSource } from "../domain/ratecard";
+import { NOT_ON_CARD, RETIRED_QUOTE_LABEL, RETIRED_SOURCE_KIND, retiredSource } from "../domain/ratecard";
+import { NO_MARKET_PRICE } from "../domain/offer";
 
 /**
  * First-boot data. Two kinds, kept apart:
@@ -17,9 +18,9 @@ import { RETIRED_QUOTE_LABEL, RETIRED_SOURCE_KIND, retiredSource } from "../doma
  *              buyback partner ("Buyback Partner (demo)", login `partner`).
  *
  * No prices of SwapUp's own and no example cases (owner, 2026-10-18: "Remove
- * sample data"): a trade-in is priced by PriceIQ, the partner's uploaded rate
- * card, or a quote staff type in — none of them → "No market price yet — enter
- * a quote". A database seeded before that loses its example cases once
+ * sample data"): a trade-in is priced by PriceIQ or the partner's uploaded rate
+ * card — never a typed price (2026-10-19); none of them → "No market price yet".
+ * A database seeded before that loses its example cases once
  * (removeExampleCases); migration 15 (db.ts) removed the sample rate card.
  */
 
@@ -62,6 +63,8 @@ export function ensureSeeded(): Promise<void> {
       if (r.relabelled.length) console.log(`[swapup] test cases with a retired quote relabelled "${RETIRED_QUOTE_LABEL}": ${r.relabelled.join(", ")}`);
       if (r.cancelled.length) console.log(`[swapup] locked test trade-ins on a retired quote cancelled, their holds released: ${r.cancelled.join(", ")}`);
       if (r.history.length) console.warn(`[swapup] test trade-ins on a retired quote already in a pickup or collected — not cancelled, the owner decides: ${r.history.join(", ")}`);
+      const reworded = rewordQuoteTexts();
+      if (reworded.length) console.log(`[swapup] cases whose stored words asked staff to type a trade-in price, reworded: ${reworded.join(", ")}`);
     })();
   }
   return g.__swapup_seed;
@@ -399,6 +402,64 @@ export function retireOldQuotes(): { relabelled: string[]; cancelled: string[]; 
     console.error(`[swapup] retired test quotes: not recorded — ${(e as Error).message}`);
   }
   return out;
+}
+
+/**
+ * SwapUp's own sentences that told staff to type a trade-in price (before 0.9.1 — owner, 2026-10-19:
+ * the price is the system's), as stored on cases, and what each says now. Exact sentences SwapUp
+ * wrote, never anything typed.
+ */
+export const REWORDED_QUOTE_TEXTS: readonly (readonly [string, string])[] = [
+  ["No market price yet — enter a quote.", NO_MARKET_PRICE],
+  ["No rate-card price for this model and storage — ask the partner.", NOT_ON_CARD],
+  // The tail of the Apply flag for a size not on file (phoneLed.ts).
+  ["— check Settings, then enter the partner's quote.", "— no trade-in price for that size."],
+];
+// An older build's flag for a size not on file, with the size in it ("… if it's really 1TB.").
+const OLDER_SIZE_FLAG = / Check Settings › About phone, and enter the partner's quote on the full case if it's really [^."]+\./g;
+const OLDER_SIZE_FLAG_NEEDLE = "enter the partner's quote on the full case";
+
+/**
+ * On every boot: those sentences, reworded wherever a case stores them — its quote's reason, its
+ * repaired value's, its storage chips', the flags written at Apply (cases.camera_check). The stored
+ * answer (cases.decision) never holds them. Idempotent: the new words don't contain the old, so only
+ * a case that still carries one is touched, once. Every case, live or test: these are SwapUp's words,
+ * not a price. Audited; returns the case refs it changed. Never throws (it runs on boot).
+ */
+export function rewordQuoteTexts(): string[] {
+  const d = db();
+  const cols = ["quote", "repaired_quote", "storage_quotes", "camera_check"] as const;
+  const needles = [...REWORDED_QUOTE_TEXTS.map(([from]) => from), OLDER_SIZE_FLAG_NEEDLE];
+  type Row = { id: string; ref: string } & Record<(typeof cols)[number], string | null>;
+  const done: string[] = [];
+  try {
+    const rows = d
+      .prepare(`SELECT id, ref, ${cols.join(", ")} FROM cases WHERE ${cols.flatMap((c) => needles.map(() => `instr(${c}, ?) > 0`)).join(" OR ")} ORDER BY ref`)
+      .all(...cols.flatMap(() => needles)) as Row[];
+    if (!rows.length) return done;
+    tx(() => {
+      for (const r of rows) {
+        const sets: Partial<Record<(typeof cols)[number], string>> = {};
+        for (const c of cols) {
+          const was = r[c];
+          if (!was) continue;
+          let now = was;
+          for (const [from, to] of REWORDED_QUOTE_TEXTS) now = now.split(from).join(to);
+          now = now.replace(OLDER_SIZE_FLAG, " No trade-in price for that size.");
+          if (now !== was) sets[c] = now;
+        }
+        const keys = Object.keys(sets) as (typeof cols)[number][];
+        if (!keys.length) continue;
+        d.prepare(`UPDATE cases SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...keys.map((k) => sets[k]!), r.id);
+        done.push(r.ref);
+      }
+      if (done.length) audit({ action: "seed.reworded_quote_texts", detail: { cases: done } });
+    });
+  } catch (e) {
+    console.error(`[swapup] stored quote words: not reworded — ${(e as Error).message}`);
+    return [];
+  }
+  return done;
 }
 
 function demoPassword(): string {

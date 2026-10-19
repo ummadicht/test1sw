@@ -28,7 +28,7 @@
  *
  * Old data: over 14 days old the price stands, with its age on it; over 90 days old there is no
  * price (marketSell.ts marketUsable). No listing, no price — with why, so the server can fall back
- * to the partner's rate card or a typed quote and say so. Never a neighbour's model, never a
+ * to the partner's rate card and say so. Never a neighbour's model, never a
  * guessed grade. Pure — no database, no clock.
  */
 import { fmtBp, inr, type BasisPoints, type Rupees } from "./money.ts";

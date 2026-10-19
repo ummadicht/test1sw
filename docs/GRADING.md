@@ -289,11 +289,11 @@ file); **one margin below the market price everywhere** — the 5%→2% markdown
 GradeIQ; **SwapUp's % per defect** everywhere (GradeIQ copies the table, "same as SwapUp"); old data
 shown with its age over 14 days and no price over 90; no sample prices of any kind; never a made-up
 price. The answer compares the **refurb quote** (what the customer pays to fix it) with
-**trade-in + bonus**. The trade-in is priced in this order (`lib/server/tradeIn.ts`), and whatever
-wins is the case quote — the figure the answer shows and the lock holds on the store's credit line:
+**trade-in + bonus**. Never a typed price (0.9.1): staff change it only by changing the conditions.
+The trade-in is priced in this order (`lib/server/tradeIn.ts`), and whatever wins is the case quote
+— the figure the answer shows and the lock holds on the store's credit line:
 
-1. **A quote staff typed in from the partner's app** (`partner_manual`) — binding as entered.
-2. **PriceIQ** (`source.kind: "priceiq"`, `lib/domain/priceiqTradeIn.ts`, asked live by
+1. **PriceIQ** (`source.kind: "priceiq"`, `lib/domain/priceiqTradeIn.ts`, asked live by
    `lib/server/priceiq.ts` — `GET /api/market-grades`, cached an hour, a quote waits ≤ 6 s):
    - **base** — PriceIQ's LOWEST refurbished-market listing for the model + storage at the phone's
      grade by rule G1; when the market lists none at that grade, the next LOWER grade, named
@@ -309,10 +309,11 @@ wins is the case quote — the figure the answer shows and the lock holds on the
      price, week 2026-W35, 52 days old." under the figure); over 90 days old it is no price
      (`priceiqWhy` "PriceIQ's prices for the … are from 2026-W29 (91 days old) — too old to price.");
    - **PriceIQ unreachable** — the last good answer, labelled "PriceIQ unreachable, last answer …".
-3. **The partner's uploaded rate card** — when PriceIQ has no price. The quote carries `priceiqWhy`
+2. **The partner's uploaded rate card** — when PriceIQ has no price. The quote carries `priceiqWhy`
    (e.g. "PriceIQ has no refurbished market price for the Galaxy Z Fold6 256GB.") and the answer's
    Show details says it.
-4. **None** (`source.kind: "none"`) — "No market price yet — enter a quote." Never a guess.
+3. **None** (`source.kind: "none"`) — "No market price yet", and the reason: "This phone isn't on the
+   rate card yet.", PriceIQ's own why, or "No rate card is active yet." Never a guess.
 
 **What is a defect.** The grade already prices the look — scratches, scuffs, dents, a bent frame —
 so those are never deducted again. Deducted once each: a screen with lines, cracked or not working; a

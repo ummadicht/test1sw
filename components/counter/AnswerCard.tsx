@@ -7,7 +7,7 @@ import type { Offer } from "@/lib/domain/offer";
 import type { AnswerLine, AnswerLineKey } from "@/lib/domain/answer";
 import type { CaseOps } from "./ops";
 import { CHOOSE_NEW_PHONE_LINK, askControl, autoRequoteKey, requotable, staleDecisionKey, swapRefusal } from "./answerAsks";
-import { PartnerQuoteEntry, IdentityOverride } from "./AnswerAskForms";
+import { IdentityOverride } from "./AnswerAskForms";
 import { GradeRow } from "./GradeRow";
 
 /**
@@ -28,10 +28,11 @@ import { GradeRow } from "./GradeRow";
  * (CaseView.offer, lib/domain/offer.ts). The repair and what we pay carry the same weight,
  * side by side, the recommended side marked. Whatever the test couldn't fill is one tap here (storage
  * chips with each size's trade-in) or a jump to the step that fills it — never a
- * guessed size. Where no step can fill it (a lapsed partner-app quote, a size not on
- * file, the camera's identity check) it is answered here (answerAsks.ts says which). An
- * expired quote is re-quoted once on open, as the store app does, so "re-quoting" is
- * true. The verdict is decide()'s headline; the bonus is shown, never a reason.
+ * guessed size, never a typed price. Where no step can fill it (the camera's identity
+ * check) it is answered here (answerAsks.ts says which); where nothing can (no price, a
+ * size not on file) it is said once, as text. An expired or unpriced quote is re-quoted
+ * once on open, as the store app does, so "re-quoting" is true and a rate card uploaded
+ * since shows. The verdict is decide()'s headline; the bonus is shown, never a reason.
  *
  * ONE ANSWER on the page — the case page's "The answer" step (caseSteps.ts): the headline,
  * its sentence, "Why this answer" (the server's signals and caveats, as the store app's "?"
@@ -205,10 +206,10 @@ export function AnswerCard({
   const [requoting, setRequoting] = useState(false);
   const [requoteErr, setRequoteErr] = useState<string | null>(null);
 
-  // An expired quote is re-quoted once, quietly, the moment the answer shows it (the store app's
-  // answer screen does the same): ONCE per page open, whatever comes back — a partner whose fresh
-  // quote is already out of date must not be asked again and again with the IMEI. The tile's
-  // "Re-quote" is the way to ask again. Never a quote typed in from the partner's app (autoRequoteKey).
+  // An expired or unpriced quote is re-quoted once, quietly, the moment the answer shows it (the
+  // store app's answer screen does the same): ONCE per page open, whatever comes back — a quote
+  // already out of date, or still unpriced, is not asked for again and again with the IMEI. The
+  // tile's "Re-quote" is the way to ask again (autoRequoteKey).
   // An open case decided under an older ruleset is re-decided the same quiet way, without asking the partner.
   const autoKey = autoRequoteKey(view) ?? staleDecisionKey(view);
   const autoTried = useRef(false);
@@ -298,8 +299,6 @@ export function AnswerCard({
                 {/* The market data's age, or "PriceIQ unreachable, last answer …", while those chip prices are on screen. */}
                 {c.note ? <Small tone="warn">{c.note}</Small> : null}
               </>
-            ) : c.kind === "partner_quote_entry" ? (
-              <PartnerQuoteEntry ops={ops} why={c.why} size={c.size} />
             ) : c.kind === "identity_override" ? (
               <IdentityOverride ops={ops} />
             ) : c.kind === "ask_manager" ? (

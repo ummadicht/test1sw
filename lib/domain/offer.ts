@@ -7,10 +7,11 @@
  * "Why asking questions when we have all tested data … just refurb quote vs
  * bonus + trade in price." Everything here is already on the case: the test
  * filled the model, faults and condition, the price book priced the repair, the
- * trade-in was priced (a quote staff typed in from the partner's app, else
- * PriceIQ's refurbished-market price at the grade less the 5%→2% markdown and a %
- * per defect, else the partner's uploaded rate card — lib/server/tradeIn.ts; none
- * of them → "No market price yet — enter a quote") and SwapUp suggested the new one.
+ * trade-in was priced by the system (PriceIQ's refurbished-market price at the grade
+ * less the 5%→2% markdown and a % per defect, else the partner's uploaded rate card —
+ * lib/server/tradeIn.ts; none of them → "No market price yet", with the reason) and
+ * SwapUp suggested the new one. Staff never type a trade-in price: what's wrong with
+ * the phone is the only thing that changes it.
  * This file only arranges it and says, in the server's words, what is still
  * missing and why. `swap.tradeInDetail` says how the trade-in was reached.
  *
@@ -60,7 +61,8 @@ export type OfferAsk =
    * may offer a size the phone has ruled out.
    */
   | { kind: "storage"; title: string; text: string; options: StorageOption[]; note: string | null }
-  | { kind: "partner_quote"; title: string; text: string }
+  /** Nothing priced the phone: text only, the reason why (the rate card, PriceIQ). Never a form — no price is typed in. */
+  | { kind: "no_price"; title: string; text: string }
   | { kind: "repair_quote"; title: string; text: string }
   | { kind: "new_phone"; title: string; text: string };
 
@@ -74,7 +76,7 @@ export type Offer = {
   recommendation: Recommendation | null;
   /** repair → "repair"; upgrade | no_repair → "swap"; either | cannot_say → null. */
   recommended: "repair" | "swap" | null;
-  /** Ordered: blocked, model, storage, partner_quote, repair_quote, new_phone. Empty once the case is closed. */
+  /** Ordered: blocked, model, storage, no_price, repair_quote, new_phone. Empty once the case is closed. */
   asks: OfferAsk[];
   storage: { variant: string | null; source: VariantSource | null; note: string | null };
   /** THE refurb quote — what the customer pays to fix it. */
@@ -109,7 +111,7 @@ export type Offer = {
      *          grade was used). null for any other source.
      *   lines  each step after the base, in order: the markdown, one line per defect with its %, then any
      *          cap, minimum or rounding — "Rear camera faulty · 18% · −₹9,251". A rate-card quote lists its
-     *          best-condition price first. Empty for a single-figure quote (one typed in from the partner's app).
+     *          best-condition price first. Empty for a single-figure quote.
      *   note   why PriceIQ didn't price it, when the partner's rate card did instead.
      */
     tradeInDetail: { line: string | null; lines: { label: string; pct: string | null; amount: number }[]; note: string | null } | null;
@@ -208,7 +210,7 @@ const ASK_TITLE = {
   blocked: "Check this is the right phone",
   model: "Which phone is it?",
   storage: "Which storage is it?",
-  partner_quote: "Enter the partner's quote",
+  no_price: "No market price yet",
   repair_quote: "The repair needs a quote",
   new_phone: "Choose the new phone",
 } as const;
@@ -220,24 +222,12 @@ const STORAGE_TEXT = "The phone couldn't measure it — see Settings › About p
 // cleared: "couldn't measure" would be untrue, so only what is true — there is no size yet.
 const STORAGE_TEXT_UNTESTED = "See Settings › About phone › Storage.";
 // The phone measured a size the model's list doesn't have. No chip can be right, so none is
-// offered: the advisor checks Settings, and prices that size with the partner by hand.
-const measuredUnlisted = (size: string) =>
-  `Phone measures ${size}, not on file — check Settings, then enter the partner's quote.`;
-/** Owner, 2026-10-18: nothing priced the phone — never a made-up price. */
-export const NO_MARKET_PRICE = "No market price yet — enter a quote.";
-// A quote read off the partner's app is never re-quoted by SwapUp (reprice rebuilds it as entered),
-// so once it lapses only a new one from the app can replace it — and the Lock screen refuses it.
-const manualExpired = (ref: string) => `Partner quote (ref ${ref}) expired — enter today's quote.`;
-const EXPIRED_BLOCKER = "The partner's quote has expired — re-quote.";
-
-/**
- * The lock's refusal for an expired quote (cases.ts lockBlockers). "Re-quote" is the fix for a
- * PriceIQ or rate-card quote; a quote read off the partner's app can't be re-quoted, so it gets the
- * answer's own sentence — the Lock screen and the answer never tell the advisor two things.
- */
-export function expiredQuoteBlocker(q: Pick<OfferQuote, "source" | "partnerRef">): string {
-  return q.source.kind === "partner_manual" ? manualExpired(q.partnerRef ?? "—") : EXPIRED_BLOCKER;
-}
+// offered, and nothing prices that size: never a guessed one.
+const measuredUnlisted = (size: string) => `Phone measures ${size}, not on file — no trade-in price for that size.`;
+/** Owner, 2026-10-18: nothing priced the phone — never a made-up price. 2026-10-19: and never a typed one. */
+export const NO_MARKET_PRICE = "No market price yet.";
+/** The lock's refusal for an expired quote (cases.ts lockBlockers): every quote is the system's, so re-quoting renews it. */
+export const EXPIRED_BLOCKER = "The trade-in price has expired — re-quote.";
 const NEW_PHONE_TEXT = "No catalogue match — choose one to see the bonus.";
 const NO_DECISION = "Not enough to compare yet";
 const NOTHING_WRONG = "The test found nothing wrong.";
@@ -325,16 +315,10 @@ export function buildOffer(i: OfferInput): Offer {
   const q = i.quote;
   const priced = !!device && !!variant && !i.quoteBlocked && q?.status === "priced" && q.amount !== null;
   const tradeIn = priced ? q!.amount : null;
-  // A partner-app quote that has lapsed on an open case: the figure stays on screen for
-  // reference, marked, and nothing can go ahead on it until today's quote is entered.
-  const stale = open && tradeIn !== null && q?.source.kind === "partner_manual" && i.quoteExpired ? manualExpired(q.partnerRef ?? "—") : null;
   let tradeInNote: string | null = null;
   if (tradeIn !== null && q) {
-    if (stale) tradeInNote = stale;
-    // A quote read off the partner's app is never re-quoted by SwapUp, so "re-quoting" would be untrue for it.
-    else if (q.source.kind === "partner_manual") tradeInNote = `Partner ref ${q.partnerRef ?? "—"}`;
-    // A closed case is never re-quoted either: its quote running out after the lock is no news.
-    else if (i.quoteExpired && open) tradeInNote = EXPIRED_NOTE;
+    // A closed case is never re-quoted: its quote running out after the lock is no news.
+    if (i.quoteExpired && open) tradeInNote = EXPIRED_NOTE;
     // Old market data (over 14 days) is shown with its age; a last good answer says PriceIQ didn't answer.
     else if (q.source.kind === "priceiq" && q.priceiq?.note) tradeInNote = q.priceiq.note;
   }
@@ -397,8 +381,9 @@ export function buildOffer(i: OfferInput): Offer {
         asks.push({ kind: "storage", title: ASK_TITLE.storage, text, options, note });
       }
     }
-    if (device && variant && !i.quoteBlocked && q && (q.status !== "priced" || stale))
-      asks.push({ kind: "partner_quote", title: ASK_TITLE.partner_quote, text: stale ?? q.reason ?? NO_MARKET_PRICE });
+    // Nothing priced it: the reason, said once under the title — no form, no button.
+    if (device && variant && !i.quoteBlocked && q && q.status !== "priced")
+      asks.push({ kind: "no_price", title: ASK_TITLE.no_price, text: q.reason ?? NO_MARKET_PRICE });
     if (device && !nothingToRepair && repairAmount === null && (r?.status === "needs_inspection" || r?.status === "unpriced" || (!r && i.repairNotServiced)))
       asks.push({ kind: "repair_quote", title: ASK_TITLE.repair_quote, text: repairNote ?? NO_REPAIR_PRICE });
     if (device && !up) asks.push({ kind: "new_phone", title: ASK_TITLE.new_phone, text: i.newPhoneMatch ? NO_NEW_PHONE : NEW_PHONE_TEXT });
@@ -415,7 +400,7 @@ export function buildOffer(i: OfferInput): Offer {
     signals.find((s) => way && s.points === way && s.strength === "strong")?.text ??
     signals[0]?.text ??
     (recommendation === "no_repair" ? (i.tested === false ? NOTHING_RECORDED : NOTHING_WRONG) : null) ??
-    // "Not enough to compare yet" says what is missing (e.g. a partner quote entered without its repaired value).
+    // "Not enough to compare yet" says what is missing (e.g. no repaired value yet).
     (recommendation === "cannot_say" ? (decision?.missing[0] ?? null) : null);
 
   const status = i.status;
@@ -458,20 +443,18 @@ export function buildOffer(i: OfferInput): Offer {
     actions: {
       repair: !open ? CLOSED : nothingToRepair ? NOTHING_TO_REPAIR : repairAmount === null ? repairWhy : status === "draft" ? NOT_PRICED : null,
       // A swap the Lock screen is certain to refuse for a reason it can't fix there is refused
-      // here, with that reason: a lapsed partner quote, or no new phone to swap up to.
+      // here, with that reason: no new phone to swap up to.
       swap: !open
         ? CLOSED
         : tradeIn === null
           ? swapWhy
-          : stale
-            ? stale
-            : !up
-              ? CHOOSE_NEW_PHONE
-              : tooCheap
-                ? NEW_PHONE_TOO_CHEAP
-                : status !== "quoted"
-                  ? NOT_PRICED
-                  : null,
+          : !up
+            ? CHOOSE_NEW_PHONE
+            : tooCheap
+              ? NEW_PHONE_TOO_CHEAP
+              : status !== "quoted"
+                ? NOT_PRICED
+                : null,
       walkAway: !open ? CLOSED : null,
     },
     signals,
@@ -492,7 +475,6 @@ export function buildOffer(i: OfferInput): Offer {
               gradePrice:
                 q?.source.kind === "partner_ratecard" && q?.grade && typeof q?.lines?.[0]?.amount === "number" ? q.lines[0].amount : null,
             },
-      stale: !!stale,
       quoteExpired: i.quoteExpired,
       quoteBlocked: !!i.quoteBlocked,
       repair: { amount: repairAmount, covered, coverage: i.coverage, nothingToRepair },

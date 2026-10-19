@@ -57,7 +57,7 @@ export function Banner({ tone = "info", children, icon }: { tone?: "info" | "war
   );
 }
 
-/** Where a price came from: PriceIQ, the partner's rate card, a quote typed from the partner's app, a published price. */
+/** Where a price came from: PriceIQ, the partner's rate card, a published price (or an older build's typed quote, history only). */
 export function SourceBadge({ kind, label }: { kind: string | null | undefined; label?: string | null }) {
   if (!kind || kind === "none") return null;
   if (kind === "partner_ratecard") return <span className="pill pill-fix" title={label ?? undefined}>Partner rate card</span>;

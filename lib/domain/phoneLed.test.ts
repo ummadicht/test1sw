@@ -203,14 +203,14 @@ test("storage at Apply: nothing measured, nothing picked → nothing (the answer
 });
 
 test("storage at Apply: a measured size that isn't on file is never replaced by a pick, a single size or a guess", () => {
-  const flag = "Storage: phone measures 1TB, not on file — check Settings, then enter the partner's quote.";
+  const flag = "Storage: phone measures 1TB, not on file — no trade-in price for that size.";
   // The matcher dropped the size (variant null); the reading still travels with the phone.
   assert.deepEqual(storageFromTest({ match: S22, picked: null, variants: SIZES, caseModelId: null, caseVariant: null, measured: "1TB" }), { variant: null, source: null, flag });
   // The customer tapped 256GB on the confirm card (an older app still asks): not used — the phone measured otherwise.
   assert.deepEqual(storageFromTest({ match: S22, picked: { modelId: "galaxy-s22", variant: "256GB" }, variants: SIZES, caseModelId: null, caseVariant: null, measured: "1TB" }), {
     variant: null,
     source: null,
-    flag: "Storage: phone measures 1TB, not on file (customer said 256GB — not used) — check Settings, then enter the partner's quote.",
+    flag: "Storage: phone measures 1TB, not on file (customer said 256GB — not used) — no trade-in price for that size.",
   });
   // A model sold in one size, but the phone measured another: the catalogue's size is not this phone's.
   assert.deepEqual(storageFromTest({ match: S22, picked: null, variants: ["128GB"], caseModelId: null, caseVariant: null, measured: "256GB" }).variant, null);

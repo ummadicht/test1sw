@@ -150,7 +150,7 @@ export function OnboardClient({ partners, defaultBand }: { partners: PartnerOpti
           )}
         </Field>
         <p className="hint">
-          Bonus band {fmtBp(defaultBand.minBp)}–{fmtBp(defaultBand.maxBp)}. A live programme: real trade-ins, priced by PriceIQ, the partner&apos;s rate card or a typed quote.
+          Bonus band {fmtBp(defaultBand.minBp)}–{fmtBp(defaultBand.maxBp)}. A live programme: real trade-ins, priced by PriceIQ or the partner&apos;s rate card.
         </p>
         <button className="btn btn-primary" disabled={busy || partners.length === 0}>
           {busy ? "Creating…" : "Create client"}

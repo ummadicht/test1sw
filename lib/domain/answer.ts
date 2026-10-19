@@ -17,7 +17,7 @@
  *            never reads better than the report's after-repair grade. Display only: the grade never
  *            moves a price. The defects go in the note, at most two, then "+N more".
  *   market   M — what the buyback partner pays for this phone (the case's trade-in quote). Shown to
- *            the customer only from the partner's own price (a typed quote or its rate card): a
+ *            the customer only from the partner's own price (its rate card): a
  *            PriceIQ trade-in is SwapUp's estimate, so the customer waits while staff see it. It
  *            names a grade only when the price is FOR the grade the grade line shows; otherwise
  *            "Market price ₹X", and staff read which grade it was priced at.
@@ -93,7 +93,7 @@ export type AnswerInput = {
   /**
    * The market price M on the case (Offer.swap.tradeIn) and where it came from. `priceGrade`: the
    * grade the price's base is FOR (a PriceIQ listing, a rate card's grade column); null when the
-   * price is for the phone as it is (a typed quote, a rate card without grade prices).
+   * price is for the phone as it is (a rate card without grade prices).
    */
   market: {
     amount: Rupees;
@@ -106,8 +106,7 @@ export type AnswerInput = {
      */
     gradePrice?: Rupees | null;
   } | null;
-  /** A partner-app quote that lapsed, any expired quote, the camera's identity block — nothing ready. */
-  stale: boolean;
+  /** An expired quote or the camera's identity block — nothing ready. */
   quoteExpired: boolean;
   quoteBlocked: boolean;
   repair: { amount: Rupees | null; covered: boolean; coverage: Coverage; nothingToRepair: boolean };
@@ -129,9 +128,9 @@ export const CONFIRMING = "The advisor is confirming your price.";
 export const CANCELLED_TEXT = "This trade-in was cancelled.";
 const CLOSED_TEXT = "This case is closed.";
 /** Staff: a PriceIQ trade-in is SwapUp's estimate, never shown to the customer as the market price (owner, R1). */
-export const ESTIMATE_NOTE = "Estimate from the refurbished market — enter the buyback partner's quote to show it to the customer.";
+export const ESTIMATE_NOTE = "Estimate from the refurbished market — not shown to the customer.";
 
-/** The sources whose figure IS what the buyback partner pays — the only ones the customer is shown. */
+/** The sources whose figure IS what the buyback partner pays — the only ones the customer is shown (partner_manual: history only, nothing writes it now). */
 const PARTNER_SOURCES: readonly string[] = ["partner_manual", "partner_ratecard"];
 export const TRADED_STATUSES: readonly string[] = ["locked", "in_pickup", "collected", "cleared", "regraded", "rejected", "not_received"];
 
@@ -242,8 +241,8 @@ export function buildAnswer(i: AnswerInput): Answer {
   let ready: boolean;
   let text: string | null = null;
   if (open) {
-    ready = wePay !== null && !i.stale && !i.quoteExpired && !i.quoteBlocked && partnerPrice;
-    if (!ready) text = wePay !== null && !i.stale && !i.quoteExpired && !i.quoteBlocked ? CONFIRMING : WORKING_OUT;
+    ready = wePay !== null && !i.quoteExpired && !i.quoteBlocked && partnerPrice;
+    if (!ready) text = wePay !== null && !i.quoteExpired && !i.quoteBlocked ? CONFIRMING : WORKING_OUT;
   } else if (traded || chosen) ready = true;
   else if (cancelled) {
     ready = false;

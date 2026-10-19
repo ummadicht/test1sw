@@ -788,6 +788,18 @@ export function applyCameraFloor(answers: ConditionAnswers, floor: CameraFloor):
 export type CameraEvidence = { floor: CameraFloor; faults: { id: FaultId; because: string; photoIndex: number | null }[] };
 
 /**
+ * The least a reason says (trimmed) to record the phone better than the camera confirmed, or to
+ * accept it against the camera's identity check. cases.ts updateCase refuses anything shorter; the
+ * desk asks for it (CaseWorkspace, AnswerAskForms).
+ */
+export const CAMERA_REASON_MIN = 8;
+// Every cameraOverrideProblems sentence ends with these words: the save is waiting for a reason.
+const NEEDS_REASON = "needs a reason.";
+/** The server refused a condition save the camera contradicts (cases.ts, 409): it goes through with a reason. */
+export const needsCameraReason = (message: string | null | undefined): boolean =>
+  !!message && message.startsWith("Camera confirmed ") && message.endsWith(NEEDS_REASON);
+
+/**
  * Where an edit records the phone as BETTER than the camera confirmed. Each
  * item is { key, why }: key identifies what is overridden (so one recorded
  * override covers it from then on), why is a sentence for the advisor.
@@ -797,13 +809,13 @@ export function cameraOverrideProblems(answers: ConditionAnswers | null, faults:
   if (!camera) return [];
   const out: { key: string; why: string }[] = [];
   for (const f of camera.faults) {
-    if (!faults.includes(f.id)) out.push({ key: `fault:${f.id}`, why: `Camera confirmed "${FAULT_BY_ID[f.id].label}"${photoRef(f.photoIndex)} — removing it needs a reason.` });
+    if (!faults.includes(f.id)) out.push({ key: `fault:${f.id}`, why: `Camera confirmed "${FAULT_BY_ID[f.id].label}"${photoRef(f.photoIndex)} — removing it ${NEEDS_REASON}` });
   }
   if (answers) {
     if (SCREEN_ORDER.indexOf(answers.screen) < SCREEN_ORDER.indexOf(camera.floor.screen))
-      out.push({ key: `screen:${camera.floor.screen}`, why: `Camera confirmed the screen "${SCREEN_LABEL[camera.floor.screen]}" — "${SCREEN_LABEL[answers.screen]}" needs a reason.` });
+      out.push({ key: `screen:${camera.floor.screen}`, why: `Camera confirmed the screen "${SCREEN_LABEL[camera.floor.screen]}" — "${SCREEN_LABEL[answers.screen]}" ${NEEDS_REASON}` });
     if (BODY_ORDER.indexOf(answers.body) < BODY_ORDER.indexOf(camera.floor.body))
-      out.push({ key: `body:${camera.floor.body}`, why: `Camera confirmed the body "${BODY_LABEL[camera.floor.body]}" — "${BODY_LABEL[answers.body]}" needs a reason.` });
+      out.push({ key: `body:${camera.floor.body}`, why: `Camera confirmed the body "${BODY_LABEL[camera.floor.body]}" — "${BODY_LABEL[answers.body]}" ${NEEDS_REASON}` });
   }
   return out;
 }

@@ -18,7 +18,7 @@ echo "▸ gates: domain tests + typecheck"
 (cd "$ROOT" && npm test >/dev/null && npx tsc --noEmit -p .)
 
 # No bundled price file, ever (owner, 2026-10-18: PriceIQ live, no snapshot). Prices come from
-# PriceIQ's API, an uploaded partner rate card or a quote staff type in — never a CSV in the app.
+# PriceIQ's API or an uploaded partner rate card — never a CSV in the app, never a typed price.
 echo "▸ gate: no bundled price file"
 stray=$(cd "$ROOT" && find app components lib public -type f -name '*.csv' 2>/dev/null || true)
 if [ -n "$stray" ]; then echo "✗ a CSV in the app — prices come from PriceIQ live, not a bundled file:" >&2; echo "$stray" >&2; exit 1; fi
@@ -73,8 +73,8 @@ priceiq_env_defaults() {
 
 # Gate: from the VM, PriceIQ must answer 200 with graded prices for a known phone (the contract's
 # acceptance phone, Galaxy S23 Ultra 256GB) with the key in /etc/swapup.env. The key reaches curl on
-# stdin — never a command line, never echoed. No key yet → skipped, loudly: every trade-in then says
-# "No market price yet — enter a quote" until one is added.
+# stdin — never a command line, never echoed. No key yet → skipped, loudly: trade-ins are then priced
+# from the partner's rate card only until one is added.
 echo "▸ gate: PriceIQ answers on the VM"
 priceiq_env_defaults
 "${SSH[@]}" "bash -s -- $PRICEIQ_DEFAULT_BASE" <<'REMOTE'
@@ -83,7 +83,7 @@ val() { sudo test -f "$F" && sudo sed -n "s/^$1=//p" "$F" | tail -n1 | tr -d "\"
 BASE=$(val PRICEIQ_BASE_URL); BASE=${BASE:-$1}; BASE=${BASE%/}
 KEY=$(val PRICEIQ_API_KEY)
 if [ -z "$KEY" ]; then
-  echo "  ⚠ PRICEIQ_API_KEY is not in $F — gate SKIPPED. Trade-ins say \"No market price yet — enter a quote\" until a read-only key is added."
+  echo "  ⚠ PRICEIQ_API_KEY is not in $F — gate SKIPPED. Trade-ins are priced from the rate card only until a read-only key is added."
   exit 0
 fi
 out=$(printf 'Authorization: Bearer %s\n' "$KEY" | curl -s -m 10 -H @- -w '\n%{http_code}' "$BASE/api/market-grades?brand=Samsung&model=Galaxy%20S23%20Ultra&storageGb=256&market=IN" || true)

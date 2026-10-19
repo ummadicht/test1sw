@@ -326,7 +326,7 @@ function ModeBanner({ mode }: { mode: PartnerMode }) {
     );
   return (
     <Banner>
-      <strong>No rate card.</strong> PriceIQ prices each phone; where it has no price, staff enter the partner&apos;s quote.
+      <strong>No rate card.</strong> PriceIQ prices each phone; a phone it can&apos;t price gets no trade-in price.
     </Banner>
   );
 }

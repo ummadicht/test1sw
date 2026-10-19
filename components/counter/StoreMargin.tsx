@@ -104,7 +104,7 @@ export function StoreMargin({ ops }: { ops: CaseOps }) {
         </LedgerRow>
         <LedgerRow
           label="Sell after refurb"
-          sub={sellSub({ sellBasis: b.sellBasis, sellWhy: b.sellWhy, market: m, repairedReason: rq?.reason ?? null, manualQuote: q?.source.kind === "partner_manual", partner })}
+          sub={sellSub({ sellBasis: b.sellBasis, sellWhy: b.sellWhy, market: m, repairedReason: rq?.reason ?? null, partner })}
         >
           <Money value={b.sell} />
         </LedgerRow>

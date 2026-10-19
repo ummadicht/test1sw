@@ -412,11 +412,12 @@ not asked again).
 
 Owner: *"price compare from price iq based on grade ...deduct based on % of failure or defects."*
 2026-10-18: PriceIQ live, one 5%→2% markdown everywhere, SwapUp's % per defect, no sample prices,
-never a made-up price. `reprice` asks in this order (`lib/server/tradeIn.ts`); the first that prices
-is the case `quote`, and the lock holds exactly that amount on the store's credit line:
+never a made-up price. 2026-10-19 (0.9.1): never a typed one either — the price is the system's, and
+staff change it only by changing the conditions (what's wrong, screen/body, issues, comes-with, age).
+`reprice` asks in this order (`lib/server/tradeIn.ts`); the first that prices is the case `quote`, and
+the lock holds exactly that amount on the store's credit line:
 
-1. `partner_manual` — a quote typed in from the partner's app (`PATCH {partnerQuote}`), as entered.
-2. `priceiq` — PriceIQ's lowest refurbished-market listing for the model + storage at the phone's
+1. `priceiq` — PriceIQ's lowest refurbished-market listing for the model + storage at the phone's
    grade (rule G1 on the screen and body; none at it → the next LOWER grade, named), less the
    markdown (5% up to ₹15,000, 4% to ₹30,000, 3% to ₹50,000, 2% above — the sell price's own), less
    SwapUp's % for each defect (`DEFECT_DEDUCTIONS`), combined as a rate card combines them: each % of
@@ -428,7 +429,7 @@ is the case `quote`, and the lock holds exactly that amount on the store's credi
    cracked back, won't switch on (priced on that alone), no calls, and each failed function (touch,
    battery, charging, cameras, speaker, mic, Wi-Fi/Bluetooth, fingerprint, buttons, vibration,
    liquid). Accessories and age are not defects. Full rules: `docs/GRADING.md` §6.
-3. `partner_ratecard` — the partner's uploaded rate card. When PriceIQ was asked first and had no
+2. `partner_ratecard` — the partner's uploaded rate card. When PriceIQ was asked first and had no
    price, the quote says why in `priceiqWhy`. Since 2026-10-19 a card may price each grade
    (CSV `model_id,variant,max_price,good_price,fair_price,best_value_price`, the last three optional,
    max ≥ good ≥ fair ≥ best value per row): a row with grade prices prices the phone at its look's
@@ -438,11 +439,22 @@ is the case `quote`, and the lock holds exactly that amount on the store's credi
    worked out: W42's grade B S23 Ultra 256GB is ₹33,574), and the
    quote carries `grade` (the grade the price is for; its first line reads "Market price grade C ·
    <card label>"). A 3-column row prices as before.
-4. `none` — nothing priced it: `status: "unpriced"`, `reason` "No market price yet — enter a quote."
-   (and `priceiqWhy`).
+3. `none` — nothing priced it: `status: "unpriced"`, and `reason` is the specific why: an active card
+   that doesn't list the phone → "This phone isn't on the rate card yet."; else PriceIQ's own why when
+   it was asked; else "No rate card is active yet." (and `priceiqWhy`). The answer heads it "No market
+   price yet" and says the reason under it, once.
 
 A quote stored by an older build from a source that no longer exists is treated as expired on an
-open case (`quoteExpired: true`) and re-asked.
+open case (`quoteExpired: true`) and re-asked. `partner_manual` (a quote 0.9.0 and older let staff type
+in) stays a kind so its history still reads, but nothing writes it and an open case re-asks it.
+`reprice` also re-asks a quote that is not priced (and storage chips none of which is priced), so a
+rate card uploaded later reaches every open case on its next re-price — the desk's and the Store
+app's quiet once-per-open re-price included.
+
+**`PATCH {partnerQuote}` is refused** (since 0.9.1): anything but `null` → 400 "Prices can't be typed in
+— change what's wrong to change the price.", before the case is read (nothing of the patch is saved, no
+IMEI lookup). `{partnerQuote: null}` is accepted and changes nothing. Old Store builds that still send it
+show that sentence.
 
 ```ts
 type PartnerQuote = {
@@ -500,7 +512,7 @@ type OfferAsk =
   | { kind: "storage";       title: string; text: string;
       options: { variant: string; tradeIn: number | null }[];   // [] = no chip can be right (below)
       note: string | null }                                     // the chips' market data age / "PriceIQ unreachable, …" | null
-  | { kind: "partner_quote"; title: string; text: string }
+  | { kind: "no_price"; title: string; text: string }   // text only — no control (0.9.0 and older: "partner_quote")
   | { kind: "repair_quote";  title: string; text: string }
   | { kind: "new_phone";     title: string; text: string };
 
@@ -510,7 +522,7 @@ type Offer = {
   reason: string | null;                  // one sentence under the headline
   recommendation: Recommendation | null;  // decision.recommendation (null when no decision)
   recommended: "repair" | "swap" | null;  // repair→"repair"; upgrade|no_repair→"swap"; either|cannot_say→null
-  asks: OfferAsk[];                       // ordered: blocked, model, storage, partner_quote, repair_quote, new_phone
+  asks: OfferAsk[];                       // ordered: blocked, model, storage, no_price, repair_quote, new_phone
   storage: { variant: string | null; source: VariantSource | null; note: string | null };
   repair: {                               // THE refurb quote
     amount: number | null; covered: boolean; basis: "book" | "manual" | null;
@@ -595,7 +607,7 @@ never "for grade B" (the card's grade B is ₹30,000).
 
 | status | ready | final | lines | customer text when not ready |
 | --- | --- | --- | --- | --- |
-| `draft` / `quoted` | a market price from the **partner** (`partner_manual` or `partner_ratecard`), not lapsed, not blocked | false | grade, market, we_pay, bonus, repair | "The advisor is working out your price." — or, for a PriceIQ estimate, "The advisor is confirming your price." (staff note: "Estimate from the refurbished market — enter the buyback partner's quote to show it to the customer.") |
+| `draft` / `quoted` | a market price from the **partner** (`partner_manual` or `partner_ratecard`), not lapsed, not blocked | false | grade, market, we_pay, bonus, repair | "The advisor is working out your price." — or, for a PriceIQ estimate, "The advisor is confirming your price." (staff note: "Estimate from the refurbished market — not shown to the customer.") |
 | traded (`locked` … `not_received`) | true | true | grade, market, we_pay, bonus — from `trade_value`, `premium_value`, `bonus_value` | — |
 | `repair_chosen` | true | true | grade, repair | — |
 | `walked_away` | as the partner's price allows | true | as last worked out | "This case is closed." |
@@ -628,8 +640,8 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
 | --- | --- | --- | --- |
 | `blocked` | "Check this is the right phone" | `quoteBlocked` | the camera says this may not be the phone on the case |
 | `model` | "Which phone is it?" | "The test couldn't tell — choose it on the full case." (no test was applied to the case: "Choose it on the full case.") | no model on the case |
-| `storage` | "Which storage is it?" | "The phone couldn't measure it — see Settings › About phone." — only when a test ran and the phone read nothing. No test applied (a desk-only case), or the phone measured a size on the list that is no longer on the case: "See Settings › About phone › Storage." The phone measured a size that ISN'T on the model's list (`measuredStorage`, e.g. a 1TB Ultra on file as 256/512GB): "Phone measures 1TB, not on file — check Settings, then enter the partner's quote." | a model, no storage. `options`: the what-if trade-in for each size, smallest size first, priced the way the trade-in itself will be (PriceIQ less defects, else the rate card — so the chip and the answer agree) (`tradeIn: null` when nothing prices that size, or none could be asked yet — e.g. the condition is incomplete). `note` is the first priced chip's market-data note (its age over 14 days, or "PriceIQ unreachable, last answer …"), else null — show it under the chips. **`options: []` when the phone measured an off-list size:** every listed size is one the phone has ruled out, so none is offered (and no what-if prices are asked) — show the text and the way to the full case. |
-| `partner_quote` | "Enter the partner's quote" | `quote.reason` ?? "No market price yet — enter a quote." A quote typed in from the partner's app that has lapsed: "Partner quote (ref CF-88421) expired — enter today's quote." | model + storage, not blocked, the partner's quote is unpriced or errored — or it is a lapsed partner-app quote (`partner_manual` + `quoteExpired`, open case): SwapUp never re-quotes those, so only today's quote from the app (`PATCH {partnerQuote}`) replaces it |
+| `storage` | "Which storage is it?" | "The phone couldn't measure it — see Settings › About phone." — only when a test ran and the phone read nothing. No test applied (a desk-only case), or the phone measured a size on the list that is no longer on the case: "See Settings › About phone › Storage." The phone measured a size that ISN'T on the model's list (`measuredStorage`, e.g. a 1TB Ultra on file as 256/512GB): "Phone measures 1TB, not on file — no trade-in price for that size." | a model, no storage. `options`: the what-if trade-in for each size, smallest size first, priced the way the trade-in itself will be (PriceIQ less defects, else the rate card — so the chip and the answer agree) (`tradeIn: null` when nothing prices that size, or none could be asked yet — e.g. the condition is incomplete). `note` is the first priced chip's market-data note (its age over 14 days, or "PriceIQ unreachable, last answer …"), else null — show it under the chips. **`options: []` when the phone measured an off-list size:** every listed size is one the phone has ruled out, so none is offered (and no what-if prices are asked) — show the text only: no button, no entry, never a guessed size. |
+| `no_price` | "No market price yet" | `quote.reason` (the specific why: "This phone isn't on the rate card yet.", PriceIQ's own why, or "No rate card is active yet.") ?? "No market price yet." | model + storage, not blocked, the quote is unpriced or errored. **Text only** — no button, no sheet: nothing is typed in. Swap up stays refused with the same reason; Repair and "Customer walked away" stay choosable. (0.9.0 sent `partner_quote` here; installed apps drop the kind they don't know.) |
 | `repair_quote` | "The repair needs a quote" | the first `repair.notes` entry, or `repairNotServiced` (fallback "No book price — enter the service centre's quote.") | a model, something to repair, and the book can't price it (`needs_inspection` / `unpriced` / brand not serviced) |
 | `new_phone` | "Choose the new phone" | "No catalogue match — choose one to see the bonus." (the catalogue does have one — staff cleared the suggestion, or none ran on a desk-only case: "Choose the new phone to see the bonus.") | a model and no new phone (the suggestion found none: e.g. an iPhone at a Samsung centre) |
 
@@ -654,14 +666,11 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
   the store app's answer screen show the same.
 - **`swap.tradeInNote`:** a PriceIQ quote on market data over 14 days old → "Refurbished market price,
   week 2026-W35, 52 days old." (with " · PriceIQ unreachable, last answer …" when PriceIQ didn't answer
-  and the last good answer priced it; that alone when the data is fresh); read off the partner's app
-  (`partner_manual`) and lapsed, on an open case → "Partner quote (ref ${partnerRef}) expired — enter today's
-  quote." (the figure stays on screen for reference, marked; the same sentence is the `partner_quote` ask and
-  `actions.swap`); read off the partner's app → `Partner ref ${partnerRef}` (SwapUp never re-quotes those, so
-  it is never "re-quoting"); expired on an open case → "Quote expired — re-quoting." (a closed case's quote
-  running out after the lock is no news: no note).
+  and the last good answer priced it; that alone when the data is fresh); expired on an open case →
+  "Quote expired — re-quoting." (every quote is the system's, so it is; a closed case's quote running out
+  after the lock is no news: no note).
 - **`swap.why`**, in order: `quoteBlocked`; "Choose the phone first."; "Tap the storage to see the
-  trade-in." (the phone measured an off-list size: the storage ask's text — there is nothing to tap); `quote.reason` (fallback "No market price yet — enter a quote."); the first
+  trade-in." (the phone measured an off-list size: the storage ask's text — there is nothing to tap); `quote.reason` (fallback "No market price yet."); the first
   `conditionProblems` entry; "Record the condition." (no condition); "No trade-in price
   yet."
 - **`bonusWhy`:** no new phone → "Choose the new phone to see the bonus."; a new phone but no bonus →
@@ -669,14 +678,12 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
   override when there is one (`override.amount` / `override.bp`).
 - **`actions.repair`:** closed → "This case is closed."; nothing to repair → "Nothing to repair.";
   no refurb quote → `repair.why`; draft → "Not priced yet."; else null.
-- **`actions.swap`:** closed → "This case is closed."; no trade-in → `swap.why`; a lapsed partner-app quote →
-  "Partner quote (ref …) expired — enter today's quote."; no new phone → "Choose the new phone." (the lock
+- **`actions.swap`:** closed → "This case is closed."; no trade-in → `swap.why`; no new phone → "Choose the new phone." (the lock
   blocker's own words); not quoted → "Not priced yet."; else null. A swap the Lock screen is certain to refuse
   for a reason it can't fix there is refused here, with that reason. The IMEI, credit and
   PriceIQ / rate-card expiry blockers stay on the Lock screen (`lockBlockers`) — an expired PriceIQ or rate-card quote
-  IS re-quoted by `reprice`. The lock's expired-quote blocker is "The partner's quote has expired — re-quote."
-  for those, and the same "Partner quote (ref …) expired — enter today's quote." for a partner-app quote
-  (`expiredQuoteBlocker`), so the Lock screen never asks for a re-quote that can't happen.
+  IS re-quoted by `reprice`. The lock's expired-quote blocker is "The trade-in price has expired — re-quote."
+  (`EXPIRED_BLOCKER`) for every quote.
 - **`actions.walkAway`:** closed → "This case is closed."; else null.
 
 ### Filled without asking
@@ -684,13 +691,13 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
 - **Storage** — at Apply (§4): the phone's measurement; else the model's only size (`catalogue`);
   else the size the customer picked on their own phone (`customer` — a claim, see the lock below). A
   measured size that isn't on the model's list fills nothing and is kept as `measuredStorage`; the answer
-  says so and offers no chip. **Entering the partner's quote for that phone (`PATCH {partnerQuote}` while the
-  case has no storage) settles the storage at the measured size** (`variant: "1TB"`, `variantSource:
-  "measured"`): the partner's app priced that phone. `PATCH {variant: "1TB"}` stays refused (not on file).
+  says so ("Phone measures 1TB, not on file — no trade-in price for that size.") and offers no chip and no
+  entry: there is no trade-in price for a size not on file, and none is guessed. `PATCH {variant: "1TB"}`
+  stays refused (not on file).
   Still unknown → the `storage` ask: one row of chips, each with that size's trade-in. Those are
   **what-if** trade-in quotes (PriceIQ less defects, else the partner's rate card) (`whatIf: true`, never binding), asked by the re-price for each of the
   model's sizes while the storage is unknown and the condition is complete, consistent and not
-  camera-blocked — again only when the description changed or there are none yet — and dropped the
+  camera-blocked — again only when the description changed, there are none yet, or none is priced — and dropped the
   moment a size is set. One tap: `PATCH {variant}`. Never a guessed size.
 - **New phone** — SwapUp suggests one at Apply (`lib/domain/upgrade.ts`, rule `2026-10-17.1`): the
   newest phone in the same line as the old one (S23 Ultra → the newest S Ultra) at the same storage,
@@ -708,8 +715,10 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
   quote reads only model, storage, condition and IMEI, and each edit on the answer screen would
   otherwise extend a rate-card quote's validity or call a live partner again. `reprice` still
   recomputes the repair, bonus and decision on every call, and still re-quotes a missing or expired
-  quote. `faults`, `condition`, `modelId`, `variant`, `partnerQuote` and the camera identity override
-  still re-quote.
+  or unpriced quote. `faults`, `condition`, `modelId`, `variant` and the camera identity override still
+  re-quote. A fault or condition change the store camera contradicts is refused 409 with the camera's
+  sentence ("Camera confirmed "Cracked screen", photo 2 — removing it needs a reason."); send the same
+  patch again with `cameraOverride: {reason}` (8+ characters, kept with the advisor's name) and it saves.
 - **IMEI** — step 1 (§2d): asked first, on New trade-in (or the Session screen for a counter-QR
   trade-in), resolved once per case; Lock asks for it only when it was skipped.
 
@@ -718,13 +727,12 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
 All exist and accept Bearer:
 - `GET /api/cases/<id>`
 - `PATCH /api/cases/<id>` with one of `{variant}`, `{upgradeDeviceId}`, `{coverage}`,
-  `{manualRepair: {amount, reason} | null}`, `{partnerQuote: {amount, reference, validDays?, repairedAmount?}}`,
-  `{imei}` (resolved once — §2d), `{kymEarly}` (§2d) → the whole `CaseView`. A staff `variant` is recorded as `variantSource: "advisor"`; only
+  `{manualRepair: {amount, reason} | null}`, `{faults}` / `{condition}` (with `cameraOverride: {reason}` when
+  the camera refused it), `{imei}` (resolved once — §2d), `{kymEarly}` (§2d) → the whole `CaseView`. A staff `variant` is recorded as `variantSource: "advisor"`; only
   Apply can record `measured` / `catalogue` / `customer` (the public PATCH can't say where a size came from).
   **Re-saving the size already on the case changes nothing** (since the 2026-10-17 review): it keeps its
   `variantSource` — a size the customer typed stays `customer`, so the lock still asks for `storageSeen` —
-  and the partner is not re-asked and a partner-app quote is not cleared. Only a different size is the
-  advisor's word (re-quoted, partner-app quote cleared). Apply's own word still counts on the same size: a
+  and the partner is not re-asked. Only a different size is the advisor's word (re-quoted). Apply's own word still counts on the same size: a
   measurement turns the customer's claim into `measured`.
 - `POST /api/cases/<id>/action` with `{action: "reprice"}`, `{action: "choose_repair"}`,
   `{action: "walk_away", reason?}` or `{action: "lock", customer, checks}` (below).
@@ -853,8 +861,9 @@ At **Apply** (`POST /api/test-sessions/<id>/apply`):
      size gets the flag "Storage: customer said X, phone measures Y — measurement used."
   1b. the phone read a size that ISN'T on the model's list → nothing is patched, and no pick, single
      size or guess is used against the reading. Flag: "Storage: the phone measures 1TB, which isn't a size
-     on file (the customer said 512GB — not used). Check Settings › About phone, and enter the partner's quote
-     on the full case if it's really 1TB." The reading is kept as `measuredStorage` (§3c).
+     on file (the customer said 512GB — not used). No trade-in price for that size." (0.9.1 writes "Storage:
+     phone measures 1TB, not on file (customer said 512GB — not used) — no trade-in price for that size.";
+     older stored flags are reworded on boot.) The reading is kept as `measuredStorage` (§3c).
   2. the case already has a size for that model → nothing is patched (a claim never overwrites).
   3. **catalogue** — the model comes in one size only.
   4. **customer** — the customer picked that model and a size on its list (on the confirm card, or in

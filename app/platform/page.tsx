@@ -16,7 +16,7 @@ export const metadata = { title: "Clients & partners" };
 
 function ModePill({ mode }: { mode: PartnerMode }) {
   if (mode.kind === "partner_ratecard") return <span className="pill pill-fix">Partner rate card</span>;
-  return <span className="pill">No rate card — PriceIQ or a typed quote</span>;
+  return <span className="pill">No rate card — PriceIQ only</span>;
 }
 
 function Meta({ label, children }: { label: string; children: ReactNode }) {

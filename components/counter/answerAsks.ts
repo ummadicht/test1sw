@@ -1,19 +1,22 @@
 /**
  * The answer card's rules, kept pure so they are tested without a browser
  * (answerAsks.test.ts): which control sits under each ask, when the card quietly
- * re-quotes, what a partner quote typed in here must look like, and which "Swap up"
- * refusal the tile still has to say. Every sentence the customer reads is the
- * server's (lib/domain/offer.ts); this file only picks where it is answered.
+ * re-quotes, which "Swap up" refusal the tile still has to say, and when a condition
+ * save waits for the reason the camera asks for. Every sentence the customer reads is
+ * the server's (lib/domain/offer.ts); this file only picks where it is answered. No
+ * price is ever typed in here: the trade-in is the system's, moved only by what's wrong.
  */
 
 import type { Offer, OfferAsk, StorageOption } from "@/lib/domain/offer";
-import type { CaseView } from "@/lib/server/cases";
+import type { CasePatch, CaseView } from "@/lib/server/cases";
 import { RULESET_VERSION } from "../../lib/domain/decision.ts";
+import { CAMERA_REASON_MIN, needsCameraReason } from "../../lib/domain/gradeiqMap.ts";
 
-/** Where on this page each ask is answered, and the button that goes there. */
+export { CAMERA_REASON_MIN };
+
+/** Where on this page each ask is answered, and the button that goes there. `no_price` has none: it is text only. */
 export const ASK_STEP: Partial<Record<OfferAsk["kind"], { step: string; button: string }>> = {
   model: { step: "step-phone", button: "Choose model" },
-  partner_quote: { step: "step-tradein", button: "Enter partner quote" },
   repair_quote: { step: "step-repair", button: "Enter repair quote" },
   new_phone: { step: "step-upgrade", button: "Choose new phone" },
 };
@@ -24,16 +27,6 @@ export const ASK_MANAGER = "Ask your manager to confirm it.";
 export type AskControl =
   /** One tap each: the storage chips, with the server's note under them (old market data, PriceIQ unreachable). */
   | { kind: "chips"; options: StorageOption[]; note: string | null }
-  /**
-   * The partner's quote, typed in right on the card — the two cases nothing else on the card can
-   * answer without leaving the answer for the trade-in step:
-   *   lapsed    a quote read off the partner's app ran out. SwapUp never re-quotes a quote from the
-   *             app, so only today's from the app replaces it (the trade-in step opens the same form: partnerQuoteLapsed).
-   *   unlisted  the phone measured a size the model's list doesn't have (a 1TB Ultra). No chip can
-   *             be right; the quote entered for the phone settles its storage at the size it
-   *             measured (updateCase; the trade-in step offers the same: unlistedSize).
-   */
-  | { kind: "partner_quote_entry"; why: "lapsed" | "unlisted"; size: string | null }
   /** Go to the step that answers it. */
   | { kind: "step"; step: string; button: string }
   /** The camera says it may be another phone: a store manager records why it is the right one. */
@@ -41,17 +34,14 @@ export type AskControl =
   | { kind: "ask_manager"; text: string }
   | { kind: "none" };
 
-export function askControl(a: OfferAsk, v: Pick<CaseView, "partnerManual" | "measuredStorage">, isManager: boolean): AskControl {
+export function askControl(a: OfferAsk, v: Pick<CaseView, "measuredStorage">, isManager: boolean): AskControl {
   switch (a.kind) {
     case "storage":
       if (a.options.length) return { kind: "chips", options: a.options, note: a.note ?? null };
-      // No chips: either the phone measured a size that isn't on file, or the model has no sizes at all.
-      if (v.measuredStorage) return { kind: "partner_quote_entry", why: "unlisted", size: v.measuredStorage };
+      // No chips: the phone measured a size that isn't on file (its text says so — no price for that
+      // size, never a guessed one), or the model has no sizes at all.
+      if (v.measuredStorage) return { kind: "none" };
       return { kind: "step", step: "step-phone", button: "Choose storage" };
-    case "partner_quote":
-      // A partner-app quote on the case is always priced, so this ask can only mean it has lapsed.
-      if (v.partnerManual) return { kind: "partner_quote_entry", why: "lapsed", size: null };
-      break;
     case "blocked":
       return isManager ? { kind: "identity_override" } : { kind: "ask_manager", text: ASK_MANAGER };
   }
@@ -61,15 +51,15 @@ export function askControl(a: OfferAsk, v: Pick<CaseView, "partnerManual" | "mea
 
 /**
  * The card's one quiet re-quote, as the store app's answer screen does: an open case whose
- * partner quote has run out — then "Quote expired — re-quoting." is true. A plain reprice is
- * enough (reprice re-quotes an expired quote). Non-null = there is something to re-quote;
- * AnswerCard runs it at most ONCE per page open (a ref), so a partner whose fresh quote comes
- * back already out of date is never asked in a loop. Never for a quote read off the partner's
- * app: reprice rebuilds it as entered, so only a new one helps.
+ * quote has run out — then "Quote expired — re-quoting." is true — or that nothing priced last
+ * time (a rate card uploaded since prices it, with nobody touching the case). A plain reprice is
+ * enough (reprice re-asks both). Non-null = there is something to re-quote; AnswerCard runs it at
+ * most ONCE per page open (a ref), so a quote that comes back already out of date, or still
+ * unpriced, is never asked for in a loop.
  */
 export function autoRequoteKey(v: Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer">): string | null {
   const q = v.quote;
-  if (!v.offer?.open || !v.quoteExpired || !q || q.source.kind === "partner_manual") return null;
+  if (!v.offer?.open || !q || (!v.quoteExpired && q.status === "priced")) return null;
   return `${v.id} ${q.quotedAt} ${q.validUntil ?? ""}`;
 }
 
@@ -84,54 +74,52 @@ export function staleDecisionKey(v: Pick<CaseView, "id" | "offer"> & { decision?
   return `${v.id} ruleset ${v.decision.version}`;
 }
 
+/**
+ * Where the trade-in step offers its ONE "Re-quote": on the step itself when the price has expired
+ * or nothing priced the phone (the thing to do now), else behind "Show details" while the price is
+ * good. null = no quote to ask again, or a viewer who can't change the case.
+ */
+export function requoteSpot(v: Pick<CaseView, "quote" | "quoteExpired">, editable: boolean): "step" | "details" | null {
+  const q = v.quote;
+  if (!editable || !q) return null;
+  return v.quoteExpired || q.status !== "priced" || q.amount === null ? "step" : "details";
+}
+
 /** The tile's "Re-quote": wherever the quiet one applies, in case it failed. */
 export const requotable = (v: Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer">): boolean => autoRequoteKey(v) !== null;
 
 /**
- * A quote read off the partner's app that has run out. Re-quoting can't renew it (reprice rebuilds
- * it as entered), so the trade-in step opens its form for today's quote instead of offering a Re-quote.
- */
-export const partnerQuoteLapsed = (v: Pick<CaseView, "partnerManual" | "quoteExpired" | "quote">): boolean =>
-  !!v.partnerManual && v.quoteExpired && v.quote?.source.kind === "partner_manual";
-
-/**
  * The size the phone measured when it isn't on the model's list (a 1TB Ultra on file as
  * 256/512GB), while the case has no storage: the server's storage ask then offers no chip
- * (lib/domain/offer.ts). The trade-in step takes the partner's quote for it, which settles the storage at
- * that size (cases.ts updateCase) — the Phone step can't, its chips are the sizes the phone ruled out. null otherwise.
+ * (lib/domain/offer.ts) and the trade-in step says there is no trade-in price for that size —
+ * the Phone step's chips are the sizes the phone ruled out. null otherwise.
  */
 export function unlistedSize(v: Pick<CaseView, "device" | "measuredStorage" | "offer">): string | null {
   if (!v.device || v.device.variant || !v.measuredStorage) return null;
   return v.offer?.asks.some((a) => a.kind === "storage" && a.options.length === 0) ? v.measuredStorage : null;
 }
 
-/** The server's own check on the identity override (cases.ts updateCase): a reason of at least 8 characters, trimmed. */
-export const IDENTITY_REASON_MIN = 8;
-export const identityReasonOk = (reason: string): boolean => reason.trim().length >= IDENTITY_REASON_MIN;
-
-/** "18,800" or "₹18800" → 18800; anything but whole rupees → null. */
-export function wholeRupees(t: string): number | null {
-  const s = t.replace(/[,\s₹]/g, "");
-  return /^\d+$/.test(s) ? Number(s) : null;
-}
-
-/** The server's limit on a partner quote (cases.ts updateCase). */
-const MAX_RUPEES = 500_000;
+/**
+ * The server's own check on a reason given against the camera (cases.ts updateCase, CAMERA_REASON_MIN):
+ * at least 8 characters, trimmed — for a correction of what it confirmed and for the identity override alike.
+ */
+export const cameraReasonOk = (reason: string): boolean => reason.trim().length >= CAMERA_REASON_MIN;
+export const IDENTITY_REASON_MIN = CAMERA_REASON_MIN;
+export const identityReasonOk = cameraReasonOk;
 
 /**
- * Why a partner quote typed on the card can't be saved yet — the server's own sentences
- * (cases.ts updateCase, partnerQuote), the same as the store app's PartnerQuoteSheet — or null.
+ * A condition save the server refused because the camera confirmed the phone worse (409, "Camera
+ * confirmed "Cracked screen", photo 2 — removing it needs a reason."): the change is kept, with that
+ * sentence, for ONE reason field (CaseWorkspace). null = nothing to hold — the save went through,
+ * failed for another reason, or was not a fault or condition change (the identity override has its own).
  */
-export function partnerQuoteProblem(amount: string, reference: string, repaired: string): string | null {
-  const n = wholeRupees(amount);
-  if (n === null || n <= 0 || n > MAX_RUPEES) return "Quote: whole rupees only.";
-  if (!/^[A-Z0-9-]{4,40}$/.test(reference.trim().toUpperCase())) return "Enter the app's reference code.";
-  if (repaired.trim()) {
-    const r = wholeRupees(repaired);
-    if (r === null || r < n) return "Repaired value must be at least the quote.";
-  }
-  return null;
+export function heldForReason(patch: CasePatch, error: string | null): { patch: CasePatch; why: string } | null {
+  const describes = patch.faults !== undefined || patch.condition !== undefined || !!patch.conditionFromFaults;
+  return describes && !patch.cameraOverride && needsCameraReason(error) ? { patch, why: error! } : null;
 }
+
+/** The held change, sent again with the advisor's reason — the shape updateCase reads (kept with their name). */
+export const withCameraReason = (patch: CasePatch, reason: string): CasePatch => ({ ...patch, cameraOverride: { reason: reason.trim() } });
 
 /** The tile's own link when no new phone is chosen. */
 export const CHOOSE_NEW_PHONE_LINK = "Choose new phone";
@@ -140,8 +128,7 @@ const SAYS_CHOOSE_NEW_PHONE = /^choose (?:the |a )?new phone\.?$/i;
 
 /**
  * Why "Swap up" is refused, said once in the trade-in tile — and not at all when the tile already
- * says it: as its why (no trade-in), as its warn note (a lapsed partner-app quote), or as its
- * "Choose the new phone" link.
+ * says it: as its why (no trade-in), as its warn note, or as its "Choose the new phone" link.
  */
 export function swapRefusal(o: Offer): string | null {
   const no = o.actions.swap;

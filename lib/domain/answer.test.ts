@@ -18,7 +18,6 @@ function f1(over: Partial<AnswerInput> = {}): AnswerInput {
     status: "quoted",
     condition: CRACKED_DENTED,
     market: { amount: 25_000, source: "partner_manual", priceGrade: null },
-    stale: false,
     quoteExpired: false,
     quoteBlocked: false,
     repair: { amount: 34_096, covered: false, coverage: "none", nothingToRepair: false },
@@ -160,7 +159,7 @@ test("answer F2: no price yet — one sentence for the customer, never half an o
   assert.deepEqual(customerAnswer(a), F2);
   // Staff still see what there is: the grade and the repair.
   assert.deepEqual(a.lines.map((l) => l.key), ["grade", "repair"]);
-  for (const over of [{ stale: true }, { quoteExpired: true }, { quoteBlocked: true }] as Partial<AnswerInput>[]) {
+  for (const over of [{ quoteExpired: true }, { quoteBlocked: true }] as Partial<AnswerInput>[]) {
     assert.deepEqual(customerAnswer(buildAnswer(f1(over))), F2, JSON.stringify(over));
   }
 });

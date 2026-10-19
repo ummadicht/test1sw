@@ -28,14 +28,11 @@ export function sellSub(x: {
   market: Market;
   /** The partner's repaired quote's own reason, when it has none. */
   repairedReason: string | null;
-  /** The trade-in is a quote typed in from the partner's app. */
-  manualQuote: boolean;
   partner: string;
 }): string | null {
   const m = x.market;
   if (x.sellBasis === "market" && m.amount !== null) return sellSourceLine(m);
   if (x.sellBasis === "partner") return "Partner's repaired price";
   if (x.repairedReason) return x.repairedReason;
-  if (x.manualQuote) return "Not given — enter it from the partner app.";
   return x.sellWhy;
 }

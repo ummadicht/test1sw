@@ -23,10 +23,11 @@ import { SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LABEL } from "./condition.ts
 import { MARKET_GRADES, MARKET_GRADE_LETTER, isDefectState, tradeInGrade, type MarketGrade } from "./marketSell.ts";
 
 /**
- * Where a trade-in price came from, best first (lib/server/tradeIn.ts asks in this order): a
- * quote staff typed in from the partner's app, PriceIQ's refurbished-market price less the
- * markdown and defects (lib/domain/priceiqTradeIn.ts), the partner's uploaded rate card.
- * `none` = nothing priced it ("No market price yet — enter a quote"). Never a made-up price.
+ * Where a trade-in price came from, best first (lib/server/tradeIn.ts asks in this order):
+ * PriceIQ's refurbished-market price less the markdown and defects (lib/domain/priceiqTradeIn.ts),
+ * the partner's uploaded rate card. `none` = nothing priced it ("No market price yet", with why).
+ * Never a made-up price, never a typed one. `partner_manual` is a quote an older build let staff
+ * type in: kept as a kind so its history still reads, never written again (an open case re-asks it).
  */
 export type PriceSourceKind = "partner_manual" | "priceiq" | "partner_ratecard" | "none";
 export const PRICE_SOURCE_KINDS: readonly PriceSourceKind[] = ["partner_manual", "priceiq", "partner_ratecard", "none"];
@@ -171,18 +172,16 @@ export type RateQuote =
     }
   | { status: "unpriced"; reason: string };
 
+/** The card is active, but the phone (model + storage) is not on it. */
+export const NOT_ON_CARD = "This phone isn't on the rate card yet.";
+
 export function findEntry(card: RateCard, modelId: string, variant: string): RateEntry | null {
   return card.entries.find((e) => e.modelId === modelId && e.variant === variant) ?? null;
 }
 
 export function priceFromCard(card: RateCard, modelId: string, variant: string, a: ConditionAnswers): RateQuote {
   const entry = findEntry(card, modelId, variant);
-  if (!entry) {
-    return {
-      status: "unpriced",
-      reason: "No rate-card price for this model and storage — ask the partner.",
-    };
-  }
+  if (!entry) return { status: "unpriced", reason: NOT_ON_CARD };
   const d = card.deductions;
   // A row with grade prices: the price at the phone's look (or the next lower grade it lists), and
   // the looks are NOT taken off again — the grade priced them. Every other deduction applies once.

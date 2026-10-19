@@ -64,7 +64,7 @@ and say so in your final report.
 ## Honesty rules (non-negotiable — the user has rejected "theatre" before)
 
 1. No made-up prices and no sample prices: a trade-in comes from PriceIQ, the partner's uploaded
-   rate card, or a quote staff typed in — none of them → "No market price yet — enter a quote".
+   rate card — none of them → "No market price yet", with the reason. Never a typed price (0.9.1).
    Market data over 14 days old is shown with its age. Show the source label/effective date for
    partner prices. A test programme says "Test programme — no real money" (`AppShell`).
    Screens never name the partner company — "the partner" or the partner org's own name.
@@ -101,12 +101,12 @@ href there must exist when you are done (between all builders).
 - `updateCase(u, id, patch: CasePatch) → Promise<CaseView>` — CasePatch fields:
   `modelId, variant, imei, faults: FaultId[], coverage: "none"|"warranty"|"care_plus",
   condition: ConditionAnswers, conditionFromFaults: true, customer: {name, phone},
-  manualRepair: {amount, reason}|null, partnerQuote: {amount, reference, validDays?, repairedAmount?}|null,
+  manualRepair: {amount, reason}|null, partnerQuote: refused 400 unless null (0.9.1 — prices are never typed in),
   upgradeDeviceId: string|null`. Re-prices automatically.
 - `reprice(u, id, {requote?: boolean}) → Promise<CaseView>`
 - `setBonusOverride(u, id, {bp: number|null, reason?}) → Promise<CaseView>` (store_manager+)
 - `chooseRepair(u, id)`, `walkAway(u, id, reason?)`, `lockTradeIn(u, id, {customer: {name, phone, idType, idLast4}, checks: {ownership, simRemoved, imeiMatches, noFinanceLock, kym, imeiCheckAck?}})`, `cancelTradeIn(u, id, reason)` (store_manager+), `recordDataClear(u, id, {accountsSignedOut, resetDone, setupScreenSeen, noPreviousAccount, note?})` (store staff, `locked`/`in_pickup`, once — the customer's own factory reset after acceptance, labelled "not a certified erasure"; factory reset + account sign-out moved here from the lock checks on 2026-10-16)
-- `CaseView` fields: `id ref status storeName storeCode advisorName customer device{modelId brand model series variant releaseYear supportEndYear ageYears} imei imeiCheck faults coverage condition conditionProblems manualRepair partnerManual repairNotServiced repair(RepairEstimate) quote(PartnerQuote) quoteExpired repairedQuote upgrade{deviceId label model series variant price supportEndYear} bonus{bp amount basisAmount steps[] clampedBy fundedBy campaignName override} decision(Decision) checks tradeValue premiumValue bonusValue payable pickupId clearance{outcome accepted shortfall reason by at} settledAt demo createdAt updatedAt lockedAt closedAt partner{kind label why partnerName} creditCheck lockBlockers[]`
+- `CaseView` fields: `id ref status storeName storeCode advisorName customer device{modelId brand model series variant releaseYear supportEndYear ageYears} imei imeiCheck faults coverage condition conditionProblems manualRepair repairNotServiced repair(RepairEstimate) quote(PartnerQuote) quoteExpired repairedQuote upgrade{deviceId label model series variant price supportEndYear} bonus{bp amount basisAmount steps[] clampedBy fundedBy campaignName override} decision(Decision) checks tradeValue premiumValue bonusValue payable pickupId clearance{outcome accepted shortfall reason by at} settledAt demo createdAt updatedAt lockedAt closedAt partner{kind label why partnerName} creditCheck lockBlockers[]`
 - `PartnerQuote`: `status amount lines[{label bp? amount}] source{kind label effectiveFrom?} partner partnerRef quotedAt validUntil reason?`
 - `Decision`: `recommendation("repair"|"upgrade"|"either"|"no_repair"|"cannot_say") headline favoursCustomer("keep"|"let_go"|"level"|null) repair{pays keepsValue net covered} upgrade{label newPrice tradeIn bonus pays extraVsRepair} metrics{repairRatio valueAddedByRepair yearsLeftOld yearsLeftNew costPerYearRepair costPerYearUpgrade} signals[{code points strength text}] missing[] caveats[]`
 

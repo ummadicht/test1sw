@@ -17,11 +17,10 @@ test("the sell line names the refurbished market and PriceIQ — never the partn
 });
 
 test("under 'Sell': the market listing, else the partner's repaired price, else why not", () => {
-  const base = { sellWhy: "No quote yet.", repairedReason: null, manualQuote: false, partner: "Buyback Partner (demo)" };
+  const base = { sellWhy: "No quote yet.", repairedReason: null, partner: "Buyback Partner (demo)" };
   assert.equal(sellSub({ ...base, sellBasis: "market", market: LISTED }), "Refurbished market price ₹32,000 (Good) − 2% · PriceIQ");
   assert.equal(sellSub({ ...base, sellBasis: "partner", market: { amount: null, why: "PriceIQ has no refurbished market price for the Galaxy S23 Ultra 256GB." } }), "Partner's repaired price");
   assert.equal(sellSub({ ...base, sellBasis: "partner", market: { amount: null, why: null } }), "Partner's repaired price");
   assert.equal(sellSub({ ...base, sellBasis: null, market: { amount: null, why: null }, repairedReason: "Not available for this model." }), "Not available for this model.");
-  assert.equal(sellSub({ ...base, sellBasis: null, market: { amount: null, why: null }, manualQuote: true }), "Not given — enter it from the partner app.");
   assert.equal(sellSub({ ...base, sellBasis: null, market: { amount: null, why: null } }), "No quote yet.");
 });

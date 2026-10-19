@@ -26,8 +26,9 @@ for (const k of Object.keys(process.env)) if (k.startsWith("PRICEIQ_")) delete p
 
 const origLog = console.log;
 console.log = () => {};
-const { ensureSeeded, renameDemoPartner, renameDemoPartnerIds, removeExampleCases, retireOldQuotes, RETIRED_QUOTE_CANCEL_REASON, demoPartnerId, DEMO_PARTNER, SEEDED_EXAMPLE_CASES } = await import("./seed.ts");
-const { quoteSourceLabel, retiredSource, RETIRED_QUOTE_LABEL } = await import("../domain/ratecard.ts");
+const { ensureSeeded, renameDemoPartner, renameDemoPartnerIds, removeExampleCases, retireOldQuotes, rewordQuoteTexts, RETIRED_QUOTE_CANCEL_REASON, demoPartnerId, DEMO_PARTNER, SEEDED_EXAMPLE_CASES } = await import("./seed.ts");
+const { quoteSourceLabel, retiredSource, NOT_ON_CARD, RETIRED_QUOTE_LABEL } = await import("../domain/ratecard.ts");
+const { NO_MARKET_PRICE } = await import("../domain/offer.ts");
 const { checkLedger } = await import("../domain/credit.ts");
 await ensureSeeded();
 const { db } = await import("./db.ts");
@@ -62,7 +63,7 @@ test("a new database: the test programmes and their logins — no rate card of S
   for (const login of ["advisor", "manager", "samsung", "partner", "platform", "advisor.kor", "xc.advisor"]) assert.ok(authenticate(login, "swapup2026"), login);
   assert.equal(demoPartnerId(), DEMO_PARTNER.orgId);
   assert.equal(one<{ name: string }>(`SELECT name FROM orgs WHERE id = ?`, DEMO_PARTNER.orgId).name, "Buyback Partner (demo)");
-  assert.equal(count(`SELECT COUNT(*) n FROM rate_cards`), 0, "no SAMPLE card: prices come from PriceIQ, the partner's card or a typed quote");
+  assert.equal(count(`SELECT COUNT(*) n FROM rate_cards`), 0, "no SAMPLE card: prices come from PriceIQ or the partner's card");
   assert.equal(count(`SELECT COUNT(*) n FROM cases`), 0, "no example cases");
   assert.equal(count(`SELECT COUNT(*) n FROM pickups`), 0);
   assert.equal(count(`SELECT COUNT(*) n FROM credit_ledger`), 0);
@@ -140,6 +141,53 @@ test("a database seeded under the partner's former name: renamed once — read f
   assert.equal(one<{ name: string }>(`SELECT name FROM orgs WHERE id = ?`, P.orgId).name, OLD);
   d.prepare(`UPDATE orgs SET name = ? WHERE id = ?`).run(P.name, P.orgId);
   d.prepare(`DELETE FROM pickups WHERE id IN ('pk_seeded', 'pk_typed')`).run();
+});
+
+test("stored words that asked staff to type a trade-in price are reworded on every boot — SwapUp's exact sentences only, idempotent", () => {
+  const d = db();
+  const u = userNamed("advisor");
+  const c = cases.createCase(u, { customerName: "Reword test" });
+  const quote = { status: "unpriced", amount: null, lines: [], source: { kind: "none", label: "No market price" }, partner: "Buyback Partner (demo)", partnerRef: null, reason: "No market price yet — enter a quote." };
+  const chips = [
+    { variant: "256GB", amount: null, reason: "No rate-card price for this model and storage — ask the partner." },
+    { variant: "512GB", amount: 20_000, reason: null },
+  ];
+  const typed = "Customer will enter a quote from another shop later";
+  const camera = {
+    flags: [
+      "Storage: phone measures 1TB, not on file (customer said 256GB — not used) — check Settings, then enter the partner's quote.",
+      "Storage: the phone measures 1TB, which isn't a size on file (the customer said 512GB — not used). Check Settings › About phone, and enter the partner's quote on the full case if it's really 1TB.",
+      "Not camera-graded — no camera grade came back before Apply. The condition is the advisor's.",
+    ],
+    overrides: [{ by: "Asha", userId: u.id, reason: typed, at: "2026-10-18T10:00:00Z", items: [] }],
+  };
+  d.prepare(`UPDATE cases SET quote = ?, repaired_quote = ?, storage_quotes = ?, camera_check = ? WHERE id = ?`).run(JSON.stringify(quote), JSON.stringify(quote), JSON.stringify(chips), JSON.stringify(camera), c.id);
+
+  // This case, and any other still holding them (the rename above wrote two of these sentences itself).
+  const changed = rewordQuoteTexts();
+  assert.ok(changed.includes(c.ref), changed.join(", "));
+  const read = () => one<{ quote: string; repaired_quote: string; storage_quotes: string; camera_check: string }>(`SELECT quote, repaired_quote, storage_quotes, camera_check FROM cases WHERE id = ?`, c.id);
+  const r = read();
+  assert.equal(JSON.parse(r.quote).reason, "No market price yet.");
+  assert.equal(JSON.parse(r.quote).reason, NO_MARKET_PRICE, "the words the code writes today");
+  assert.equal(JSON.parse(r.repaired_quote).reason, "No market price yet.");
+  assert.deepEqual(JSON.parse(r.storage_quotes), [{ ...chips[0], reason: "This phone isn't on the rate card yet." }, chips[1]]);
+  assert.equal(JSON.parse(r.storage_quotes)[0].reason, NOT_ON_CARD);
+  const cam = JSON.parse(r.camera_check);
+  assert.deepEqual(cam.flags, [
+    "Storage: phone measures 1TB, not on file (customer said 256GB — not used) — no trade-in price for that size.",
+    "Storage: the phone measures 1TB, which isn't a size on file (the customer said 512GB — not used). No trade-in price for that size.",
+    camera.flags[2],
+  ]);
+  assert.equal(cam.overrides[0].reason, typed, "what a person typed is never touched");
+  assert.doesNotMatch(JSON.stringify(r), /enter a quote\.|ask the partner\.|enter the partner's quote/);
+  // Idempotent: the next boot finds nothing to change, and changes nothing.
+  assert.deepEqual(rewordQuoteTexts(), []);
+  assert.deepEqual(read(), r);
+  assert.equal(count(`SELECT COUNT(*) n FROM audit WHERE action = 'seed.reworded_quote_texts' AND instr(detail, ?) > 0`, c.ref), 1, "audited once");
+  assert.equal(count(`SELECT COUNT(*) n FROM cases WHERE instr(quote, 'enter a quote') > 0 OR instr(camera_check, 'enter the partner') > 0 OR instr(storage_quotes, 'ask the partner') > 0`), 0);
+  // It runs on every boot, after the one-time passes.
+  assert.match(readFileSync(join(ROOT, "lib/server/seed.ts"), "utf8"), /retireOldQuotes\(\);[^]*?rewordQuoteTexts\(\);/);
 });
 
 test("the login moves to 'partner' only when nobody else has it", () => {

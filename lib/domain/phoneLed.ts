@@ -238,7 +238,7 @@ export function storageFromTest(i: {
     return {
       variant: null,
       source: null,
-      flag: `Storage: phone measures ${reading}, not on file${said ? ` (customer said ${said} — not used)` : typed ? ` (customer's earlier ${i.caseVariant} removed)` : ""} — check Settings, then enter the partner's quote.`,
+      flag: `Storage: phone measures ${reading}, not on file${said ? ` (customer said ${said} — not used)` : typed ? ` (customer's earlier ${i.caseVariant} removed)` : ""} — no trade-in price for that size.`,
       ...(typed ? { clear: true as const } : {}),
     };
   }
@@ -266,9 +266,9 @@ export function storageFromTest(i: {
  * Re-saving the size already on the case is not a new fact. From staff it keeps the
  * source it has: tapping the chip that is already pressed must not turn a size the
  * customer TYPED into the advisor's (that would drop the lock's "Settings › About
- * phone" tick on a size nobody checked), nor re-ask the partner, nor clear a quote
- * read off the partner's app. Apply's word still counts on the same size: a
- * measurement upgrades a claim. A size of a model that just changed is always new.
+ * phone" tick on a size nobody checked), nor re-ask the partner. Apply's word still
+ * counts on the same size: a measurement upgrades a claim. A size of a model that just
+ * changed is always new.
  */
 export function storageOnSave(i: {
   next: string | null;

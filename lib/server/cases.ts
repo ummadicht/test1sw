@@ -24,7 +24,7 @@ import { estimateRepair, type Coverage, type ManualQuote, type RepairEstimate, t
 import { bestCampaign, type BonusResult, type Campaign } from "../domain/bonus";
 import { decide, type Decision } from "../domain/decision";
 import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
-import { buildOffer, expiredQuoteBlocker, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
+import { buildOffer, EXPIRED_BLOCKER, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
 import { customerAnswer, type CustomerAnswer } from "../domain/answer";
 import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } from "../domain/premium";
 import { RuleError } from "../domain/errors";
@@ -42,6 +42,7 @@ import {
   applyCameraFloor,
   blankCameraCheck,
   cameraOverrideProblems,
+  CAMERA_REASON_MIN,
   identityBlock,
   reconcileFaultSources,
 } from "../domain/gradeiqMap";
@@ -122,9 +123,6 @@ export type TradeModel = {
   care_plus_fee: number | null;
 };
 
-/** A quote the advisor read off the partner's own app, with its reference code. */
-export type PartnerManual = { amount: number; reference: string; validUntil: string; repairedAmount: number | null; by: string; at: string };
-
 type CaseRow = {
   id: string;
   ref: string;
@@ -144,6 +142,7 @@ type CaseRow = {
   coverage: Coverage;
   condition: string | null;
   manual_repair: string | null;
+  /** A quote an older build let staff type in from the partner's app. Never written now (updateCase refuses it), never priced from. */
   partner_manual: string | null;
   repair: string | null;
   quote: string | null;
@@ -358,7 +357,6 @@ export type CaseView = {
   refurbCost: RefurbCost | null;
   /** SELL: what the phone sells for refurbished — PriceIQ's refurbished-market listing less 2–5% (lib/domain/marketSell.ts). */
   marketSell: CaseMarketSell;
-  partnerManual: PartnerManual | null;
   /** The centre does not repair this brand — only an outside quote can be compared. */
   repairNotServiced: string | null;
   repair: RepairEstimate | null;
@@ -397,7 +395,7 @@ export type CaseView = {
   /**
    * The size the phone read off its own disk at Apply, whatever the model's list says (null = it
    * didn't measure). When it isn't on the list (a 1TB Ultra on file as 256/512GB) the storage stays
-   * empty, and a partner quote entered for the phone settles it at this size (updateCase).
+   * empty and there is no trade-in price for that size — never a guessed one.
    */
   measuredStorage: string | null;
   /** THE ANSWER — refurb quote vs trade-in + bonus, and the one thing still missing (lib/domain/offer.ts). null for the partner. */
@@ -559,7 +557,6 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     manualRepair: parseJson<ManualQuote | null>(c.manual_repair, null),
     refurbCost: parseJson<RefurbCost | null>(c.refurb_cost, null),
     marketSell: caseMarketSell({ modelId: tm?.id ?? null, variant: c.variant, brand: tm?.brand ?? null, model: tm?.model ?? null, condition }),
-    partnerManual: parseJson<PartnerManual | null>(c.partner_manual, null),
     repairNotServiced: repairNotServicedFor(tm, org),
     repair: parseJson<RepairEstimate | null>(c.repair, null),
     quote,
@@ -662,8 +659,8 @@ function lockBlockers(v: CaseView): string[] {
   if (!v.condition) out.push("Record the condition.");
   if (v.conditionProblems.length) out.push("Condition is better than the faults allow.");
   if (!v.quote || v.quote.status !== "priced" || !v.quote.amount) out.push("No trade-in price yet.");
-  // Re-quote fixes a rate-card or live quote; one read off the partner's app needs today's from the app.
-  else if (v.quoteExpired) out.push(expiredQuoteBlocker(v.quote));
+  // Re-quote fixes it: every quote is the system's (PriceIQ, the rate card).
+  else if (v.quoteExpired) out.push(EXPIRED_BLOCKER);
   if (!v.upgrade) out.push("Choose the new phone.");
   // We pay + the bonus must come off the new phone: never a share floored at zero (premium.ts exchange).
   else if (v.quote?.status === "priced" && v.quote.amount) {
@@ -1075,8 +1072,11 @@ export type CasePatch = {
   manualRepair?: { amount: number; reason: string } | null;
   /** The store's refurb cost (BUY vs SELL). Changes no price: the partner is not re-asked. */
   refurbCost?: { amount: number } | null;
-  /** The partner's quote read off its own app (amount + reference code). */
-  partnerQuote?: { amount: number; reference: string; validDays?: number; repairedAmount?: number | null } | null;
+  /**
+   * Retired (owner, 2026-10-19): the trade-in price is the system's, never typed in. Anything but
+   * null is refused (400) before the case is read; null changes nothing. Old SwapUp Store builds still send it.
+   */
+  partnerQuote?: unknown;
   upgradeDeviceId?: string | null;
   /**
    * Record the phone as BETTER than the store camera confirmed (remove a fault
@@ -1088,6 +1088,9 @@ export type CasePatch = {
 };
 
 const EDITABLE: CaseStatus[] = ["draft", "quoted"];
+
+/** The refusal of a typed trade-in price (CasePatch.partnerQuote), word for word. */
+export const PRICE_NOT_TYPED = "Prices can't be typed in — change what's wrong to change the price.";
 
 /**
  * What only the server's own callers may say about a change — never the public
@@ -1133,6 +1136,9 @@ async function resolveNewImei(u: SessionUser, id: string, raw: unknown, withImei
  */
 export async function updateCase(u: SessionUser, id: string, patch: CasePatch, internal: UpdateInternal = {}): Promise<CaseView> {
   requireCounter(u);
+  // A typed trade-in price is refused before anything is read or written (no IMEI lookup, no half
+  // save): what's wrong with the phone is the only thing that changes its price.
+  if (patch.partnerQuote !== undefined && patch.partnerQuote !== null) throw new HttpError(400, PRICE_NOT_TYPED);
   // THE IMEI FIRST: a new IMEI is resolved once (lib/server/imeiResolve.ts) — the free TAC model and
   // GradeIQ's lookup (≤ 10 s) — BEFORE the case is read for the save, so no network call sits
   // between that read and the write.
@@ -1283,13 +1289,13 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     const next: CaseCameraCheck = { ...camera, overrides: [...camera.overrides] };
     let changed = false;
     if (problems.length) {
-      if (reason.length < 8) throw new HttpError(409, problems[0].why);
+      if (reason.length < CAMERA_REASON_MIN) throw new HttpError(409, problems[0].why);
       next.overrides.push({ by: u.name, userId: u.id, reason, at: nowIso(), items: problems.map((p) => p.key) });
       changed = true;
     }
     if (patch.cameraOverride?.identity && identityBlock(camera)) {
       if (u.role !== "store_manager") throw new HttpError(403, "Only a store manager can override the camera's identity check.");
-      if (reason.length < 8) throw new HttpError(400, "Say how you checked it's this phone.");
+      if (reason.length < CAMERA_REASON_MIN) throw new HttpError(400, "Say how you checked it's this phone.");
       next.identityOverride = { by: u.name, userId: u.id, reason, at: nowIso(), items: ["identity"] } satisfies RecordedOverride;
       changed = true;
       pricingChanged = true;
@@ -1330,46 +1336,10 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     }
     audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.refurb_cost", entity: "case", entityId: id, detail: { amount: patch.refurbCost?.amount ?? null } });
   }
-  // A partner quote read off its app describes ONE device in ONE condition. If
-  // the description changes, that quote no longer belongs to this phone.
+  // A quote an older build let staff type in describes ONE device in ONE condition: once the
+  // description changes it no longer belongs to this phone (it is never priced from either way).
   const describes = modelPatch !== undefined || variantChanged || patch.faults !== undefined || patch.condition !== undefined || patch.conditionFromFaults;
   if (describes && c.partner_manual) sets.partner_manual = null;
-  if (patch.partnerQuote !== undefined) {
-    if (patch.partnerQuote === null) sets.partner_manual = null;
-    else {
-      const amount = Number(patch.partnerQuote.amount);
-      const reference = String(patch.partnerQuote.reference || "").trim().toUpperCase();
-      const days = patch.partnerQuote.validDays === undefined ? 3 : Number(patch.partnerQuote.validDays);
-      const rep = patch.partnerQuote.repairedAmount;
-      const repairedAmount = rep === null || rep === undefined || (rep as unknown) === "" ? null : Number(rep);
-      if (!Number.isInteger(amount) || amount <= 0 || amount > 500_000) throw new HttpError(400, "Enter the partner's quote as a whole rupee amount.");
-      if (!/^[A-Z0-9-]{4,40}$/.test(reference)) throw new HttpError(400, "Enter the partner app's quote reference.");
-      if (!Number.isInteger(days) || days < 1 || days > 30) throw new HttpError(400, "Quote validity must be 1–30 days.");
-      if (repairedAmount !== null && (!Number.isInteger(repairedAmount) || repairedAmount < amount))
-        throw new HttpError(400, "Repaired value must be at least the as-is quote.");
-      sets.partner_manual = JSON.stringify({
-        amount,
-        reference,
-        validUntil: new Date(Date.now() + days * 86_400_000).toISOString(),
-        repairedAmount,
-        by: u.name,
-        at: nowIso(),
-      } satisfies PartnerManual);
-      // The phone measured a size the model's list doesn't have (a 1TB Ultra on file as
-      // 256/512GB), so no chip could be right and the answer said: check Settings, and enter
-      // the partner's quote if it's really that size. The quote entered for it settles the
-      // storage at the size the phone measured — the partner's app priced that phone.
-      const size = "variant" in sets ? (sets.variant as string | null) : c.variant;
-      const measured = "measured_storage" in sets ? (sets.measured_storage as string | null) : c.measured_storage;
-      const tmNow = !size && measured ? getTradeModel("model_id" in sets ? (sets.model_id as string | null) : c.model_id) : null;
-      if (tmNow && measured && !parseJson<string[]>(tmNow.variants, []).includes(measured)) {
-        sets.variant = measured;
-        sets.variant_source = "measured";
-        variantChanged = true;
-      }
-    }
-    pricingChanged = true;
-  }
   if (patch.upgradeDeviceId !== undefined) {
     if (!patch.upgradeDeviceId) sets.upgrade = null;
     else {
@@ -1481,42 +1451,22 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
   }
 
   // 2. The trade-in quote and the repaired value — only with a complete, consistent description of
-  //    the phone. A quote typed from the partner's app stands; otherwise tradeIn.ts asks, best first.
+  //    the phone. Always the system's: tradeIn.ts asks, best first.
   let quote = parseJson<PartnerQuote | null>(c.quote, null);
   let repairedQuote = parseJson<PartnerQuote | null>(c.repaired_quote, null);
-  const pm = parseJson<PartnerManual | null>(c.partner_manual, null);
   const consistent = !!condition && conditionFloor(condition, faults).length === 0;
   // A quote from a source that no longer exists (an older build's) is re-asked like a lapsed one.
   const expired = (!!quote?.validUntil && Date.parse(quote.validUntil) < Date.now()) || (!!quote && retiredSource(quote.source?.kind));
   const partnerId = orgPartnerId(org.id);
-  const partnerName = getOrg(partnerId)?.name ?? "Partner";
   // The camera says this is not the phone on the case: no price until a store manager resolves it.
   const blocked = identityBlock(parseJson<CaseCameraCheck | null>(c.camera_check, null));
   if (!tm || !c.variant || !condition || !consistent || blocked) {
     quote = null;
     repairedQuote = null;
-  } else if (pm) {
-    // Read off the partner's own app: binding as entered, with its reference.
-    quote = {
-      status: "priced",
-      amount: pm.amount,
-      lines: [{ label: `${partnerName} quote · ref ${pm.reference}`, amount: pm.amount }],
-      source: { kind: "partner_manual", label: `Entered from the ${partnerName} app by ${pm.by}` },
-      partner: partnerName,
-      partnerRef: pm.reference,
-      quotedAt: pm.at,
-      validUntil: pm.validUntil,
-    };
-    if (pm.repairedAmount !== null) {
-      repairedQuote = { ...quote, amount: pm.repairedAmount, lines: [{ label: `${partnerName} value in repaired condition`, amount: pm.repairedAmount }], validUntil: null };
-    } else if (!faults.length) {
-      repairedQuote = { ...quote, validUntil: null };
-    } else {
-      // The repaired value beside a typed quote: the partner's uploaded rate card, or none.
-      const what = await partnerQuote({ partnerId, modelId: tm.id, variant: c.variant, answers: healedCondition(condition, faults), whatIf: true });
-      repairedQuote = what.status === "priced" ? what : null;
-    }
-  } else if (opts.requote || !quote || expired || quote.source.kind === "partner_manual") {
+  } else if (opts.requote || !quote || expired || quote.source.kind === "partner_manual" || quote.status !== "priced") {
+    // Asked again whenever there is no good price to stand on: the description changed, none yet,
+    // expired, an older build's typed quote, or nothing priced it last time (a rate card uploaded
+    // since reaches the case on its next re-price, with nobody touching it).
     // PriceIQ less the markdown and defects, else the partner's rate card, else no price (tradeIn.ts).
     quote = await tradeInQuote({
       partnerId,
@@ -1546,14 +1496,15 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
   // 2b. Storage unknown: the partner's what-if price for EACH size, so the answer
   //     asks with one row of priced chips instead of a form — never a guessed
   //     size. Kept only while the storage is unknown; asked again only when the
-  //     description changed (requote) or there are none yet. Never for a phone that
+  //     description changed (requote), there are none yet, or none of them is priced
+  //     (as the case quote: a card uploaded since prices them). Never for a phone that
   //     measured a size off the model's list: every size on it is one the phone has
   //     ruled out, so there is nothing to offer and nothing to ask the partner.
   let storageQuotes = parseJson<StorageQuote[] | null>(c.storage_quotes, null);
   const sizes = tm ? parseJson<string[]>(tm.variants, []) : [];
   const measuredOffList = !!c.measured_storage && !sizes.includes(c.measured_storage);
   if (tm && !c.variant && condition && consistent && !blocked && !measuredOffList) {
-    if (opts.requote || !storageQuotes) {
+    if (opts.requote || !storageQuotes || storageQuotes.every((s) => s.amount === null)) {
       // Each size priced the way the trade-in itself will be, so the chip and the answer agree —
       // asked together, so a slow PriceIQ costs the counter one wait, not one per size.
       const out: StorageQuote[] = await Promise.all(
