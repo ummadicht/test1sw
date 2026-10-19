@@ -49,7 +49,7 @@ import { CERT_ROWS, certChoices, certifyNeeded, certifyRow, certifySignals, isCe
 import { cameraEvidence, type GiqRow } from "./gradeiqBridge";
 import type { DeviceReport } from "../domain/diagnostics";
 import type { ImeiLookup } from "./gradeiq";
-import { BLACKLISTED, imeiLookupView, isBlacklisted, lookupFor, resolveImei, tradeModelRefs, withLookup, type KymEarly, type StoredImeiLookup } from "./imeiResolve";
+import { BLACKLISTED, blacklistWarning, caseLookupView, isBlacklisted, lookupFor, resolveImei, tradeModelRefs, withLookup, type KymEarly, type StoredImeiLookup } from "./imeiResolve";
 
 /* ─────────────────────────── types ─────────────────────────── */
 
@@ -542,7 +542,8 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     imei2: c.imei2,
     imei2Check: (c.imei2_check as "valid" | "invalid" | null) ?? null,
     modelSource: tm ? readModelSource(c.model_source) : null,
-    imeiLookup: imeiLookupView(lookupFor(c.imei_lookup, c.imei)),
+    // "blacklisted" when GSMA said so for ANY IMEI ever saved on the case (lib/server/imeiResolve.ts).
+    imeiLookup: caseLookupView(c),
     imeiWarnings: imeiWarnings(c, tm),
     kymEarly: kymEarlyView(c.kym_early),
     closedReason: c.closed_reason,
@@ -628,8 +629,12 @@ function imeiOnOpenTradeIn(caseId: string, imeis: (string | null)[]): { ref: str
 
 /** What the advisor is told the moment the IMEI is on a case at the counter (the lock still decides). */
 function imeiWarnings(c: CaseRow, tm: TradeModel | null): string[] {
-  if (!EDITABLE.includes(c.status) || !c.imei) return [];
-  const out: string[] = [];
+  if (!EDITABLE.includes(c.status)) return [];
+  // A blacklisted number that isn't in the IMEI 1 slot (moved to IMEI 2, or replaced): named, so the
+  // stop on a clean-looking IMEI 1 is explained. Said with or without an IMEI on the case now.
+  const bad = blacklistWarning(c);
+  if (!c.imei) return bad ? [bad] : [];
+  const out: string[] = bad ? [bad] : [];
   const dup = imeiOnOpenTradeIn(c.id, [c.imei, c.imei2]);
   if (dup) out.push(`This IMEI is already on trade-in ${dup.ref}.`);
   // The IMEI names another model than the one on the case (staff's, or the phone's code): said, not changed.
@@ -648,7 +653,8 @@ function kymEarlyView(raw: string | null): CaseView["kymEarly"] {
 
 function lockBlockers(v: CaseView): string[] {
   const out: string[] = [];
-  // GSMA's blacklist, or an early KYM answer that isn't clear: the trade-in stops here.
+  // GSMA's blacklist (for any IMEI ever saved on the case — the view says it), or an early KYM
+  // answer that isn't clear: the trade-in stops here.
   if (v.imeiLookup?.blacklist === "blacklisted" || (v.kymEarly && v.kymEarly.status !== "clear")) out.push(BLACKLISTED);
   if (!v.device || !v.device.variant) out.push("Choose the phone's model and storage.");
   if (!v.imei) out.push("Record the IMEI (dial *#06#).");

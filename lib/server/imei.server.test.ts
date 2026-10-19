@@ -265,6 +265,39 @@ test("blacklisted (GSMA): test sessions refuse 409 {error, reason:'blacklisted'}
   assert.throws(() => cases.lockTradeIn(adv, c.id, { customer: CUSTOMER, checks: CHECKS }), (e: Error & { status?: number; extra?: Record<string, string> }) => e.status === 409 && e.message === BLACKLISTED && e.extra?.reason === "blacklisted");
 });
 
+test("blacklisted is the CASE's, and sticky: GSMA's answer for any IMEI ever saved on it stops it — moved to IMEI 2, or gone — with no second paid lookup", async () => {
+  const refused = (e: Error & { status?: number; extra?: Record<string, string> }) => e.status === 409 && e.message === BLACKLISTED && e.extra?.reason === "blacklisted";
+  const x = imeiOn(S23U);
+  const y = imeiOn(S23U);
+  fake.infos.set(x, { imei: x, brand: "Samsung", model: "Galaxy S23 Ultra", modelNumber: "SM-S918B", blacklist: "blacklisted", source: "gsma" });
+  fake.infos.set(y, { imei: y, brand: "Samsung", model: "Galaxy S23 Ultra", modelNumber: "SM-S918B", blacklist: "clean", source: "gsma" });
+  const c = fresh();
+  assert.equal((await withGiq(() => cases.updateCase(adv, c.id, { imei: x }))).imeiLookup?.blacklist, "blacklisted");
+  // The advisor taps Change and re-scans *#06#: the camera decodes IMEI 2 first, so the clean
+  // number lands in the IMEI 1 slot and the blacklisted one in IMEI 2.
+  const n = imeiCalls().length;
+  const swapped = await withGiq(() => cases.updateCase(adv, c.id, { imei: y, imei2: x }));
+  assert.deepEqual(imeiCalls().slice(n).map((k) => k.path), [`/api/imei/${y}`], "only the new IMEI 1 is looked up — never a second lookup for IMEI 2");
+  assert.equal(swapped.imeiLookup?.blacklist, "blacklisted", "the case's answer, not only IMEI 1's");
+  assert.equal(swapped.imeiLookup?.model, "Galaxy S23 Ultra");
+  assert.ok(swapped.imeiWarnings.includes(`IMEI 2 (${x}) is reported lost or stolen (GSMA).`), swapped.imeiWarnings.join(" | "));
+  await cases.updateCase(adv, c.id, { variant: "256GB", faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256 });
+  assert.throws(() => sessions.createTestSession(adv, { caseId: c.id }), refused);
+  const priced = await cases.updateCase(adv, c.id, { partnerQuote: { amount: 25_000, reference: "QX-STICKY1", validDays: 3 } });
+  assert.equal(priced.lockBlockers[0], BLACKLISTED);
+  assert.throws(() => cases.lockTradeIn(adv, c.id, { customer: CUSTOMER, checks: CHECKS }), refused);
+
+  // Gone from the case, and pushed past the short list of answers by six later IMEIs: still stopped.
+  for (let i = 0; i < 6; i++) await withGiq(() => cases.updateCase(adv, c.id, { imei: imeiOn(S23U), imei2: null }));
+  const later = cases.getCase(adv, c.id);
+  assert.deepEqual([later.imei2, later.imeiLookup?.blacklist], [null, "blacklisted"]);
+  assert.ok(later.imeiWarnings.includes(`IMEI ${x}, saved on this case before, is reported lost or stolen (GSMA).`), later.imeiWarnings.join(" | "));
+  assert.equal(later.lockBlockers[0], BLACKLISTED);
+  assert.throws(() => sessions.createTestSession(adv, { caseId: c.id }), refused);
+  assert.throws(() => cases.lockTradeIn(adv, c.id, { customer: CUSTOMER, checks: CHECKS }), refused);
+  assert.equal((db().prepare(`SELECT COUNT(*) AS n FROM test_sessions WHERE case_id = ?`).get(c.id) as { n: number }).n, 0, "no session made");
+});
+
 /* ─────────────────────────── I2.4: early KYM, early duplicate warning ─────────────────────────── */
 
 test("kymEarly: recorded with the advisor's name, needs an IMEI, refuses an unknown status; not clear → no tests; a new IMEI clears it", async () => {

@@ -175,12 +175,17 @@ CaseView += {
   imeiLookup: { brand: string | null; model: string | null; modelNumber: string | null;
                 blacklist: "clean" | "blacklisted" | "unknown"; source: string; at: string } | null;
     // the case's CURRENT IMEI, resolved; "unknown" shows as "Blacklist not checked", never as clean.
+    // blacklist is "blacklisted" whenever GSMA said so for ANY IMEI ever saved on the case — moved
+    // to IMEI 2 by a re-scan, or replaced: the stop is the case's, and sticky (IMEI 2 is never
+    // looked up on its own — one paid lookup per new IMEI 1, as before).
     // source: GradeIQ's ('esn'|'station'|'gsma'|'tac'|'stub'), or SwapUp's own "tac" / "none" when
     // GradeIQ wasn't asked or didn't answer. null = no IMEI, an invalid one, one from before 0.9.0
   imeiWarnings: string[];
     // at once, while the case is at the counter (the lock still decides):
     // "This IMEI is already on trade-in SU-AND-00031."
     // "The IMEI says Samsung Galaxy S23 Ultra; the case has Samsung Galaxy S23 — check Settings › About phone."
+    // "IMEI 2 (35…) is reported lost or stolen (GSMA)."  /  "IMEI 35…, saved on this case before, is
+    // reported lost or stolen (GSMA)." — the blacklisted number when it isn't in the IMEI 1 slot
   kymEarly: { status: "clear" | "blacklisted" | "duplicate" | "in_use"; reference: string | null } | null;
 };
 // Partners: imeiLookup = null, imeiWarnings = [].
@@ -192,7 +197,8 @@ needs an IMEI on the case (`400 "Record the IMEI first (dial *#06#)."`), is stor
 name, and goes when either IMEI changes. Lock pre-fills its KYM chip and reference from it — still
 editable, still required to be `clear` at lock. GSMA does not cover India's CEIR: KYM stays mandatory.
 
-**Blacklisted** (`imeiLookup.blacklist === "blacklisted"`, or `kymEarly.status !== "clear"` when set):
+**Blacklisted** (`imeiLookup.blacklist === "blacklisted"` — for any IMEI the case ever had — or
+`kymEarly.status !== "clear"` when set):
 `POST /api/test-sessions { caseId }` → `409 { "error": "This phone is reported lost or stolen. It can't be
 traded in.", "reason": "blacklisted" }` and no session is made; the lock refuses with the same sentence
 (and the reason), and it is the first of `lockBlockers`. Show the sentence in a red banner on the IMEI

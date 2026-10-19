@@ -22,6 +22,9 @@ import { matchModel, type DeviceReport, type TradeModelRef } from "../domain/dia
  * check digit (a misread is never paid for) → no call: the TAC's answer alone, blacklist "unknown".
  * "unknown" is shown as "Blacklist not checked", never as clean, and GSMA never replaces the
  * government's KYM check (India's CEIR), which the lock still requires.
+ *
+ * A "blacklisted" answer stops the CASE, for good: whichever slot that number is in now, or none
+ * (blacklistedLookup) — a re-scan that reads the phone's IMEI 2 first must not get it through.
  */
 
 /** SwapUp's trade models, for matching (each server module that matches keeps its own read). */
@@ -70,9 +73,48 @@ export function lookupFor(raw: string | null | undefined, imei: string | null | 
   return storedLookups(raw).find((l) => l.imei === imei) ?? null;
 }
 
-/** The list with this IMEI's answer in it (replacing an older one for the same IMEI), newest last. */
+/**
+ * The list with this IMEI's answer in it (replacing an older one for the same IMEI), newest last:
+ * the last KEEP answers — and every "blacklisted" one, however old. That stop is the case's.
+ */
 export function withLookup(raw: string | null | undefined, rec: StoredImeiLookup): string {
-  return JSON.stringify([...storedLookups(raw).filter((l) => l.imei !== rec.imei), rec].slice(-KEEP));
+  const list = [...storedLookups(raw).filter((l) => l.imei !== rec.imei), rec];
+  const recent = new Set(list.filter((l) => l.blacklist !== "blacklisted").slice(-KEEP));
+  return JSON.stringify(list.filter((l) => l.blacklist === "blacklisted" || recent.has(l)));
+}
+
+type CaseImeis = { imei: string | null; imei2?: string | null; imei_lookup?: string | null };
+
+/**
+ * GSMA's "blacklisted" for the case — for ANY IMEI ever saved on it, not only the one in the IMEI 1
+ * slot (a re-scan can put a phone's two numbers in either order, and a blacklisted number moved to
+ * IMEI 2, or replaced, is still that answer). Sticky: no later IMEI clears it. Free: the answers are
+ * already on the case — IMEI 2 is never looked up on its own. The current IMEI 1's answer first,
+ * then IMEI 2's, then the newest other.
+ */
+export function blacklistedLookup(c: CaseImeis): StoredImeiLookup | null {
+  const bad = storedLookups(c.imei_lookup).filter((l) => l.blacklist === "blacklisted");
+  return bad.find((l) => l.imei === c.imei) ?? bad.find((l) => !!c.imei2 && l.imei === c.imei2) ?? bad.at(-1) ?? null;
+}
+
+/**
+ * What the case view shows (`imeiLookup`): the current IMEI 1's answer — "blacklisted" whenever the
+ * case is (blacklistedLookup), so every screen that stops on it stops. No answer for IMEI 1 (none,
+ * or a misread) with the case blacklisted → the blacklisted number's own answer.
+ */
+export function caseLookupView(c: CaseImeis): ImeiLookup | null {
+  const own = lookupFor(c.imei_lookup, c.imei);
+  const bad = blacklistedLookup(c);
+  if (!bad) return imeiLookupView(own);
+  return imeiLookupView(own ? { ...own, blacklist: "blacklisted" } : bad);
+}
+
+/** The warning naming a blacklisted number that isn't the one in the IMEI 1 slot; null when there is none. */
+export function blacklistWarning(c: CaseImeis): string | null {
+  const bad = blacklistedLookup(c);
+  if (!bad || bad.imei === c.imei) return null;
+  if (c.imei2 && bad.imei === c.imei2) return `IMEI 2 (${bad.imei}) is reported lost or stolen (GSMA).`;
+  return `IMEI ${bad.imei}, saved on this case before, is reported lost or stolen (GSMA).`;
 }
 
 /** What the case view shows of it (docs/MOBILE-API.md, "IMEI first"). */
@@ -123,17 +165,17 @@ export const BLACKLISTED = "This phone is reported lost or stolen. It can't be t
 
 export type KymEarly = { status: "clear" | "blacklisted" | "duplicate" | "in_use"; reference: string | null; by: string; at: string };
 
-/** GSMA says blacklisted for the case's IMEI, or the early KYM answer is anything but clear. */
-export function isBlacklisted(c: { imei: string | null; imei_lookup?: string | null; kym_early?: string | null }): boolean {
-  if (lookupFor(c.imei_lookup, c.imei)?.blacklist === "blacklisted") return true;
+/** GSMA says blacklisted for any IMEI ever saved on the case (blacklistedLookup), or the early KYM answer is anything but clear. */
+export function isBlacklisted(c: CaseImeis & { kym_early?: string | null }): boolean {
+  if (blacklistedLookup(c)) return true;
   const k = parseJson<KymEarly | null>(c.kym_early ?? null, null);
   return !!k && k.status !== "clear";
 }
 
 /** 409 when the case's phone is blacklisted — test sessions and the lock both refuse with it. */
 export function assertNotBlacklisted(caseId: string): void {
-  const c = db().prepare(`SELECT imei, imei_lookup, kym_early FROM cases WHERE id = ?`).get(caseId) as
-    | { imei: string | null; imei_lookup: string | null; kym_early: string | null }
+  const c = db().prepare(`SELECT imei, imei2, imei_lookup, kym_early FROM cases WHERE id = ?`).get(caseId) as
+    | { imei: string | null; imei2: string | null; imei_lookup: string | null; kym_early: string | null }
     | undefined;
   if (c && isBlacklisted(c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
 }
