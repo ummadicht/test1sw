@@ -8,6 +8,7 @@
 
 import type { Offer, OfferAsk, StorageOption } from "@/lib/domain/offer";
 import type { CaseView } from "@/lib/server/cases";
+import { RULESET_VERSION } from "../../lib/domain/decision.ts";
 
 /** Where on this page each ask is answered, and the button that goes there. */
 export const ASK_STEP: Partial<Record<OfferAsk["kind"], { step: string; button: string }>> = {
@@ -70,6 +71,17 @@ export function autoRequoteKey(v: Pick<CaseView, "id" | "quoteExpired" | "quote"
   const q = v.quote;
   if (!v.offer?.open || !v.quoteExpired || !q || q.source.kind === "partner_manual") return null;
   return `${v.id} ${q.quotedAt} ${q.validUntil ?? ""}`;
+}
+
+/**
+ * An open case whose stored decision was made under an older ruleset (decide()'s RULESET_VERSION —
+ * 2026-10-18.1 weighs what we pay, the market price + the SwapUp premium): one quiet re-price, the
+ * same ONCE per page open, with requote:false — it re-decides from the stored quote and never asks
+ * the partner again. null otherwise.
+ */
+export function staleDecisionKey(v: Pick<CaseView, "id" | "offer"> & { decision?: { version: string } | null }): string | null {
+  if (!v.offer?.open || !v.decision || v.decision.version === RULESET_VERSION) return null;
+  return `${v.id} ruleset ${v.decision.version}`;
 }
 
 /** The tile's "Re-quote": wherever the quiet one applies, in case it failed. */

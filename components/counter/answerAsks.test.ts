@@ -241,3 +241,24 @@ test("the answer's asks and buttons never name the partner's brand — 'the part
   for (const o of offers) assert.ok(!namesBrand(JSON.stringify(o)), JSON.stringify(o.asks));
   for (const a of Object.values(ASK_STEP)) assert.ok(!namesBrand(a!.button), a!.button);
 });
+
+test("a decision made under an older ruleset is re-decided once, quietly — never a re-quote, never on a closed case", async () => {
+  const { staleDecisionKey } = await import("./answerAsks.ts");
+  const { RULESET_VERSION } = await import("../../lib/domain/decision.ts");
+  const open = { open: true } as never;
+  assert.equal(staleDecisionKey({ id: "c1", offer: open, decision: { version: "2026-10-15.2" } }), "c1 ruleset 2026-10-15.2");
+  assert.equal(staleDecisionKey({ id: "c1", offer: open, decision: { version: RULESET_VERSION } }), null);
+  assert.equal(staleDecisionKey({ id: "c1", offer: open, decision: null }), null);
+  assert.equal(staleDecisionKey({ id: "c1", offer: { open: false } as never, decision: { version: "2026-10-15.2" } }), null);
+  // The card runs it as a plain reprice (requote:false): the partner is not asked again.
+  const card = (await import("node:fs")).readFileSync(new URL("./AnswerCard.tsx", import.meta.url), "utf8");
+  assert.match(card, /autoRequoteKey\(view\) \?\? staleDecisionKey\(view\)/);
+  assert.match(card, /act\("reprice"\)\.then/);
+});
+
+test("the answer card prints the server's lines — no figure of its own beside them (each number once)", async () => {
+  const card = (await import("node:fs")).readFileSync(new URL("./AnswerCard.tsx", import.meta.url), "utf8");
+  assert.match(card, /o\.answer\.lines/);
+  assert.ok(!/inr\(w\.total\)|inr\(r\.amount\)/.test(card), "the old tile figures are gone");
+  assert.match(card, /<GradeRow view=\{view\} hideLabel=/);
+});

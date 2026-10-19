@@ -14,6 +14,7 @@ import { StepTradeIn } from "./StepTradeIn";
 import { LockForm } from "./LockForm";
 import { LockedSummary } from "./LockedSummary";
 import { AnswerCard } from "./AnswerCard";
+import { CheckByEye } from "./CheckByEye";
 import { PhonecheckPanel } from "./PhonecheckPanel";
 import { StoreMargin } from "./StoreMargin";
 import { StepHeader, StepDock } from "./StepNav";
@@ -261,6 +262,8 @@ export function CaseWorkspace({
       ) : (
         <>
           <StepHeader steps={steps} current={current} done={done} busy={ops.busy} onGo={goTo} />
+          {/* The camera couldn't decide: one tap says the phone is fine and opens the answer. */}
+          <CheckByEye ops={ops} onDone={() => goTo(hasAnswer ? "answer" : "faults")} onOther={() => goTo("faults")} />
           {/* Every step stays mounted (a half-typed field survives Back and Next); only the current one shows. */}
           <div hidden={current !== "phone"} data-step="phone">
             <StepPhone ops={ops} brands={brands} initialModel={initialModel} />

@@ -2,23 +2,31 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ErrorText } from "@/components/ui";
-import { inr, fmtBp } from "@/lib/domain/money";
+import { inr } from "@/lib/domain/money";
 import type { Offer } from "@/lib/domain/offer";
+import type { AnswerLine, AnswerLineKey } from "@/lib/domain/answer";
 import type { CaseOps } from "./ops";
-import { CHOOSE_NEW_PHONE_LINK, askControl, autoRequoteKey, requotable, swapRefusal } from "./answerAsks";
+import { CHOOSE_NEW_PHONE_LINK, askControl, autoRequoteKey, requotable, staleDecisionKey, swapRefusal } from "./answerAsks";
 import { PartnerQuoteEntry, IdentityOverride } from "./AnswerAskForms";
 import { GradeRow } from "./GradeRow";
 
 /**
  * THE ANSWER, first, once the test is on the case (owner, 2026-10-17: "Why asking
- * questions when we have all tested data ... just refurb quote vs bonus + trade in price"):
+ * questions when we have all tested data ... just refurb quote vs bonus + trade in price";
+ * 2026-10-18: "Current grade C. Market price for grade C is ₹25000 … We pay you ₹27000 +
+ * ₹10000 bonus if you exchange with a new device"):
  *
- *     Refurb quote          vs     Trade-in + bonus
- *     what fixing it costs         the as-is price + the upgrade bonus
+ *     Current grade C · screen cracked
+ *     Market price for grade C ₹25,000
+ *     Repair                        Swap up
+ *     or repair it for ₹34,096      We pay you ₹26,000
+ *                                   + ₹6,199 bonus if you exchange with a new device
  *
- * The same numbers and the same words as the SwapUp Store answer screen: the server
- * builds every figure and every reason (CaseView.offer, lib/domain/offer.ts) and this
- * card only lays them out. Whatever the test couldn't fill is one tap here (storage
+ * The LINES are the server's, word for word (CaseView.offer.answer, lib/domain/answer.ts) —
+ * the same lines SwapUp Store and the customer's phone print; this card adds only the staff
+ * extras under the line they belong to, and every figure and reason is the server's
+ * (CaseView.offer, lib/domain/offer.ts). The repair and what we pay carry the same weight,
+ * side by side, the recommended side marked. Whatever the test couldn't fill is one tap here (storage
  * chips with each size's trade-in) or a jump to the step that fills it — never a
  * guessed size. Where no step can fill it (a lapsed partner-app quote, a size not on
  * file, the camera's identity check) it is answered here (answerAsks.ts says which). An
@@ -27,8 +35,9 @@ import { GradeRow } from "./GradeRow";
  *
  * ONE ANSWER on the page — the case page's "The answer" step (caseSteps.ts): the headline,
  * its sentence, "Why this answer" (the server's signals and caveats, as the store app's "?"
- * sheet), the SwapUp grade on one line (GradeRow), the asks, the two tiles and the buttons.
- * Each ask and each "Change" goes to the step that answers it. No second money panel.
+ * sheet), the asks, the lines with their staff extras (the grade's report links, how the
+ * market price was reached, the premium, the bonus, the new phone) and the buttons. Each
+ * number once. Each ask and each "Change" goes to the step that answers it.
  */
 
 /** "Cover: None · change" — the store app's short names. */
@@ -42,13 +51,14 @@ function chipLabel(opt: { variant: string; tradeIn: number | null }): string {
   return opt.tradeIn === null ? opt.variant : `${opt.variant} · ${inr(opt.tradeIn)}`;
 }
 
-/** "Trade-in ₹18,800 + bonus ₹6,199 (4%)", or "Trade-in ₹18,800 · <why no bonus>". null without a trade-in — the tile says why instead. */
-function bonusLine(o: Offer): string | null {
-  const s = o.swap;
-  if (s.tradeIn === null) return null;
-  const trade = `Trade-in ${inr(s.tradeIn)}`;
-  if (s.bonus !== null && s.bonus > 0) return `${trade} + bonus ${inr(s.bonus)}${s.bonusBp !== null ? ` (${fmtBp(s.bonusBp)})` : ""}`;
-  return s.bonusWhy ? `${trade} · ${s.bonusWhy}` : trade;
+/** One of the server's lines as sent: its text, and " · note" in muted ink. */
+function LineText({ l }: { l: AnswerLine }) {
+  return (
+    <>
+      {l.text}
+      {l.note ? <span className="text-muted font-normal"> · {l.note}</span> : null}
+    </>
+  );
 }
 
 /** "Galaxy S26 Ultra 256GB ₹1,54,999 · customer pays ₹1,30,000" (the offer names the phone without the brand). */
@@ -138,20 +148,20 @@ function WhyThisAnswer({ o }: { o: Offer }) {
 }
 
 /**
- * How the trade-in was reached, in the server's words (Offer.swap.tradeInDetail): its one line
- * ("PriceIQ Good ₹51,399 − 2% − 2 defects") and, closed, each step with its % and rupees — the
- * same as the store app's "Show details". Nothing when the quote is a single figure.
+ * How the market price was reached, in the server's words (Offer.swap.tradeInDetail) — closed
+ * behind "Show details", as the store app's: its one line ("Refurbished market price ₹51,399 (Good)
+ * − 2% − 2 defects · PriceIQ") and each step with its % and rupees. Nothing for a single figure.
  */
 function TradeInHow({ d }: { d: NonNullable<Offer["swap"]["tradeInDetail"]> }) {
   if (!d.line && !d.lines.length && !d.note) return null;
   return (
     <>
-      {d.line ? <Small>{d.line}</Small> : null}
-      {d.lines.length || d.note ? (
+      {d.line || d.lines.length || d.note ? (
         <details className="group">
           <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer inline-block text-[13.5px] font-semibold text-fix hover:underline">
             Show details <span aria-hidden className="inline-block group-open:rotate-90 transition-transform">›</span>
           </summary>
+          {d.line ? <p className="mt-1.5 text-[13px] text-ink-2 leading-snug">{d.line}</p> : null}
           <ul className="mt-1.5 space-y-1 text-[13px] text-ink-2">
             {d.lines.map((l, i) => (
               <li key={`${l.label}-${i}`} className="flex items-baseline justify-between gap-2">
@@ -170,7 +180,8 @@ function TradeInHow({ d }: { d: NonNullable<Offer["swap"]["tradeInDetail"]> }) {
   );
 }
 
-const FIGURE = "num text-[26px] sm:text-[36px] font-[780] leading-tight tracking-tight [overflow-wrap:anywhere]";
+/** The repair and what we pay: the same weight, side by side. */
+const FIGURE = "num text-[19px] sm:text-[26px] font-[760] leading-tight tracking-tight [overflow-wrap:anywhere]";
 
 export function AnswerCard({
   ops,
@@ -198,7 +209,8 @@ export function AnswerCard({
   // answer screen does the same): ONCE per page open, whatever comes back — a partner whose fresh
   // quote is already out of date must not be asked again and again with the IMEI. The tile's
   // "Re-quote" is the way to ask again. Never a quote typed in from the partner's app (autoRequoteKey).
-  const autoKey = autoRequoteKey(view);
+  // An open case decided under an older ruleset is re-decided the same quiet way, without asking the partner.
+  const autoKey = autoRequoteKey(view) ?? staleDecisionKey(view);
   const autoTried = useRef(false);
   useEffect(() => {
     if (!editable || !autoKey || autoTried.current) return;
@@ -239,9 +251,12 @@ export function AnswerCard({
   const r = o.repair;
   const repairWhy = r.amount === null && !r.nothingToRepair ? r.why : null;
   const repairRefusal = o.actions.repair && o.actions.repair !== repairWhy && !(r.nothingToRepair && o.actions.repair === r.why) ? o.actions.repair : null;
-  // Trade-in + bonus
+  // The server's lines, and its staff-only words.
+  const line = (k: AnswerLineKey) => o.answer.lines.find((l) => l.key === k) ?? null;
+  const [gradeL, marketL, wePayL, bonusL, repairL] = (["grade", "market", "we_pay", "bonus", "repair"] as const).map(line);
+  const notes = o.answer.staffNotes;
+  // Swap up
   const w = o.swap;
-  const bonus = bonusLine(o);
   const phoneLine = newPhoneLine(o);
   const vs = vsRepairLine(w.vsRepair);
   const swapWhy = w.total === null ? w.why : null;
@@ -266,13 +281,6 @@ export function AnswerCard({
           {o.storage.note ? <p className="text-[13.5px] text-warn font-semibold leading-snug mt-1.5">{o.storage.note}</p> : null}
           <WhyThisAnswer o={o} />
         </div>
-
-        {/* The phone's grade: under the answer, never inside its price tiles (docs/GRADING.md). */}
-        {view.grading ? (
-          <div className="rounded-[12px] border border-line px-4 py-3">
-            <GradeRow view={view} />
-          </div>
-        ) : null}
 
         {/* What the answer still needs — one tap each. Title and text are dropped where the headline and the sentence already say them. */}
         {o.asks.map((a) => {
@@ -313,13 +321,51 @@ export function AnswerCard({
           );
         })}
 
-        {/* The two numbers, side by side even on a phone */}
+        {/* The grade and the market price — the server's lines; the grade's report and how the price was reached under them. */}
+        {gradeL || marketL || view.grading ? (
+          <div className="rounded-[12px] border border-line px-4 py-3 space-y-3">
+            {gradeL || view.grading ? (
+              <div className="space-y-1">
+                {gradeL ? (
+                  <p className="text-[16px] font-[720] leading-snug">
+                    <LineText l={gradeL} />
+                  </p>
+                ) : null}
+                {/* The grade never moves a price (docs/GRADING.md): its report and why sit under the line, never in the money. */}
+                {view.grading ? <GradeRow view={view} hideLabel={!!gradeL} /> : null}
+              </div>
+            ) : null}
+            {marketL ? (
+              <div className="space-y-1">
+                <p className="text-[16px] font-[720] leading-snug">
+                  <LineText l={marketL} />
+                </p>
+                {notes.market ? <Small tone="warn">{notes.market}</Small> : null}
+                {w.tradeInNote ? <Small tone="warn">{w.tradeInNote}</Small> : null}
+                {w.tradeInDetail ? <TradeInHow d={w.tradeInDetail} /> : null}
+                {/* The quiet re-quote is the usual way out; this is for when it failed or the advisor wants it now. */}
+                {editable && requotable(view) ? (
+                  <>
+                    <TileLink onClick={requote} disabled={requoting}>
+                      {requoting ? "Re-quoting…" : "Re-quote"}
+                    </TileLink>
+                    {requoteErr ? <Small tone="warn">{requoteErr}</Small> : null}
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Repair | Swap up — the same weight, side by side even on a phone */}
         <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
-          <Tile label="Refurb quote" recommended={badge === "repair"}>
-            {r.nothingToRepair && r.amount === null ? (
-              <div className="text-[20px] sm:text-[26px] font-[760] leading-tight">Nothing to repair</div>
+          <Tile label="Repair" recommended={badge === "repair"}>
+            {repairL ? (
+              <div className={FIGURE}>{repairL.text}</div>
+            ) : r.nothingToRepair ? (
+              <div className={FIGURE}>Nothing to repair</div>
             ) : (
-              <div className={`${FIGURE} ${r.amount === null ? "text-muted" : ""}`}>{r.amount !== null ? inr(r.amount) : "—"}</div>
+              <div className={`${FIGURE} text-muted`}>—</div>
             )}
             {r.amount !== null && r.detail ? <Small>{r.detail}</Small> : null}
             {repairWhy ? <Small>{repairWhy}</Small> : null}
@@ -332,21 +378,16 @@ export function AnswerCard({
             ) : null}
           </Tile>
 
-          <Tile label="Trade-in + bonus" recommended={badge === "swap"}>
-            <div className={`${FIGURE} ${w.total === null ? "text-muted" : ""}`}>{w.total !== null ? inr(w.total) : "—"}</div>
-            {swapWhy ? <Small>{swapWhy}</Small> : null}
-            {bonus ? <Small>{bonus}</Small> : null}
-            {w.tradeInDetail ? <TradeInHow d={w.tradeInDetail} /> : null}
-            {w.tradeInNote ? <Small tone="warn">{w.tradeInNote}</Small> : null}
-            {/* The quiet re-quote above is the usual way out; this is for when it failed or the advisor wants it now. */}
-            {editable && requotable(view) ? (
-              <>
-                <TileLink onClick={requote} disabled={requoting}>
-                  {requoting ? "Re-quoting…" : "Re-quote"}
-                </TileLink>
-                {requoteErr ? <Small tone="warn">{requoteErr}</Small> : null}
-              </>
+          <Tile label="Swap up" recommended={badge === "swap"}>
+            <div className={`${FIGURE} ${wePayL ? "" : "text-muted"}`}>{wePayL ? wePayL.text : "—"}</div>
+            {bonusL ? (
+              <p className="text-[15px] text-ink leading-snug">
+                <LineText l={bonusL} />
+              </p>
             ) : null}
+            {swapWhy ? <Small>{swapWhy}</Small> : null}
+            {notes.we_pay ? <Small>{notes.we_pay}</Small> : null}
+            {wePayL && notes.bonus ? <Small>{notes.bonus}</Small> : null}
             {phoneLine ? (
               <div className="flex flex-col gap-1 mt-0.5">
                 {w.newPhone?.suggested ? (

@@ -16,8 +16,11 @@ import { LETTER_NOTE, TONE_TEXT, absoluteUrl, certifiedLine, gradeLine, gradeTon
  * reasons in full, what to check by hand and what a buyer must know are one
  * click away, on the report. What the advisor certified by eye in SwapUp Store
  * ("Check the phone": screen, body, liquid indicator) is one line under it, by name.
+ *
+ * `hideLabel`: under the answer's own grade line ("Current grade C · screen cracked"), the
+ * "SwapUp grade: …" line is not said again — one grade on the screen; the why and the report stay.
  */
-export function GradeRow({ view }: { view: CaseView }) {
+export function GradeRow({ view, hideLabel = false }: { view: CaseView; hideLabel?: boolean }) {
   const g = view.grading;
   const path = g?.report?.path ?? null;
   const [qr, setQr] = useState<{ dataUrl: string; url: string } | null>(null);
@@ -36,9 +39,11 @@ export function GradeRow({ view }: { view: CaseView }) {
 
   return (
     <div className="space-y-1" id="grade">
-      <p className={`text-[16px] font-[720] leading-snug ${TONE_TEXT[gradeTone(g.status, g.final)]}`} title={LETTER_NOTE}>
-        {gradeLine(g.label)}
-      </p>
+      {hideLabel ? null : (
+        <p className={`text-[16px] font-[720] leading-snug ${TONE_TEXT[gradeTone(g.status, g.final)]}`} title={LETTER_NOTE}>
+          {gradeLine(g.label)}
+        </p>
+      )}
       {g.why ? <p className="text-[13.5px] text-ink-2 leading-snug">{g.why}</p> : null}
       {checked ? <p className="text-[13.5px] text-ink-2 leading-snug">{checked}</p> : null}
       {g.report ? (
