@@ -381,12 +381,22 @@ test("rate card by grade: the market price is the card's price at the phone's gr
       activate: true,
     });
     const c = cases.createCase(adv, {});
-    const v = await cases.updateCase(adv, c.id, { modelId: "galaxy-s23-ultra", variant: "256GB", faults: [], condition: { ...COND, screen: "flawless", body: "dented", accessories: { charger: true, box: true, bill: true } }, upgradeDeviceId: S26U_256 });
+    // Nothing taken off (all accessories, under 3 months): the price IS the card's grade C price, named.
+    const v = await cases.updateCase(adv, c.id, { modelId: "galaxy-s23-ultra", variant: "256GB", faults: [], condition: { ...COND, screen: "flawless", body: "dented", accessories: { charger: true, box: true, bill: true }, age: "lt3m" }, upgradeDeviceId: S26U_256 });
     assert.equal(v.quote?.source.kind, "partner_ratecard");
     assert.equal(v.quote?.grade, "Fair");
     assert.equal(v.quote?.lines[0].label, "Market price grade C · Week 42");
-    assert.equal(v.offer!.answer.lines.find((l) => l.key === "market")!.text, `Market price for grade C ₹${v.quote!.amount!.toLocaleString("en-IN")}`);
+    assert.equal(v.quote?.amount, 32_255);
+    const named = v.offer!.answer.lines.find((l) => l.key === "market")!;
+    assert.deepEqual([named.text, named.note], ["Market price for grade C ₹32,255", null]);
     assert.equal(v.offer!.answer.ready, true, "the partner's own card is the market price the customer sees");
+    // The same phone over 11 months old: the card takes age off, so the figure is no longer grade C's
+    // price — the line names no grade and says what it is after (never "for grade C ₹29,670").
+    const old = await cases.updateCase(adv, c.id, { condition: { ...COND, screen: "flawless", body: "dented", accessories: { charger: true, box: true, bill: true }, age: "gt11m" } });
+    const m = old.offer!.answer.lines.find((l) => l.key === "market")!;
+    assert.ok(old.quote!.amount! < 32_255);
+    assert.deepEqual([m.text, m.note], [`Market price ₹${old.quote!.amount!.toLocaleString("en-IN")}`, "after accessories and age"]);
+    assert.equal(old.offer!.answer.staffNotes.market, "Priced at grade C (₹32,255) less accessories and age.");
   } finally {
     connectPriceiq();
   }
@@ -414,7 +424,7 @@ test("rate card by grade: a cracked back is priced off grade A less the back gla
     assert.equal(v.quote?.source.kind, "partner_ratecard");
     assert.deepEqual([v.quote?.amount, v.quote?.grade, v.quote?.lines[0].label], [34_000, "Superb", "Market price grade A · Week 43"]);
     const staff = v.offer!.answer;
-    assert.equal(staff.staffNotes.market, "Priced at grade A less back glass cracked.");
+    assert.equal(staff.staffNotes.market, "Priced at grade A (₹40,000) less back glass cracked.");
     const s = sessions.deviceStatus(t.ticket).answer;
     assert.ok(s?.ready, JSON.stringify(s));
     if (!s?.ready) return;
@@ -422,6 +432,7 @@ test("rate card by grade: a cracked back is priced off grade A less the back gla
     const [grade, market, wePay] = s.lines;
     assert.deepEqual([grade.text, grade.note], ["Current grade B", "back glass cracked"]);
     assert.equal(market.text, "Market price ₹34,000", "never 'for grade B': the card's grade B is ₹30,000");
+    assert.equal(market.note, "after back glass cracked");
     assert.equal(wePay.text, "We pay you ₹35,020");
     assert.deepEqual(s.market, { amount: 34_000, letter: null, word: null });
   } finally {

@@ -95,7 +95,17 @@ export type AnswerInput = {
    * grade the price's base is FOR (a PriceIQ listing, a rate card's grade column); null when the
    * price is for the phone as it is (a typed quote, a rate card without grade prices).
    */
-  market: { amount: Rupees; source: PriceSourceKind | string; priceGrade: MarketGrade | null } | null;
+  market: {
+    amount: Rupees;
+    source: PriceSourceKind | string;
+    priceGrade: MarketGrade | null;
+    /**
+     * The grade's own price before anything was taken off (a rate card grade column's price), when
+     * the source has one. M below it means something was deducted (a defect, missing accessories,
+     * age), so M is no longer "the market price for grade X" — the line must not say it is.
+     */
+    gradePrice?: Rupees | null;
+  } | null;
   /** A partner-app quote that lapsed, any expired quote, the camera's identity block — nothing ready. */
   stale: boolean;
   quoteExpired: boolean;
@@ -217,7 +227,13 @@ export function buildAnswer(i: AnswerInput): Answer {
   const wanted = tradeInGrade(i.condition);
   const lower = !!i.market?.priceGrade && !!wanted && i.market.priceGrade !== wanted;
   const pricedAt = i.market?.priceGrade ?? wanted;
-  const named = word && pricedAt === word ? word : null;
+  // Something taken off the grade's own price (liquid damage, a cracked screen, no charger…): M is
+  // what the partner pays for THIS phone, not the grade's market price — so the line names no grade
+  // and says what it is after. Seen on the W42 card: a grade-A phone with liquid damage read
+  // "Market price for grade A ₹19,220" while the card's grade A is ₹34,960.
+  const gradePrice = i.market?.gradePrice ?? null;
+  const deducted = M !== null && gradePrice !== null && M < gradePrice;
+  const named = word && pricedAt === word && !deducted ? word : null;
   const market: Answer["market"] =
     M === null ? null : { amount: M, letter: named ? MARKET_GRADE_LETTER[named] : null, word: named, source: i.market?.source ?? "none" };
 
@@ -243,7 +259,12 @@ export function buildAnswer(i: AnswerInput): Answer {
   if (grade && !cancelled)
     lines.push({ key: "grade", text: note ? `Current grade ${grade.letter}` : `Current grade ${grade.letter} (${grade.word})`, note, amount: null });
   if (market && wePay !== null) {
-    lines.push({ key: "market", text: market.letter ? `Market price for grade ${market.letter} ${inr(M)}` : `Market price ${inr(M)}`, note: null, amount: M });
+    lines.push({
+      key: "market",
+      text: market.letter ? `Market price for grade ${market.letter} ${inr(M)}` : `Market price ${inr(M)}`,
+      note: deducted ? (note ? `after ${note}` : "after accessories and age") : null,
+      amount: M,
+    });
     lines.push({ key: "we_pay", text: traded ? `We paid you ${inr(wePay)}` : `We pay you ${inr(wePay)}`, note: null, amount: wePay });
   }
   if (bonus && i.newPhone) {
@@ -272,7 +293,7 @@ export function buildAnswer(i: AnswerInput): Answer {
   // "Priced at grade A less back glass cracked." / "Priced at grade C — none listed at grade B."
   const pricedNote =
     pricedAt && wanted && (lower || (word && !named))
-      ? `Priced at grade ${MARKET_GRADE_LETTER[pricedAt]}${note ? ` less ${note}` : ""}${lower ? ` — none listed at grade ${MARKET_GRADE_LETTER[wanted]}` : ""}.`
+      ? `Priced at grade ${MARKET_GRADE_LETTER[pricedAt]}${gradePrice !== null ? ` (${inr(gradePrice)})` : ""}${note ? ` less ${note}` : deducted ? " less accessories and age" : ""}${lower ? ` — none listed at grade ${MARKET_GRADE_LETTER[wanted]}` : ""}.`
       : null;
   const marketNotes = [open && i.market?.source === "priceiq" ? ESTIMATE_NOTE : null, pricedNote].filter((x): x is string => !!x);
   const pct = premium && premium.bp ? ` (${fmtBp(premium.bp)}${premiumEdge !== null ? `, lifted to what ${inr(premiumEdge)} earns` : ""})` : "";

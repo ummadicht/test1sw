@@ -423,3 +423,22 @@ test("every line is at most 15 words, one sentence", () => {
     assert.ok(!/[.!?]\s/.test(l.text), l.text);
   }
 });
+
+test("a rate-card price with something taken off is not 'the market price for grade X' (liquid damage on a grade-A phone)", () => {
+  const a = buildAnswer(
+    f1({
+      condition: { powersOn: true, calls: true, screen: "flawless", body: "flawless", issues: ["liquid"] },
+      market: { amount: 19_220, source: "partner_ratecard", priceGrade: "Superb", gradePrice: 34_960 },
+    }),
+  );
+  const m = a.lines.find((l) => l.key === "market")!;
+  assert.equal(m.text, "Market price ₹19,220");
+  assert.equal(m.note, "after signs of liquid damage");
+  assert.match(a.staffNotes.market ?? "", /^Priced at grade A \(₹34,960\) less signs of liquid damage\.$/);
+  // Nothing taken off: named exactly as before.
+  const b = buildAnswer(
+    f1({ condition: { powersOn: true, calls: true, screen: "flawless", body: "flawless", issues: [] }, market: { amount: 34_960, source: "partner_ratecard", priceGrade: "Superb", gradePrice: 34_960 } }),
+  );
+  const n = b.lines.find((l) => l.key === "market")!;
+  assert.deepEqual([n.text, n.note], ["Market price for grade A ₹34,960", null]);
+});

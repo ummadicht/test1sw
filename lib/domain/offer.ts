@@ -483,7 +483,15 @@ export function buildOffer(i: OfferInput): Offer {
       market:
         market === null
           ? null
-          : { amount: market, source: q?.source.kind ?? "none", priceGrade: q?.source.kind === "priceiq" ? (q.priceiq?.grade ?? null) : (q?.grade ?? null) },
+          : {
+              amount: market,
+              source: q?.source.kind ?? "none",
+              priceGrade: q?.source.kind === "priceiq" ? (q.priceiq?.grade ?? null) : (q?.grade ?? null),
+              // A rate card's grade column: the grade's own price before deductions — the trace's first
+              // line is that base ("Market price grade A · <card>", ratecard.ts priceFromCard).
+              gradePrice:
+                q?.source.kind === "partner_ratecard" && q?.grade && typeof q?.lines?.[0]?.amount === "number" ? q.lines[0].amount : null,
+            },
       stale: !!stale,
       quoteExpired: i.quoteExpired,
       quoteBlocked: !!i.quoteBlocked,
