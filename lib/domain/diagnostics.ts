@@ -318,11 +318,15 @@ export function isBrowserReport(device: Pick<DeviceReport, "appVersion"> | null 
  * Same phone, same answer (owner, 2026-10-18: "Why swapup check in browser doesn't follow same").
  * In a browser these tests are the customer's own yes/no — count the beeps, "Did you feel two
  * buzzes?", "Did the light come on?" — where the native app measures them (loopback audio, the
- * accelerometer, the camera's luminance) and SKIPS when it can't tell. So a browser FAIL on them is
- * recorded as a skip, never a fault, a repair line or a deduction. Measured browser tests (touch,
- * camera, connectivity…) keep their verdicts, and a pass stands.
+ * accelerometer, the camera's luminance) and SKIPS when it can't tell. Multi-touch and the side
+ * buttons fail in a browser only by the customer's Fail tap (the buttons are a tick list), where the
+ * native app doesn't run them at all (not in its automatic run: always a skip); Bluetooth's browser
+ * fail is the customer's tap or a browser's Web Bluetooth saying no, where the native app reads it
+ * off the phone's feature list (pass or unsupported) and never fails it. So a browser FAIL on any of
+ * them is recorded as a skip, never a fault, a repair line or a deduction. Measured browser tests
+ * (touch, camera, display, connectivity…) keep their verdicts, and a pass stands.
  */
-export const BROWSER_JUDGED: readonly string[] = ["speaker", "vibration", "flash"];
+export const BROWSER_JUDGED: readonly string[] = ["speaker", "vibration", "flash", "multitouch", "buttons", "bluetooth"];
 export const NOT_MEASURED_IN_BROWSER = "Not measured in the browser";
 export function browserVerdict<T extends Pick<ResultItem, "testId" | "outcome" | "detail">>(item: T, device: Pick<DeviceReport, "appVersion"> | null | undefined): T {
   if (item.outcome !== "fail" || !BROWSER_JUDGED.includes(item.testId) || !isBrowserReport(device)) return item;

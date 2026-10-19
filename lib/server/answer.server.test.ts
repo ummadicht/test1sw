@@ -315,18 +315,28 @@ test("device status: priced, then locked — the same lines as the desk, read on
 
 /* ─────────────────────────── browser parity (R4) ─────────────────────────── */
 
-test("parity: the same phone through the browser (the customer's 'no' on beeps, buzz and light) and the native app (skips) — identical lines", async () => {
-  const native = await testedCase({ appVersion: "0.9.0", results: { speaker: "skip", vibration: "skip", flash: "skip" } });
-  const web = await testedCase({ appVersion: "web-0.9.0", results: { speaker: "fail", vibration: "fail", flash: "fail" } });
+test("parity: the same phone through the browser (the customer's 'no' on beeps, buzz, light, multi-touch, side buttons, Bluetooth) and the native app (skips) — identical lines", async () => {
+  // The native app measures beeps, buzz and light and skips when it can't tell; it doesn't run
+  // multi-touch or the side buttons (not in its automatic run) and reads Bluetooth off the phone's
+  // feature list — never a fail. In the browser each of those is a customer's tap.
+  const judged = ["speaker", "vibration", "flash", "multitouch", "buttons", "bluetooth"] as const;
+  const native = await testedCase({ appVersion: "0.9.0", results: Object.fromEntries(judged.map((id) => [id, "skip" as const])) });
+  const web = await testedCase({ appVersion: "web-0.9.0", results: Object.fromEntries(judged.map((id) => [id, "fail" as const])) });
   const price = { partnerQuote: { amount: 25_000, reference: "QX-PAR-1", validDays: 3, repairedAmount: null } };
   const n = await cases.updateCase(adv, native.caseId, { ...price, upgradeDeviceId: S26U_256 });
   const w = await cases.updateCase(adv, web.caseId, { ...price, partnerQuote: { ...price.partnerQuote, reference: "QX-PAR-2" }, upgradeDeviceId: S26U_256 });
-  assert.deepEqual(w.faults, n.faults, "no speaker fault from a customer's count");
-  assert.deepEqual(w.condition?.issues, n.condition?.issues, "no vibration issue from a customer's 'no'");
+  assert.deepEqual(w.faults, n.faults, "no speaker, touch or buttons fault from a customer's tap");
+  assert.deepEqual(w.faults, []);
+  assert.deepEqual(w.condition?.issues, n.condition?.issues, "no vibration or Wi-Fi/Bluetooth issue from a customer's 'no'");
+  assert.equal(w.quote?.amount, n.quote?.amount, "the same price");
   assert.deepEqual(w.offer!.answer.lines, n.offer!.answer.lines);
+  assert.ok(!w.offer!.answer.lines.some((l) => l.key === "repair"), "no repair line from a customer's tap");
   assert.deepEqual(sessions.deviceStatus(web.ticket).answer, sessions.deviceStatus(native.ticket).answer);
-  const stored = db().prepare(`SELECT results FROM test_sessions WHERE id = ?`).get(web.sessionId) as { results: string };
-  assert.equal(JSON.parse(stored.results).speaker.detail.reason, "Not measured in the browser");
+  const stored = JSON.parse((db().prepare(`SELECT results FROM test_sessions WHERE id = ?`).get(web.sessionId) as { results: string }).results);
+  for (const id of judged) {
+    assert.equal(stored[id].outcome, "skip", id);
+    assert.equal(stored[id].detail.reason, "Not measured in the browser", id);
+  }
 });
 
 /* ─────────────────────────── the grade line (§C3 #5, R5) ─────────────────────────── */

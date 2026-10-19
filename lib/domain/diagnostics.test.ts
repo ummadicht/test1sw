@@ -590,11 +590,11 @@ test("camera display fold: the phone's own display FAIL is still a phone-test fa
   assert.deepEqual(faultIds(summarise(DEFAULT_PLAN, r, NO_DAMAGE, DEVICE, MODELS)), ["display_lines"]);
 });
 
-test("browser parity: a FAIL that is only the customer's yes/no (beeps, buzzes, the light) is a skip — never a fault; measured tests keep theirs", () => {
+test("browser parity: a FAIL that is only the customer's yes/no (beeps, buzzes, the light, multi-touch, the side buttons, Bluetooth) is a skip — never a fault; measured tests keep theirs", () => {
   const web = { appVersion: "web-0.9.0" };
   const app = { appVersion: "0.9.0" };
   const at = "2026-10-19T10:00:00.000Z";
-  assert.deepEqual([...BROWSER_JUDGED], ["speaker", "vibration", "flash"]);
+  assert.deepEqual([...BROWSER_JUDGED], ["speaker", "vibration", "flash", "multitouch", "buttons", "bluetooth"]);
   for (const testId of BROWSER_JUDGED) {
     const fail = { testId, outcome: "fail" as const, detail: { beeps: 2 }, at };
     assert.deepEqual(browserVerdict(fail, web), { testId, outcome: "skip", detail: { beeps: 2, reason: NOT_MEASURED_IN_BROWSER }, at }, testId);
@@ -613,4 +613,8 @@ test("browser parity: a FAIL that is only the customer's yes/no (beeps, buzzes, 
   const sn = summarise(DEFAULT_PLAN, results("skip") as never, null, null, []);
   assert.deepEqual([sw.faults, sw.issues], [sn.faults, sn.issues]);
   assert.deepEqual(sw.faults, []);
+  // What those taps would have cost, kept as fails: priced faults and issues.
+  const raw = summarise(DEFAULT_PLAN, results("fail") as never, null, null, []);
+  for (const f of ["speaker", "touch_issue", "buttons"]) assert.ok(raw.faults.some((x) => x.id === f), f);
+  for (const i of ["vibration", "wifi_bt"]) assert.ok(raw.issues.includes(i as never), i);
 });

@@ -848,9 +848,12 @@ At **Apply** (`POST /api/test-sessions/<id>/apply`):
 idempotent per `testId` (the latest `at` wins). The app sends after every test and retries
 its queue until acknowledged → `{ ok: true, received: n, progress }`. Same phone, same answer
 (since 2026-10-18): from the browser build (`appVersion` "web-…"), a `fail` on `speaker`, `vibration`
-or `flash` — the customer's own count, buzz or light, where the native app measures and skips — is
-stored as `skip` with `detail.reason` "Not measured in the browser": never a fault, a repair line or
-a deduction. Measured browser tests (touch, camera, connectivity…) keep their verdicts.
+or `flash` — the customer's own count, buzz or light, where the native app measures and skips — and
+on `multitouch`, `buttons` or `bluetooth` — the customer's Fail tap (or a browser's Web Bluetooth
+saying no), where the native app doesn't run multi-touch or the buttons and reads Bluetooth off the
+feature list, never failing them — is stored as `skip` with `detail.reason` "Not measured in the
+browser": never a fault, a repair line or a deduction (`BROWSER_JUDGED`, lib/domain/diagnostics.ts).
+Measured browser tests (touch, camera, display, connectivity…) keep their verdicts.
 
 `POST /api/device/complete` `{}` → `{ ok: true, summary }`.
 
