@@ -135,6 +135,77 @@ audited `test_session.create` `{ via: "counter code" }`. Guards, because the QR 
 A closed (rejected / inactive) store's counter code, or one with no staff, is `404` like any
 dead code. `/j/<counter code>` shows the store's name and no case (there is none until a phone joins).
 
+## 2d. The IMEI first (store side, since 0.9.0 — owner 2026-10-19: *"Scan IMEI first"*)
+
+The IMEI is now **step 1** of a trade-in: the customer dials `*#06#`, the advisor scans it, reads the
+screen, or types it — before the mobile number and before any test. It is resolved ONCE per case
+(`lib/server/imeiResolve.ts`): the model from its type code (free, offline) and GradeIQ's lookup —
+the GSMA blacklist and the maker's model number (one paid lookup per trade-in). Lock's own IMEI card
+stays as the fallback ("Skip — scan at hand-over").
+
+**Store-led order:** `POST /api/cases {customerName, customerPhone}` → `PATCH /api/cases/<id>
+{imei, imei2}` → (409 / blacklisted? stop) → `POST /api/test-sessions {caseId}`. Skipped IMEI → today's
+`POST /api/test-sessions {customerName, customerPhone}`. Phone-led (counter QR): the same card on the
+Session screen, `PATCH` on the session's existing case.
+
+`POST /api/imei/read` (Bearer, advisor / store manager) — "Read the screen"
+`{ "photo": "data:image/jpeg;base64,…" }` → SwapUp's server sends it to GradeIQ's stateless reader
+(`POST /api/imei/ocr`, ~20 s; never a session's `/ocr`). Nothing is saved: show "Read: 35… — confirm".
+
+| Status | Body |
+|---|---|
+| 200 | `{ "imei": "35…" \| null, "imei2": "35…" \| null, "valid": true \| false }` — `valid` = the IMEI's check digit |
+| 503 | `{ "error": "The screen reader is off — scan or type the IMEI.", "reason": "reader_off" }` (GradeIQ's AI refused, no key, slow, down, or GradeIQ switched off) |
+| 422 | `{ "error": "No IMEI found in that photo — try again or type it.", "reason": "not_found" }` |
+| 400 / 413 | not a `data:image/…;base64` photo / larger than 8 MB of base64 |
+
+`PATCH /api/cases/<id> { "imei": "…", "imei2": "…" | null }` (as before) now also resolves a NEW IMEI
+synchronously (≤ 10 s) and answers with the whole `CaseView`. The same IMEI saved again → no new lookup
+(an IMEI the case had before is answered from the case). An IMEI that fails its check digit is saved as
+before (`imeiCheck: "invalid"`) but not resolved — a misread is never paid for. GradeIQ off
+(`GRADEIQ_ENABLED=0`), no `GRADEIQ_SERVER_KEY`, or no answer in 10 s → the type code's model only and
+`blacklist: "unknown"`, with no retry. The model is set ONLY when the case has none (or one an earlier
+IMEI set); never the storage.
+
+```ts
+CaseView += {
+  modelSource: "imei" | "phone" | "customer" | "phonecheck" | "advisor" | null;
+    // where the model came from: the IMEI, the phone's model code at Apply, the customer's pick (a claim),
+    // a Phonecheck report, staff; null = no model, or a case from before 0.9.0
+  imeiLookup: { brand: string | null; model: string | null; modelNumber: string | null;
+                blacklist: "clean" | "blacklisted" | "unknown"; source: string; at: string } | null;
+    // the case's CURRENT IMEI, resolved; "unknown" shows as "Blacklist not checked", never as clean.
+    // source: GradeIQ's ('esn'|'station'|'gsma'|'tac'|'stub'), or SwapUp's own "tac" / "none" when
+    // GradeIQ wasn't asked or didn't answer. null = no IMEI, an invalid one, one from before 0.9.0
+  imeiWarnings: string[];
+    // at once, while the case is at the counter (the lock still decides):
+    // "This IMEI is already on trade-in SU-AND-00031."
+    // "The IMEI says Samsung Galaxy S23 Ultra; the case has Samsung Galaxy S23 — check Settings › About phone."
+  kymEarly: { status: "clear" | "blacklisted" | "duplicate" | "in_use"; reference: string | null } | null;
+};
+// Partners: imeiLookup = null, imeiWarnings = [].
+```
+
+`PATCH /api/cases/<id> { "kymEarly": { "status": KymStatus, "reference": string | null } }` records the
+government KYM answer right after the IMEI (`Text KYM to 14422`, then the chips); `null` clears it. It
+needs an IMEI on the case (`400 "Record the IMEI first (dial *#06#)."`), is stored with the advisor's
+name, and goes when either IMEI changes. Lock pre-fills its KYM chip and reference from it — still
+editable, still required to be `clear` at lock. GSMA does not cover India's CEIR: KYM stays mandatory.
+
+**Blacklisted** (`imeiLookup.blacklist === "blacklisted"`, or `kymEarly.status !== "clear"` when set):
+`POST /api/test-sessions { caseId }` → `409 { "error": "This phone is reported lost or stolen. It can't be
+traded in.", "reason": "blacklisted" }` and no session is made; the lock refuses with the same sentence
+(and the reason), and it is the first of `lockBlockers`. Show the sentence in a red banner on the IMEI
+card and disable Start.
+
+**The model at the phone:** a case whose model is set (by the IMEI or staff) is what the join tells the
+phone (`identity.match: "exact"`), so an iPhone or a browser — which can't name itself — skips the
+customer's picker; the storage is still asked when the phone can't measure it. The phone's own model
+code still wins when it matched, except against a model the IMEI named: at Apply a code that disagrees
+is a flag in `camera.flags` (`Model: phone code says Samsung Galaxy S23; the IMEI says Samsung Galaxy
+S23 Ultra — check Settings › About phone.`), never an overwrite. A code that agrees makes
+`modelSource: "phone"`.
+
 ## 3. Test sessions (store side)
 
 `POST /api/test-sessions` (Bearer, advisor/store_manager)
@@ -619,7 +690,8 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
   recomputes the repair, bonus and decision on every call, and still re-quotes a missing or expired
   quote. `faults`, `condition`, `modelId`, `variant`, `partnerQuote` and the camera identity override
   still re-quote.
-- **IMEI** — not needed for the answer; asked on the Lock screen only if missing.
+- **IMEI** — step 1 (§2d): asked first, on New trade-in (or the Session screen for a counter-QR
+  trade-in), resolved once per case; Lock asks for it only when it was skipped.
 
 ### The calls
 
@@ -627,7 +699,7 @@ All exist and accept Bearer:
 - `GET /api/cases/<id>`
 - `PATCH /api/cases/<id>` with one of `{variant}`, `{upgradeDeviceId}`, `{coverage}`,
   `{manualRepair: {amount, reason} | null}`, `{partnerQuote: {amount, reference, validDays?, repairedAmount?}}`,
-  `{imei}` → the whole `CaseView`. A staff `variant` is recorded as `variantSource: "advisor"`; only
+  `{imei}` (resolved once — §2d), `{kymEarly}` (§2d) → the whole `CaseView`. A staff `variant` is recorded as `variantSource: "advisor"`; only
   Apply can record `measured` / `catalogue` / `customer` (the public PATCH can't say where a size came from).
   **Re-saving the size already on the case changes nothing** (since the 2026-10-17 review): it keeps its
   `variantSource` — a size the customer typed stays `customer`, so the lock still asks for `storageSeen` —
