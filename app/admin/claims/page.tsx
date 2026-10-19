@@ -10,25 +10,28 @@ import { adminContext } from "@/components/admin/context";
 import { fmtDay, fmtMonth, isMonth, monthIst, shiftMonth, withOrg } from "@/components/admin/format";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Bonus claims" };
+export const metadata = { title: "Bonus and premium claims" };
 
 const AT_RISK: Record<string, string> = {
   rejected: "Device failed the partner's check",
   not_received: "Partner says the device never arrived",
 };
 
-type Group = { fundedBy: string; count: number; sum: number; riskCount: number; riskSum: number };
+type Kind = "bonus" | "premium";
+const KIND_WORD: Record<Kind, string> = { bonus: "Upgrade bonus", premium: "SwapUp premium" };
+/** One card per funder and kind: a bonus is claimed from the campaign's funder, a premium from the programme. */
+type Group = { fundedBy: string; kind: Kind; count: number; sum: number; riskCount: number; riskSum: number };
+const claimOf = (r: BonusClaimRow, k: Kind) => (k === "bonus" ? r.bonus : r.premium);
 
 export default async function AdminClaimsPage({ searchParams }: { searchParams: Promise<{ orgId?: string; month?: string }> }) {
   const u = await requirePage(["org_admin", "platform"], "/admin/claims");
   const sp = await searchParams;
   const ctx = adminContext(u, sp.orgId);
-  const intro =
-    "Bonuses given, to claim back from the funder.";
+  const intro = "Bonuses and premiums given, to claim back from the funder.";
   if (!ctx.orgId) {
     return (
       <AppShell user={u} wide>
-        <AdminFrame ctx={ctx} section="/admin/claims" title="Bonus claims" intro={intro}>
+        <AdminFrame ctx={ctx} section="/admin/claims" title="Bonus and premium claims" intro={intro}>
           {null}
         </AdminFrame>
       </AppShell>
@@ -43,17 +46,25 @@ export default async function AdminClaimsPage({ searchParams }: { searchParams: 
 
   const groups = new Map<string, Group>();
   for (const r of rows) {
-    const key = r.fundedBy || "Not recorded";
-    const g = groups.get(key) ?? { fundedBy: key, count: 0, sum: 0, riskCount: 0, riskSum: 0 };
-    g.count += 1;
-    g.sum += r.bonus;
-    if (AT_RISK[r.status]) {
-      g.riskCount += 1;
-      g.riskSum += r.bonus;
+    for (const kind of ["bonus", "premium"] as const) {
+      const amount = claimOf(r, kind);
+      if (amount <= 0) continue;
+      const fundedBy = (kind === "bonus" ? r.fundedBy : r.premiumFundedBy) || "Not recorded";
+      const key = `${kind}|${fundedBy}`;
+      const g = groups.get(key) ?? { fundedBy, kind, count: 0, sum: 0, riskCount: 0, riskSum: 0 };
+      g.count += 1;
+      g.sum += amount;
+      if (AT_RISK[r.status]) {
+        g.riskCount += 1;
+        g.riskSum += amount;
+      }
+      groups.set(key, g);
     }
-    groups.set(key, g);
   }
-  const total = rows.reduce((t, r) => t + r.bonus, 0);
+  const bonuses = rows.filter((r) => r.bonus > 0);
+  const premiums = rows.filter((r) => r.premium > 0);
+  const bonusTotal = bonuses.reduce((t, r) => t + r.bonus, 0);
+  const premiumTotal = premiums.reduce((t, r) => t + r.premium, 0);
   const risk = rows.filter((r) => AT_RISK[r.status]);
 
   const link = (m: string) => withOrg("/admin/claims", orgId, ctx.isPlatform, { month: m });
@@ -65,7 +76,7 @@ export default async function AdminClaimsPage({ searchParams }: { searchParams: 
       <AdminFrame
         ctx={ctx}
         section="/admin/claims"
-        title="Bonus claims"
+        title="Bonus and premium claims"
         intro={intro}
         actions={
           <a className="btn btn-primary" href={csv} download>
@@ -104,17 +115,17 @@ export default async function AdminClaimsPage({ searchParams }: { searchParams: 
 
         <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4" aria-label="Totals">
           <div className="card card-pad">
-            <div className="section-title">Bonuses given · {periodLabel}</div>
-            <div className="kpi mt-1">
-              <Money value={total} />
+            <div className="section-title">Given · {periodLabel}</div>
+            <div className="kpi mt-1 !text-[24px]">
+              Bonuses <Money value={bonusTotal} /> · Premiums <Money value={premiumTotal} />
             </div>
             <div className="hint mt-1">
-              {rows.length} upgrade{rows.length === 1 ? "" : "s"} with a bonus
+              {bonuses.length} bonus{bonuses.length === 1 ? "" : "es"} · {premiums.length} premium{premiums.length === 1 ? "" : "s"}
             </div>
           </div>
           {[...groups.values()].map((g) => (
-            <div key={g.fundedBy} className="card card-pad">
-              <div className="section-title">Funded by</div>
+            <div key={`${g.kind}|${g.fundedBy}`} className="card card-pad">
+              <div className="section-title">{KIND_WORD[g.kind]} · funded by</div>
               <div className="text-[16px] font-semibold mt-1">{g.fundedBy}</div>
               <div className="flex items-baseline gap-2 mt-1">
                 <span className="kpi !text-[24px]">
@@ -138,21 +149,22 @@ export default async function AdminClaimsPage({ searchParams }: { searchParams: 
             <strong>
               {risk.length} claim{risk.length === 1 ? " is" : "s are"} at risk
             </strong>{" "}
-            (<Money value={risk.reduce((t, r) => t + r.bonus, 0)} />): rejected or not received — check before claiming.
+            (<Money value={risk.reduce((t, r) => t + r.bonus + r.premium, 0)} />): rejected or not received — check before claiming.
           </Banner>
         ) : null}
 
         <Card title={`Claims · ${periodLabel}`} pad={false}>
           {rows.length ? (
             <div className="overflow-x-auto">
-              <table className="table min-w-[980px]">
+              <table className="table min-w-[1080px]">
                 <thead>
                   <tr>
                     <th>Case · traded in</th>
                     <th>Store</th>
                     <th>New phone</th>
                     <th className="text-right">Price</th>
-                    <th className="text-right">Trade-in</th>
+                    <th className="text-right">Market price</th>
+                    <th className="text-right">Premium</th>
                     <th className="text-right">Bonus</th>
                     <th>Campaign</th>
                     <th>Status</th>
@@ -166,13 +178,13 @@ export default async function AdminClaimsPage({ searchParams }: { searchParams: 
               </table>
             </div>
           ) : (
-            <Empty title={`No upgrade bonuses in ${periodLabel}`}>
+            <Empty title={`No bonuses or premiums in ${periodLabel}`}>
               {month ? (
                 <>
                   Try <Link href={link("all")}>all months</Link>.
                 </>
               ) : (
-                "None of this programme's trade-ins has had a bonus yet."
+                "None of this programme's trade-ins has had a bonus or a premium yet."
               )}
             </Empty>
           )}
@@ -206,10 +218,34 @@ function ClaimRow({ r, caseId }: { r: BonusClaimRow; caseId: string | undefined 
         <Money value={r.tradeValue} />
       </td>
       <td className="text-right">
-        <Money value={r.bonus} className="font-semibold text-up" />
-        <div className="hint !mt-0.5">
-          <Pct bp={r.bonusBp} />
-        </div>
+        {r.premium > 0 ? (
+          <>
+            <Money value={r.premium} className="font-semibold text-up" />
+            <div className="hint !mt-0.5">
+              <Pct bp={r.premiumBp} />
+            </div>
+            {/* Never re-based on a regrade: the premium stays on what was paid at the counter. */}
+            {r.accepted !== null ? (
+              <div className="hint !mt-0.5 whitespace-nowrap">
+                premium on <Money value={r.tradeValue} />; partner accepted <Money value={r.accepted} />
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <span className="text-muted">—</span>
+        )}
+      </td>
+      <td className="text-right">
+        {r.bonus > 0 ? (
+          <>
+            <Money value={r.bonus} className="font-semibold text-up" />
+            <div className="hint !mt-0.5">
+              <Pct bp={r.bonusBp} />
+            </div>
+          </>
+        ) : (
+          <span className="text-muted">—</span>
+        )}
       </td>
       <td className="max-w-[240px]">
         {r.campaign || "—"}

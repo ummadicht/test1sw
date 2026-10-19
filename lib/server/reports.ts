@@ -146,16 +146,27 @@ export type BonusClaimRow = {
   lockedAt: string;
   newDevice: string;
   newPrice: number;
+  /** The market price (trade_value): what the credit line held and the partner pays back. */
   tradeValue: number;
   bonusBp: number;
   bonus: number;
   campaign: string;
   fundedBy: string;
   override: string | null;
+  /** The SwapUp premium credited at lock (0 before premiums), its band and who pays it back — never re-based on a regrade. */
+  premium: number;
+  premiumBp: number;
+  premiumFundedBy: string;
+  /** What the partner accepted on a regrade (clearance), else null. */
+  accepted: number | null;
   status: string;
 };
 
-/** Every upgrade bonus given — what the store claims back from whoever funds the campaign. */
+/**
+ * Every upgrade bonus and SwapUp premium given — what the store claims back from whoever funds
+ * them (the campaign's funder for a bonus, the programme for a premium). Both are the programme's,
+ * never the store's: a regrade never re-bases the premium and nothing here is a chargeback.
+ */
 export function bonusClaims(u: SessionUser, opts: { orgId?: string | null; month?: string | null } = {}): BonusClaimRow[] {
   if (!["platform", "org_admin", "store_manager"].includes(u.role)) throw new HttpError(403, "Not allowed.");
   const stores = storesForUser(u).filter((s) => !opts.orgId || s.org_id === opts.orgId);
@@ -165,9 +176,11 @@ export function bonusClaims(u: SessionUser, opts: { orgId?: string | null; month
   const month = opts.month && /^\d{4}-\d{2}$/.test(opts.month) ? opts.month : null;
   const rows = db()
     .prepare(
-      `SELECT c.ref, c.locked_at, c.trade_value, c.bonus_value, c.bonus, c.upgrade, c.status, s.name AS store_name, s.code AS store_code
+      `SELECT c.ref, c.locked_at, c.trade_value, c.bonus_value, c.bonus, c.upgrade, c.status, c.premium_value, c.premium_bp, c.premium_funded_by, c.clearance,
+              s.name AS store_name, s.code AS store_code
        FROM cases c JOIN stores s ON s.id = c.store_id
-       WHERE c.store_id IN (${stores.map(() => "?").join(",")}) AND c.locked_at IS NOT NULL AND c.status != 'cancelled' AND COALESCE(c.bonus_value,0) > 0
+       WHERE c.store_id IN (${stores.map(() => "?").join(",")}) AND c.locked_at IS NOT NULL AND c.status != 'cancelled'
+         AND (COALESCE(c.bonus_value,0) > 0 OR COALESCE(c.premium_value,0) > 0)
        ${month ? "AND substr(datetime(c.locked_at, '+330 minutes'),1,7) = ?" : ""}
        ORDER BY c.locked_at`
     )
@@ -179,6 +192,10 @@ export function bonusClaims(u: SessionUser, opts: { orgId?: string | null; month
     bonus: string;
     upgrade: string;
     status: string;
+    premium_value: number | null;
+    premium_bp: number | null;
+    premium_funded_by: string | null;
+    clearance: string | null;
     store_name: string;
     store_code: string;
   }[];
@@ -193,11 +210,15 @@ export function bonusClaims(u: SessionUser, opts: { orgId?: string | null; month
       newDevice: up?.label ?? "",
       newPrice: up?.price ?? 0,
       tradeValue: r.trade_value,
-      bonusBp: b?.override?.bp ?? b?.bp ?? 0,
-      bonus: r.bonus_value,
-      campaign: b?.campaignName ?? "",
-      fundedBy: b?.fundedBy ?? "",
+      bonusBp: (r.bonus_value ?? 0) > 0 ? (b?.override?.bp ?? b?.bp ?? 0) : 0,
+      bonus: r.bonus_value ?? 0,
+      campaign: (r.bonus_value ?? 0) > 0 ? (b?.campaignName ?? "") : "",
+      fundedBy: (r.bonus_value ?? 0) > 0 ? (b?.fundedBy ?? "") : "",
       override: b?.override ? `${b.override.by}: ${b.override.reason}` : null,
+      premium: r.premium_value ?? 0,
+      premiumBp: r.premium_bp ?? 0,
+      premiumFundedBy: (r.premium_value ?? 0) > 0 ? (r.premium_funded_by ?? "") : "",
+      accepted: r.status === "regraded" ? (parseJson<{ accepted?: number } | null>(r.clearance, null)?.accepted ?? null) : null,
       status: r.status,
     };
   });

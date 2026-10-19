@@ -10,7 +10,6 @@ import type { CaseView } from "@/lib/server/cases";
 import { getStore, getOrg } from "@/lib/server/scope";
 import { inr, fmtBp } from "@/lib/domain/money";
 import { maskImei } from "@/lib/domain/imei";
-import { RETIRED_QUOTE_LABEL, retiredSource } from "@/lib/domain/ratecard";
 import { PrintBar } from "@/components/counter/PrintBar";
 import { conditionSummary, faultLabels, fmtWhen, idTypeLabel, maskPhone } from "@/components/counter/shared";
 import { absoluteUrl, gradeTail, pinnedPath, shortHash, tokenOf } from "@/components/counter/gradingView";
@@ -24,20 +23,6 @@ function Shell({ children }: { children: React.ReactNode }) {
       <style>{`@page { size: A4; margin: 14mm; } @media print { html, body { background: #fff !important; } }`}</style>
       <div className="mx-auto max-w-[780px]">{children}</div>
     </div>
-  );
-}
-
-function SourceLine({ v }: { v: CaseView }) {
-  const q = v.quote;
-  if (!q) return <>—</>;
-  // A quote from a source SwapUp no longer has: never its stored label or date (quoteSourceLabel).
-  if (retiredSource(q.source.kind)) return <>{RETIRED_QUOTE_LABEL}</>;
-  if (q.partnerRef) return <>Ref. {q.partnerRef}</>;
-  return (
-    <>
-      {q.source.label}
-      {q.source.effectiveFrom ? `, effective ${fmtWhen(q.source.effectiveFrom, "date")}` : ""}
-    </>
   );
 }
 
@@ -103,7 +88,10 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
   // A test programme's receipt says so on its face: no real money changes hands.
   const test = !!org?.demo;
   const priceiq = v.quote?.source.kind === "priceiq";
-  const partner = v.quote?.partner ?? v.partner?.partnerName ?? "the buyback partner";
+  // The customer's copy: what we pay (the market price + the SwapUp premium) in ONE row, its market
+  // price in the answer's own words under it. Never the word "premium", never the partner's name.
+  const wePay = v.tradeValue === null ? null : v.tradeValue + (v.premiumValue ?? 0);
+  const marketWords = v.offer?.answer.lines.find((l) => l.key === "market")?.text ?? null;
   const b = v.bonus;
   const bonusBp = b ? (b.override?.bp ?? b.bp) : null;
   const cond = conditionSummary(v.condition);
@@ -214,13 +202,10 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
               </tr>
               <tr className="border-b border-line">
                 <td className="py-2 pr-3">
-                  <div>Less trade-in</div>
-                  <div className="text-[12px] text-muted">
-                    {/* The customer's copy: what the trade-in is for, never the market price or a tool's name. */}
-                    {priceiq ? <>Trade-in for its condition and faults</> : <>Quoted by {partner} · <SourceLine v={v} /></>}
-                  </div>
+                  <div>We pay you</div>
+                  <div className="text-[12px] text-muted">{marketWords ?? "Quoted by the buyback partner"}</div>
                 </td>
-                <td className="py-2 text-right num whitespace-nowrap">− {inr(v.tradeValue)}</td>
+                <td className="py-2 text-right num whitespace-nowrap">− {inr(wePay)}</td>
               </tr>
               <tr className="border-b border-line">
                 <td className="py-2 pr-3">
@@ -246,7 +231,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
           <h2 className="section-title mb-1.5">Terms</h2>
           <ol className="list-decimal pl-5 space-y-1 text-[12.5px] text-ink-2">
             <li>
-              {priceiq ? "Trade-in: market price at its grade, less markdown and defects." : <>Trade-in: {partner}&apos;s quote for the condition above.</>} If the
+              {priceiq ? "Trade-in: market price at its grade, less markdown and defects." : <>Trade-in: the buyback partner&apos;s quote for the condition above.</>} If the
               phone differs, the store may revise or reverse the exchange.
             </li>
             <li>The bonus is a promotion; no bank cashback or no-cost EMI with it.</li>

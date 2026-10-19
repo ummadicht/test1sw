@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Money, Pct, Banner, ErrorText } from "@/components/ui";
+import { inr, fmtBp } from "@/lib/domain/money";
 import { OUTCOME_LABEL, PICKUP_STATUS_LABEL, type ClearanceOutcome, type PickupStatus } from "@/lib/domain/lifecycle";
 import { maskImei } from "@/lib/domain/imei";
 import { quoteSourceLabel } from "@/lib/domain/ratecard";
@@ -17,6 +18,7 @@ export function LockedSummary({
   ops,
   isManager,
   isCounter,
+  isPartner,
   showCustomer,
   pickup,
 }: {
@@ -24,6 +26,8 @@ export function LockedSummary({
   isManager: boolean;
   /** Store staff — they record the customer's data clearing. */
   isCounter: boolean;
+  /** The buyback partner: its figure is the market price it pays back ("Trade-in value"), never what the customer was paid. */
+  isPartner: boolean;
   /** Store and programme staff see the customer's details; the partner sees the phone only. */
   showCustomer: boolean;
   pickup: PickupInfo | null;
@@ -34,6 +38,9 @@ export function LockedSummary({
   const [err, setErr] = useState<string | null>(null);
   const cl = view.clearance;
   const bonusBp = view.bonus ? (view.bonus.override?.bp ?? view.bonus.bp) : null;
+  // What the customer was paid: the market price + the SwapUp premium frozen at lock (none before premiums).
+  const premiumBp = view.offer?.swap.premium?.bp ?? null;
+  const wePay = view.tradeValue === null ? null : view.tradeValue + (view.premiumValue ?? 0);
 
   const timeline: { label: string; at: string | null; note?: string }[] = [
     { label: "Case opened", at: view.createdAt, note: view.advisorName ? `by ${view.advisorName}` : undefined },
@@ -67,10 +74,15 @@ export function LockedSummary({
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <div className="section-title">Trade-in value</div>
+              <div className="section-title">{isPartner ? "Trade-in value" : "We pay you"}</div>
               <div className="kpi mt-1">
-                <Money value={view.tradeValue} />
+                <Money value={isPartner ? view.tradeValue : wePay} />
               </div>
+              {!isPartner && view.premiumValue ? (
+                <div className="hint">
+                  Market price {inr(view.tradeValue)} + SwapUp premium{premiumBp ? ` ${fmtBp(premiumBp)}` : ""}
+                </div>
+              ) : null}
               <div className="mt-1">
                 <QuoteSource quote={view.quote} />
               </div>
@@ -86,17 +98,19 @@ export function LockedSummary({
                 </div>
               ) : null}
             </div>
-            <div>
-              <div className="section-title">Customer pays</div>
-              <div className="kpi mt-1">
-                <Money value={view.payable} />
-              </div>
-              {view.upgrade ? (
-                <div className="hint">
-                  for {view.upgrade.label} (<Money value={view.upgrade.price} />)
+            {isPartner ? null : (
+              <div>
+                <div className="section-title">Customer pays</div>
+                <div className="kpi mt-1">
+                  <Money value={view.payable} />
                 </div>
-              ) : null}
-            </div>
+                {view.upgrade ? (
+                  <div className="hint">
+                    for {view.upgrade.label} (<Money value={view.upgrade.price} />)
+                  </div>
+                ) : null}
+              </div>
+            )}
           </div>
 
           <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-3 text-[14px]">

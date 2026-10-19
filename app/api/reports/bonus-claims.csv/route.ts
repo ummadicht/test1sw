@@ -16,12 +16,15 @@ const HEADER = [
   "Traded in at (UTC)",
   "New phone",
   "New phone price (INR)",
-  "Trade-in value (INR)",
+  "Market price (INR)",
   "Bonus (%)",
   "Bonus (INR)",
   "Campaign",
   "Funded by",
   "Bonus override",
+  "SwapUp premium (%)",
+  "SwapUp premium (INR)",
+  "Premium funded by",
   "Case status",
   "Claim note",
 ];
@@ -40,15 +43,18 @@ function csvRow(r: BonusClaimRow): Record<string, unknown> {
     r.campaign,
     r.fundedBy,
     r.override ?? "",
+    r.premiumBp / 100,
+    r.premium,
+    r.premiumFundedBy,
     CASE_STATUS_LABEL[r.status as CaseStatus] ?? r.status,
-    AT_RISK[r.status] ?? "",
+    AT_RISK[r.status] ?? (r.accepted !== null && r.premium > 0 ? `Premium on ${r.tradeValue}; partner accepted ${r.accepted}` : ""),
   ];
   return Object.fromEntries(HEADER.map((h, i) => [h, v[i]]));
 }
 
 /**
- * The month's upgrade-bonus claims as a spreadsheet, for claiming the bonus back
- * from whoever funds the campaign. Not wrapped by handle(): the success body is
+ * The month's upgrade-bonus and SwapUp-premium claims as a spreadsheet, for
+ * claiming them back from whoever funds them. Not wrapped by handle(): the success body is
  * CSV, but errors are still JSON with the right status.
  */
 export async function GET(req: Request) {

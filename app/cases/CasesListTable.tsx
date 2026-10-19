@@ -27,7 +27,8 @@ export function CasesListTable({
             <th>Customer</th>
             <th>Phone</th>
             {partnerView ? null : <th>Recommended</th>}
-            <th className="text-right!">Trade-in</th>
+            {/* The figure is the market price (trade_value): what the partner pays back. */}
+            <th className="text-right!">{partnerView ? "Trade-in" : "Market price"}</th>
             {partnerView ? null : <th>New phone</th>}
             <th>Status</th>
             <th>Updated</th>

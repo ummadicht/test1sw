@@ -4,7 +4,7 @@ import { Money, StatusPill, Empty } from "@/components/ui";
 import { CASE_STATUS_LABEL } from "@/lib/domain/lifecycle";
 import { recommendationOf, fmtWhen } from "./shared";
 
-/** One line per case: who, which phone, what we'd recommend, what the trade-in is worth. */
+/** One line per case: who, which phone, what we'd recommend, its market price. */
 export function CaseRows({
   cases,
   empty,
@@ -50,11 +50,11 @@ export function CaseRows({
                 <div className="text-[12px] text-muted">
                   {mode === "held"
                     ? days === null
-                      ? "trade-in"
+                      ? "market price"
                       : days === 0
                         ? "traded in today"
                         : `waiting ${days} day${days === 1 ? "" : "s"}`
-                    : `trade-in · ${fmtWhen(c.updatedAt)}`}
+                    : `market price · ${fmtWhen(c.updatedAt)}`}
                 </div>
               </div>
             </Link>

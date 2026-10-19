@@ -257,7 +257,7 @@ export function CaseWorkspace({
       ) : null}
 
       {lockedOrLater ? (
-        <LockedSummary ops={ops} isManager={isManager} isCounter={isCounter} showCustomer={showCustomer} pickup={pickup} />
+        <LockedSummary ops={ops} isManager={isManager} isCounter={isCounter} isPartner={isPartner} showCustomer={showCustomer} pickup={pickup} />
       ) : (
         <>
           <StepHeader steps={steps} current={current} done={done} busy={ops.busy} onGo={goTo} />
