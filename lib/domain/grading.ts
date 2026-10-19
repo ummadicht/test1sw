@@ -33,7 +33,7 @@
  *
  * Pure functions only — no database, no network, no clock.
  */
-import { MARKET_GRADES, cosmeticGrade, gradeAfterRefurb, type MarketGrade } from "./marketSell.ts";
+import { MARKET_GRADES, MARKET_GRADE_LETTER, cosmeticGrade, gradeAfterRefurb, type MarketGrade, type MarketGradeLetter } from "./marketSell.ts";
 import {
   type ConditionAnswers,
   type FaultId,
@@ -119,7 +119,8 @@ export type GradingInput = {
 
 export type Reason = { code: string; text: string };
 export type GradingStatus = "not_tested" | "cannot_grade" | "needs_repair" | "incomplete" | "graded";
-export type GradeLetter = "A" | "B" | "C" | "D";
+/** The letters live beside the grade's words (marketSell.ts), so the answer names them without importing this engine. */
+export type GradeLetter = MarketGradeLetter;
 
 export type TestLine = {
   id: string;
@@ -170,7 +171,7 @@ export type Grading = {
 /* ─────────────────────────── the two scales ─────────────────────────── */
 
 /** One-to-one, and nothing else: the letter IS the SwapUp grade. */
-export const GRADE_LETTER: Readonly<Record<MarketGrade, GradeLetter>> = { Superb: "A", Good: "B", Fair: "C", "Best Value": "D" };
+export const GRADE_LETTER: Readonly<Record<MarketGrade, GradeLetter>> = MARKET_GRADE_LETTER;
 
 /** The one line every place that shows the letter carries. */
 export const LETTER_NOTE = "A = Superb, B = Good, C = Fair, D = Best Value — not CTIA.";

@@ -32,6 +32,10 @@ import type { BodyState, ConditionAnswers, ScreenState } from "./condition.ts";
 export const MARKET_GRADES = ["Superb", "Good", "Fair", "Best Value"] as const;
 export type MarketGrade = (typeof MARKET_GRADES)[number];
 
+/** The letter beside each grade (owner, 2026-10-17: "both scales") — a strict one-to-one translation, never CTIA. */
+export type MarketGradeLetter = "A" | "B" | "C" | "D";
+export const MARKET_GRADE_LETTER: Readonly<Record<MarketGrade, MarketGradeLetter>> = { Superb: "A", Good: "B", Fair: "C", "Best Value": "D" };
+
 export function isMarketGrade(g: unknown): g is MarketGrade {
   return typeof g === "string" && (MARKET_GRADES as readonly string[]).includes(g);
 }
@@ -90,6 +94,24 @@ export function cosmeticGrade(condition: Pick<ConditionAnswers, "screen" | "body
   const s = SCREEN_GRADE[condition.screen];
   const b = BODY_GRADE[condition.body];
   return s && b ? worse(s, b) : null;
+}
+
+// The grade ladder is rule G1's: a screen or body state with no grade is a defect, not a look.
+const onLadder = {
+  screen: (s: ScreenState) => SCREEN_GRADE[s] !== undefined,
+  body: (b: BodyState) => BODY_GRADE[b] !== undefined,
+};
+/** A screen or body state the grade can't see (lines, a cracked or dead screen, a cracked back): a defect, deducted. */
+export const isDefectState = { screen: (s: ScreenState) => !onLadder.screen(s), body: (b: BodyState) => !onLadder.body(b) };
+
+/**
+ * The grade a trade-in is priced at: rule G1 on what the grade can see. A defect (lines, a cracked
+ * or dead screen, a cracked back) is left out here and deducted instead. null = no condition.
+ * The PriceIQ trade-in (priceiqTradeIn.ts) and a per-grade rate card (ratecard.ts) both read it.
+ */
+export function tradeInGrade(condition: Pick<ConditionAnswers, "screen" | "body"> | null | undefined): MarketGrade | null {
+  if (!condition) return null;
+  return cosmeticGrade({ screen: onLadder.screen(condition.screen) ? condition.screen : "flawless", body: onLadder.body(condition.body) ? condition.body : "flawless" });
 }
 
 /* ─────────────────────────── PriceIQ's answer, as SwapUp keeps it ─────────────────────────── */

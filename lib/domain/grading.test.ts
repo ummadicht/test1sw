@@ -576,7 +576,7 @@ test("G48: camera sweep failed unconfirmed, display self-test passed → provisi
 /* ─────────────────────────── G49: the grade never prices ─────────────────────────── */
 
 test("G49: nothing that prices imports the grade", () => {
-  for (const f of ["offer.ts", "decision.ts", "bonus.ts", "ratecard.ts", "buySell.ts", "upgrade.ts", "marketSell.ts", "repair.ts", "credit.ts", "priceiqTradeIn.ts"]) {
+  for (const f of ["offer.ts", "decision.ts", "bonus.ts", "ratecard.ts", "buySell.ts", "upgrade.ts", "marketSell.ts", "repair.ts", "credit.ts", "priceiqTradeIn.ts", "premium.ts", "answer.ts"]) {
     const src = readFileSync(new URL(`./${f}`, import.meta.url), "utf8");
     assert.ok(!/from\s+["']\.\/(grading|gradingReport|phonecheck)(\.ts)?["']/.test(src), `${f} must not import the grading engine`);
   }

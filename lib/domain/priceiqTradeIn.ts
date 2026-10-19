@@ -32,10 +32,12 @@
  * guessed grade. Pure — no database, no clock.
  */
 import { fmtBp, inr, type BasisPoints, type Rupees } from "./money.ts";
-import type { BodyState, ConditionAnswers, ScreenState } from "./condition.ts";
+import type { ConditionAnswers } from "./condition.ts";
 import { combineDeductions, conditionDeductions, DEFECT_DEDUCTIONS, DEFECT_RULES, type DeductionPart, type QuoteLine, type RateCard } from "./ratecard.ts";
 // The cosmetic rule G1 from beside the grade's words — never the grading engine (grading.test.ts G49).
-import { cosmeticGrade, listingAt, marketUsable, onlyAboveWhy, sellFromListing, type MarketAnswer, type MarketGrade } from "./marketSell.ts";
+import { isDefectState, listingAt, marketUsable, onlyAboveWhy, sellFromListing, tradeInGrade, type MarketAnswer, type MarketGrade } from "./marketSell.ts";
+
+export { tradeInGrade };
 
 /** A deduction table: the percentages and the cap, minimum and cash step they combine under. */
 export type DeductionTable = Pick<RateCard, "deductions" | "maxDeductionBp" | "floorBp" | "roundTo">;
@@ -92,26 +94,9 @@ export type PriceiqMeta = {
   note?: string | null;
 };
 
-// The grade ladder is rule G1's: a screen or body state with no grade is a defect, not a look.
-const graded = {
-  screen: (s: ScreenState) => cosmeticGrade({ screen: s, body: "flawless" }) !== null,
-  body: (b: BodyState) => cosmeticGrade({ screen: "flawless", body: b }) !== null,
-};
-const isDefect = { screen: (s: ScreenState) => !graded.screen(s), body: (b: BodyState) => !graded.body(b) };
-
-/**
- * The grade the trade-in is priced at: the SwapUp grade's cosmetic rule on what the grade can
- * see. A defect (lines, a cracked or dead screen, a cracked back) is left out here and deducted
- * instead. null = no condition on the case.
- */
-export function tradeInGrade(condition: Pick<ConditionAnswers, "screen" | "body"> | null | undefined): MarketGrade | null {
-  if (!condition) return null;
-  return cosmeticGrade({ screen: graded.screen(condition.screen) ? condition.screen : "flawless", body: graded.body(condition.body) ? condition.body : "flawless" });
-}
-
-/** The defects on this phone, as the table's percentage lines — never a look the grade already prices. */
+/** The defects on this phone, as the table's percentage lines — never a look the grade already prices (tradeInGrade: marketSell.ts). */
 export function defectDeductions(table: Pick<DeductionTable, "deductions">, condition: ConditionAnswers): DeductionPart[] {
-  return conditionDeductions(table.deductions, condition, isDefect);
+  return conditionDeductions(table.deductions, condition, isDefectState);
 }
 
 export const BASE_LABEL = (grade: MarketGrade) => `Refurbished market price (${grade}) · PriceIQ`;
