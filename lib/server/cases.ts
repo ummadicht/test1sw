@@ -25,6 +25,9 @@ import { bestCampaign, type BonusResult, type Campaign } from "../domain/bonus";
 import { decide, type Decision } from "../domain/decision";
 import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
 import { buildOffer, expiredQuoteBlocker, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
+import { customerAnswer, type CustomerAnswer } from "../domain/answer";
+import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } from "../domain/premium";
+import { RuleError } from "../domain/errors";
 import { retiredSource } from "../domain/ratecard";
 import { coloursApp, storageOnSave } from "../domain/phoneLed";
 import { canHold } from "../domain/credit";
@@ -42,7 +45,7 @@ import {
   identityBlock,
   reconcileFaultSources,
 } from "../domain/gradeiqMap";
-import { CERT_ROWS, certChoices, certifyNeeded, certifyRow, certifySignals, isCertRow, readCertification, type CertRow, type CertifySignals } from "../domain/certify";
+import { CERT_ROWS, certChoices, certifyNeeded, certifyRow, certifySignals, isCertRow, readCertification, type Certification, type CertRow, type CertifySignals } from "../domain/certify";
 import { cameraEvidence, type GiqRow } from "./gradeiqBridge";
 import type { DeviceReport } from "../domain/diagnostics";
 
@@ -141,6 +144,10 @@ type CaseRow = {
   trade_value: number | null;
   bonus_value: number | null;
   payable: number | null;
+  /** Frozen at lock (migration 16): the SwapUp premium on the market price, its band, and who pays it back. */
+  premium_value: number | null;
+  premium_bp: number | null;
+  premium_funded_by: string | null;
   pickup_id: string | null;
   clearance: string | null;
   settled_at: string | null;
@@ -331,11 +338,15 @@ export type CaseView = {
   quote: PartnerQuote | null;
   quoteExpired: boolean;
   repairedQuote: PartnerQuote | null;
-  upgrade: UpgradeChoice | null;
+  /** The new phone. Its price is null for the partner (forViewer): with payable, it would give away the premium. */
+  upgrade: (Omit<UpgradeChoice, "price"> & { price: number | null }) | null;
   bonus: BonusApplied | null;
   decision: Decision | null;
   checks: Checks | null;
+  /** The market price held on the credit line (= what the partner pays back). */
   tradeValue: number | null;
+  /** The SwapUp premium credited on top of tradeValue at lock; null before lock, on a case locked before premiums, and for the partner. */
+  premiumValue: number | null;
   bonusValue: number | null;
   payable: number | null;
   pickupId: string | null;
@@ -409,14 +420,70 @@ function withoutGradeiqId(c: CaseCameraCheck): Omit<CaseCameraCheck, "gradeiqId"
 const VARIANT_SOURCES = new Set<string>(["measured", "catalogue", "customer", "advisor"]);
 const readVariantSource = (s: string | null): VariantSource | null => (s && VARIANT_SOURCES.has(s) ? (s as VariantSource) : null);
 
+/** A quote that ran out — or one from a source SwapUp no longer has (an older build's): re-asked, never locked on. */
+function quoteLapsed(c: CaseRow, quote: PartnerQuote | null): boolean {
+  return (!!quote?.validUntil && Date.parse(quote.validUntil) < Date.now()) || (!!quote && EDITABLE.includes(c.status) && retiredSource(quote.source?.kind));
+}
+
+function repairNotServicedFor(tm: TradeModel | null, org: ReturnType<typeof getOrg>): string | null {
+  return tm && org?.target_brand && tm.brand !== org.target_brand ? `This centre repairs ${org.target_brand} only — enter the customer's outside quote.` : null;
+}
+
+/**
+ * THE ANSWER for a case (lib/domain/offer.ts) from its stored rows ONLY — no re-price, no partner,
+ * PriceIQ or GradeIQ call, no grading report, no write: a few indexed SELECTs, so the customer's
+ * phone can read it every few seconds (deviceAnswer). toView puts the same Offer on the CaseView.
+ */
+function offerFor(c: CaseRow, store: StoreRow): Offer {
+  const tm = getTradeModel(c.model_id);
+  const org = getOrg(c.org_id);
+  const faults = parseJson<FaultId[]>(c.faults, []);
+  const condition = parseJson<ConditionAnswers | null>(c.condition, null);
+  const quote = parseJson<PartnerQuote | null>(c.quote, null);
+  const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
+  const upgrade = parseJson<UpgradeChoice | null>(c.upgrade, null);
+  const manualRepair = parseJson<ManualQuote | null>(c.manual_repair, null);
+  // With no new phone on an open case, ask the suggestion rule whether the catalogue HAS one,
+  // so the ask never says "nothing matches" after staff cleared it or on a desk-only case.
+  const newPhoneMatch =
+    tm && !upgrade && EDITABLE.includes(c.status)
+      ? suggestUpgrade({ brand: tm.brand, model: tm.model, series: tm.series, variant: c.variant }, newDevices(store.org_id)) !== null
+      : false;
+  return buildOffer({
+    status: c.status,
+    device: tm ? { label: `${tm.brand} ${tm.model}`, variant: c.variant, variants: parseJson<string[]>(tm.variants, []) } : null,
+    variantSource: c.variant ? readVariantSource(c.variant_source) : null,
+    measuredStorage: c.measured_storage ?? null,
+    storageQuotes: parseJson<StorageQuote[] | null>(c.storage_quotes, null),
+    faultCount: faults.length,
+    coverage: c.coverage,
+    repair: parseJson<RepairEstimate | null>(c.repair, null),
+    manualRepair,
+    repairNotServiced: repairNotServicedFor(tm, org),
+    quote,
+    quoteExpired: quoteLapsed(c, quote),
+    quoteBlocked: identityBlock(camera),
+    conditionProblems: condition ? conditionFloor(condition, faults) : [],
+    hasCondition: !!condition,
+    upgrade,
+    bonus: parseJson<BonusApplied | null>(c.bonus, null),
+    decision: parseJson<Decision | null>(c.decision, null),
+    tested: !!camera,
+    newPhoneMatch,
+    condition,
+    // Past the counter, the figures frozen at lock win over the quote and bonus JSON.
+    locked: EDITABLE.includes(c.status) ? null : { trade: c.trade_value, premium: c.premium_value, premiumBp: c.premium_bp, bonus: c.bonus_value, payable: c.payable },
+    testProgramme: !!org?.demo,
+  });
+}
+
 function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {}): CaseView {
   const tm = getTradeModel(c.model_id);
   const advisor = db().prepare(`SELECT name FROM users WHERE id = ?`).get(c.advisor_id) as { name: string } | undefined;
   const faults = parseJson<FaultId[]>(c.faults, []);
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
   const quote = parseJson<PartnerQuote | null>(c.quote, null);
-  // A quote from a source SwapUp no longer has (an older build's) is treated as lapsed: re-asked, never locked on.
-  const quoteExpired = (!!quote?.validUntil && Date.parse(quote.validUntil) < Date.now()) || (!!quote && EDITABLE.includes(c.status) && retiredSource(quote.source?.kind));
+  const quoteExpired = quoteLapsed(c, quote);
   const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   const org = getOrg(c.org_id);
   const partner = org?.partner_id ? partnerMode(org.partner_id) : null;
@@ -461,7 +528,7 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     refurbCost: parseJson<RefurbCost | null>(c.refurb_cost, null),
     marketSell: caseMarketSell({ modelId: tm?.id ?? null, variant: c.variant, brand: tm?.brand ?? null, model: tm?.model ?? null, condition }),
     partnerManual: parseJson<PartnerManual | null>(c.partner_manual, null),
-    repairNotServiced: tm && org?.target_brand && tm.brand !== org.target_brand ? `This centre repairs ${org.target_brand} only — enter the customer's outside quote.` : null,
+    repairNotServiced: repairNotServicedFor(tm, org),
     repair: parseJson<RepairEstimate | null>(c.repair, null),
     quote,
     quoteExpired,
@@ -471,6 +538,7 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     decision: parseJson<Decision | null>(c.decision, null),
     checks: parseJson<Checks | null>(c.checks, null),
     tradeValue: c.trade_value,
+    premiumValue: c.premium_value,
     bonusValue: c.bonus_value,
     payable: c.payable,
     pickupId: c.pickup_id,
@@ -506,34 +574,7 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     }
   }
   // The answer is worked out for every status; `open` says whether it can still be acted on.
-  // With no new phone on an open case, ask the suggestion rule whether the catalogue HAS one,
-  // so the ask never says "nothing matches" after staff cleared it or on a desk-only case.
-  const newPhoneMatch =
-    tm && !view.upgrade && EDITABLE.includes(c.status)
-      ? suggestUpgrade({ brand: tm.brand, model: tm.model, series: tm.series, variant: c.variant }, newDevices(store.org_id)) !== null
-      : false;
-  view.offer = buildOffer({
-    status: c.status,
-    device: tm ? { label: `${tm.brand} ${tm.model}`, variant: c.variant, variants: parseJson<string[]>(tm.variants, []) } : null,
-    variantSource: view.variantSource,
-    measuredStorage: view.measuredStorage,
-    storageQuotes: parseJson<StorageQuote[] | null>(c.storage_quotes, null),
-    faultCount: faults.length,
-    coverage: c.coverage,
-    repair: view.repair,
-    manualRepair: view.manualRepair,
-    repairNotServiced: view.repairNotServiced,
-    quote: view.quote,
-    quoteExpired,
-    quoteBlocked: view.quoteBlocked,
-    conditionProblems: view.conditionProblems,
-    hasCondition: !!condition,
-    upgrade: view.upgrade,
-    bonus: view.bonus,
-    decision: view.decision,
-    tested: !!camera,
-    newPhoneMatch,
-  });
+  view.offer = offerFor(c, store);
   return view;
 }
 
@@ -547,7 +588,31 @@ function lockBlockers(v: CaseView): string[] {
   // Re-quote fixes a rate-card or live quote; one read off the partner's app needs today's from the app.
   else if (v.quoteExpired) out.push(expiredQuoteBlocker(v.quote));
   if (!v.upgrade) out.push("Choose the new phone.");
+  // We pay + the bonus must come off the new phone: never a share floored at zero (premium.ts exchange).
+  else if (v.quote?.status === "priced" && v.quote.amount) {
+    const bonus = v.bonus ? (v.bonus.override?.amount ?? v.bonus.amount) : 0;
+    try {
+      exchange({ market: v.quote.amount, bonus, newPrice: v.upgrade.price ?? 0 });
+    } catch (e) {
+      if (!(e instanceof RuleError)) throw e;
+      out.push(NEW_PHONE_TOO_CHEAP);
+    }
+  }
   return out;
+}
+
+/**
+ * The customer's answer for their phone (GET /api/device/status → answer, docs/MOBILE-API.md §4):
+ * the whitelist slice of the case's answer (lib/domain/answer.ts customerAnswer). Read only —
+ * built from the stored rows (offerFor): it never re-prices, never asks the partner, PriceIQ or
+ * GradeIQ, and never writes, so a phone polling every 5 s can never loop a partner with the IMEI.
+ * null when the case is gone.
+ */
+export function deviceAnswer(caseId: string): CustomerAnswer | null {
+  const c = row(caseId);
+  const store = c ? getStore(c.store_id) : null;
+  if (!c || !store) return null;
+  return customerAnswer(offerFor(c, store).answer);
 }
 
 export function getCase(u: SessionUser, id: string): CaseView {
@@ -574,6 +639,11 @@ export function forViewer(u: SessionUser, view: CaseView): CaseView {
     ...view,
     refurbCost: null,
     offer: null,
+    // The premium is the programme's, not the partner's — and the new phone's price with what the
+    // customer paid would give it away (new phone − payable − trade-in − bonus).
+    premiumValue: null,
+    payable: null,
+    upgrade: view.upgrade ? { ...view.upgrade, price: null } : null,
     marketSell: { amount: null, why: "Not shown to the partner.", source: view.marketSell.source },
     camera: view.camera ? { ...view.camera, grade: null, gradeRange: null, flags: [] } : null,
     // The answer the store gave its customer — the decision and its repair figures — is the store's.
@@ -776,21 +846,35 @@ export function markLcdOverride(caseId: string, info: { by: string; userId: stri
 const COLOURS_FRESH_MS = 10 * 60_000;
 
 /**
+ * "All fine — screen OK, body like new" (owner, 2026-10-19: "Skip and get on advisor app fast"):
+ * the three taps of "Check the phone" in one, by the same rules — the liquid indicator "Can't see",
+ * because nobody looked at it (honest: not inspected).
+ */
+export const ALL_FINE: readonly { row: CertRow; value: string }[] = [
+  { row: "screen", value: "ok" },
+  { row: "body", value: "like_new" },
+  { row: "liquid", value: "cant_see" },
+];
+
+/**
  * THE ADVISOR CERTIFIES one row of "Check the phone" (lib/domain/certify.ts) —
  * one tap: the screen (while the customer's phone shows the test colours), the
- * body, or the liquid indicator. By name (the signed-in staff member), with the
- * time and whether the phone was showing the colours. The faults, their sources,
- * the condition and the certification move in ONE transaction; then the report
- * follows and the case is re-priced outside it, as an edit is. Tapping the same
- * value again changes nothing. Store staff only, while the case is at the counter.
+ * body, or the liquid indicator — or all three at once with `allFine: true`
+ * (ALL_FINE). By name (the signed-in staff member), with the time and whether
+ * the phone was showing the colours. The faults, their sources, the condition
+ * and the certification move in ONE transaction; then the report follows and
+ * the case is re-priced outside it, as an edit is. Tapping the same value again
+ * changes nothing. Store staff only, while the case is at the counter.
  */
-export async function certifyCase(u: SessionUser, id: string, input: { row?: unknown; value?: unknown; testSessionId?: unknown }): Promise<CaseView> {
+export async function certifyCase(u: SessionUser, id: string, input: { row?: unknown; value?: unknown; testSessionId?: unknown; allFine?: unknown }): Promise<CaseView> {
   if (u.role !== "advisor" && u.role !== "store_manager") throw new HttpError(403, "Only store staff certify a phone.");
   const { c, store } = caseInScope(u, id);
   if (!EDITABLE.includes(c.status)) throw new HttpError(409, "The case is past the counter.");
-  if (!isCertRow(input?.row)) throw new HttpError(400, "Say which row: screen, body or liquid.");
-  const row0: CertRow = input.row;
-  const value = typeof input.value === "string" ? input.value.trim().toLowerCase() : "";
+  const allFine = input?.allFine === true;
+  if (!allFine && !isCertRow(input?.row)) throw new HttpError(400, "Say which row: screen, body or liquid.");
+  const taps: readonly { row: CertRow; value: string }[] = allFine
+    ? ALL_FINE
+    : [{ row: input.row as CertRow, value: typeof input.value === "string" ? input.value.trim().toLowerCase() : "" }];
   let session: { id: string; phone_phase: string | null; phone_phase_at: string | null } | undefined;
   if (input.testSessionId !== undefined && input.testSessionId !== null) {
     if (typeof input.testSessionId !== "string") throw new HttpError(400, "Send the test session's id.");
@@ -802,7 +886,7 @@ export async function certifyCase(u: SessionUser, id: string, input: { row?: unk
   const withColours = session?.phone_phase === "colours" && !!session.phone_phase_at && Date.now() - Date.parse(session.phone_phase_at) < COLOURS_FRESH_MS;
   // The Screen waits while the customer's phone is still testing and will show the test colours
   // after: a tap now would be a look at the test screens (SwapUp Store holds the row the same way).
-  if (row0 === "screen" && session && !withColours) {
+  if (taps.some((t) => t.row === "screen") && session && !withColours) {
     const full = db().prepare(`SELECT * FROM test_sessions WHERE id = ?`).get(session.id) as (GiqRow & { phone_phase_at?: string | null }) | undefined;
     if (full && ["waiting", "opened", "joined", "testing"].includes(full.status) && certifyBlock(c, full).block.colours === "waiting")
       throw new HttpError(409, "Wait for the test colours — the phone is still testing.");
@@ -815,12 +899,18 @@ export async function certifyCase(u: SessionUser, id: string, input: { row?: unk
     const prevCondition = parseJson<ConditionAnswers | null>(fresh.condition, null);
     const camera = parseJson<CaseCameraCheck | null>(fresh.camera_check, null);
     const prevCert = readCertification(parseJson<unknown>(fresh.certification, null));
-    const r = certifyRow(
-      { faults: prevFaults, sources: reconcileFaultSources(parseJson<FaultSources>(fresh.fault_sources, {}), prevFaults), condition: prevCondition, cameraFloor: camera?.floor ?? null, certification: prevCert },
-      { row: row0, value, by: u.name, userId: u.id, at: nowIso(), withColours, testSessionId: session?.id ?? null }
-    );
-    if ("error" in r) throw new HttpError(400, r.error);
-    if (!r.changed) return { changed: false, describes: false };
+    // Each tap on what the one before left — exactly as the taps one by one would.
+    let r = { faults: prevFaults, sources: reconcileFaultSources(parseJson<FaultSources>(fresh.fault_sources, {}), prevFaults), condition: prevCondition, certification: prevCert as Certification };
+    const at = nowIso();
+    const done: { row: CertRow; value: string; prev: string | null; faultsAdded: FaultId[]; faultsRemoved: FaultId[] }[] = [];
+    for (const t of taps) {
+      const step = certifyRow({ ...r, cameraFloor: camera?.floor ?? null }, { row: t.row, value: t.value, by: u.name, userId: u.id, at, withColours, testSessionId: session?.id ?? null });
+      if ("error" in step) throw new HttpError(400, step.error);
+      if (!step.changed) continue;
+      done.push({ row: t.row, value: t.value, prev: r.certification[t.row]?.value ?? null, faultsAdded: step.faultsAdded, faultsRemoved: step.faultsRemoved });
+      r = { faults: step.faults, sources: step.sources, condition: step.condition, certification: step.certification };
+    }
+    if (!done.length) return { changed: false, describes: false };
     const describes = JSON.stringify(r.faults) !== JSON.stringify(prevFaults) || JSON.stringify(r.condition) !== JSON.stringify(prevCondition);
     const now = nowIso();
     // Before Apply the case has no condition, and a tap doesn't invent one (Apply folds it in).
@@ -830,15 +920,16 @@ export async function certifyCase(u: SessionUser, id: string, input: { row?: unk
          WHERE id = ? AND status IN ('draft','quoted')`
       )
       .run(JSON.stringify(r.faults), JSON.stringify(r.sources), r.condition ? JSON.stringify(r.condition) : null, JSON.stringify(r.certification), describes ? 1 : 0, now, id);
-    audit({
-      userId: u.id,
-      orgId: c.org_id,
-      storeId: store.id,
-      action: "case.certify",
-      entity: "case",
-      entityId: id,
-      detail: { row: row0, value, prev: prevCert[row0]?.value ?? null, withColours, testSessionId: session?.id ?? null, faultsAdded: r.faultsAdded, faultsRemoved: r.faultsRemoved },
-    });
+    for (const d of done)
+      audit({
+        userId: u.id,
+        orgId: c.org_id,
+        storeId: store.id,
+        action: "case.certify",
+        entity: "case",
+        entityId: id,
+        detail: { row: d.row, value: d.value, prev: d.prev, withColours, testSessionId: session?.id ?? null, faultsAdded: d.faultsAdded, faultsRemoved: d.faultsRemoved, ...(allFine ? { allFine: true } : {}) },
+      });
     return { changed: true, describes };
   });
   if (!out.changed) return getCase(u, id);
@@ -1304,9 +1395,10 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
     }
   } else storageQuotes = null;
 
-  // 3. Bonus — from the best active campaign for this upgrade.
+  // 3. Bonus — from the best active campaign for this upgrade. Its basis is the MARKET price, so a
+  //    trade-in-value campaign never compounds the SwapUp premium.
   const upgrade = parseJson<UpgradeChoice | null>(c.upgrade, null);
-  const asIs = quote?.status === "priced" ? quote.amount : null;
+  const market = quote?.status === "priced" ? quote.amount : null;
   const repairedVal = repairedQuote?.status === "priced" ? repairedQuote.amount : null;
   const repairPays = repair?.status === "quoted" ? repair.customerPays : null;
   const repairRatio = repairPays !== null && repairedVal ? repairPays / repairedVal : null;
@@ -1319,7 +1411,7 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
       oldAgeYears: tm.release_year ? Math.max(0, thisYear() - tm.release_year) : null,
       targetSeries: upgrade.series,
       newPrice: upgrade.price,
-      tradeInValue: asIs ?? 0,
+      tradeInValue: market ?? 0,
       repairRatio,
       storeKind: store.kind,
     });
@@ -1338,13 +1430,17 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
     bonus = best ? { ...best.result, campaignName: best.campaign.name, override } : null;
   } else bonus = null;
 
-  // 4. Decision — the bonus is passed for display only (see decide()).
+  // 4. Decision — the as-is value is what the customer is paid: the market price + the SwapUp
+  //    premium (premium.ts, the rule exchange() and the lock use). The bonus is for display only.
   const bonusAmount = bonus ? (bonus.override?.amount ?? bonus.amount) : 0;
+  const premium = premiumOn(market)?.amount ?? 0;
+  const wePay = market === null ? null : market + premium;
   const decision = decide({
     repairPays,
     repairCovered: repair?.status === "quoted" && repair.customerPays === 0 && repair.coverage !== "none" && repair.basis === "book",
     repairedValue: repairedVal,
-    asIsValue: asIs,
+    asIsValue: wePay,
+    premium,
     valueSource: quote?.source.kind ?? null,
     upgrade: upgrade ? { label: upgrade.label, newPrice: upgrade.price, bonus: bonusAmount, supportEndYear: upgrade.supportEndYear } : null,
     old: { ageYears: tm?.release_year ? Math.max(0, thisYear() - tm.release_year) : null, supportEndYear: tm?.support_end_year ?? null },
@@ -1356,7 +1452,7 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
     thresholds: settings.thresholds,
   });
 
-  const status: CaseStatus = asIs !== null || repairPays !== null ? "quoted" : "draft";
+  const status: CaseStatus = market !== null || repairPays !== null ? "quoted" : "draft";
   db()
     .prepare(
       `UPDATE cases SET repair = ?, quote = ?, repaired_quote = ?, storage_quotes = ?, bonus = ?, decision = ?, status = ?, updated_at = ?
@@ -1446,9 +1542,12 @@ export type LockInput = {
 };
 
 /**
- * Take the trade-in: the customer gets the partner's value + the bonus off the
- * new phone, the store keeps the old phone, and the trade-in value is HELD on
- * the store's credit line until the partner collects (or clears) it.
+ * Take the trade-in: the customer gets the market price + the SwapUp premium +
+ * the bonus off the new phone, the store keeps the old phone, and the MARKET
+ * price is HELD on the store's credit line until the partner collects (or
+ * clears) it. The premium, like the bonus, is the programme's: frozen here
+ * (premium_value, premium_bp, premium_funded_by) and claimed on /admin/claims,
+ * never a hold and never a chargeback.
  */
 export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseView {
   requireCounter(u);
@@ -1503,12 +1602,21 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
       .get(c.id, ...OPEN_TRADE_STATUSES, ...mine, ...mine) as { ref: string; name: string } | undefined;
     if (dup) throw new HttpError(409, `IMEI already traded in (${dup.ref}, ${dup.name}).`);
 
-    const T = view.quote!.amount!;
-    const check = canHold(storePolicy(store), storeEvents(store.id), T);
+    const M = view.quote!.amount!;
+    const check = canHold(storePolicy(store), storeEvents(store.id), M);
     if (!check.ok) throw new HttpError(409, check.reason);
     const B = view.bonus ? (view.bonus.override?.amount ?? view.bonus.amount) : 0;
-    const price = view.upgrade!.price;
-    const payable = Math.max(0, price - T - B);
+    const price = parseJson<UpgradeChoice | null>(c.upgrade, null)!.price;
+    // The one formula (premium.ts): we pay M + P, hold M, the customer pays the rest — never floored.
+    let x: ReturnType<typeof exchange>;
+    try {
+      x = exchange({ market: M, bonus: B, newPrice: price });
+    } catch (e) {
+      if (e instanceof RuleError) throw new HttpError(409, e.message);
+      throw e;
+    }
+    const payable = x.customerPays;
+    const premiumFundedBy = getOrg(c.org_id)?.name ?? "The programme";
     const now = nowIso();
     const customer: Customer = { name: name.slice(0, 80), phone, idType, idLast4 };
     const checks: Checks = {
@@ -1525,16 +1633,16 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
 
     const upd = db()
       .prepare(
-        `UPDATE cases SET status = 'locked', customer = ?, checks = ?, trade_value = ?, bonus_value = ?, payable = ?, locked_at = ?, updated_at = ?
+        `UPDATE cases SET status = 'locked', customer = ?, checks = ?, trade_value = ?, premium_value = ?, premium_bp = ?, premium_funded_by = ?, bonus_value = ?, payable = ?, locked_at = ?, updated_at = ?
          WHERE id = ? AND status = 'quoted'`
       )
-      .run(JSON.stringify(customer), JSON.stringify(checks), T, B, payable, now, now, id);
+      .run(JSON.stringify(customer), JSON.stringify(checks), M, x.premium, x.premiumBp, premiumFundedBy, B, payable, now, now, id);
     if (upd.changes !== 1) throw new HttpError(409, "This case changed — reload.");
-    postEvents(store.id, [{ kind: "hold", caseId: id, amount: T, at: now, note: `Trade-in ${c.ref}` }], u.id);
+    postEvents(store.id, [{ kind: "hold", caseId: id, amount: x.hold, at: now, note: `Trade-in ${c.ref}` }], u.id);
     // The report as it stands at hand-over, frozen: the partner's evidence at pickup and clearance.
     // Inside this transaction, so it is exactly the phone that was locked (issuing reads only the database).
     issueQuietly(id, "traded_in", u.id, { final: true });
-    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.lock", entity: "case", entityId: id, detail: { tradeValue: T, bonus: B, payable, source: view.quote!.source.kind, kym: checks.kym, storage: { variant: c.variant, source: c.variant_source, seen: checks.storageSeen === true } } });
+    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.lock", entity: "case", entityId: id, detail: { tradeValue: M, premium: { amount: x.premium, bp: x.premiumBp, rule: PREMIUM_RULE_VERSION, fundedBy: premiumFundedBy }, wePay: x.wePay, bonus: B, payable, source: view.quote!.source.kind, kym: checks.kym, storage: { variant: c.variant, source: c.variant_source, seen: checks.storageSeen === true } } });
     return getCase(u, id);
   });
 }

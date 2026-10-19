@@ -489,6 +489,17 @@ export const MIGRATIONS: readonly string[] = [
   UPDATE trade_models SET source = json_set(source, '$.kind', 'approximate')
    WHERE json_valid(source) AND json_extract(source, '$.kind') NOT IN ('oem_public', 'client', 'manual', 'approximate');
   `,
+  /* 16 — the SwapUp premium (lib/domain/premium.ts): programme-funded like the
+          bonus, frozen at lock. premium_value = rupees credited to the customer
+          on top of the market price (trade_value); premium_bp = the band it came
+          from; premium_funded_by = who pays it back (the programme's name, as
+          the claims page groups it). NULL on every case locked before premiums
+          (they were paid trade_value only); open cases work it out from the
+          quote. Additive only. */ `
+  ALTER TABLE cases ADD COLUMN premium_value INTEGER;
+  ALTER TABLE cases ADD COLUMN premium_bp INTEGER;
+  ALTER TABLE cases ADD COLUMN premium_funded_by TEXT;
+  `,
 ];
 
 function migrate(conn: Database.Database): void {

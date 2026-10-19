@@ -25,6 +25,7 @@ type ActionBody = {
   row?: unknown;
   value?: unknown;
   testSessionId?: unknown;
+  allFine?: unknown;
 };
 
 /**
@@ -64,9 +65,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         return transition(() => cancelTradeIn(u, id, str(b.reason) ?? ""));
       case "data_clear":
         return recordDataClear(u, id, { ...(b.steps ?? {}), note: b.note });
-      // The advisor certifies one row of "Check the phone" by eye: {row: screen|body|liquid, value, testSessionId?}.
+      // The advisor certifies one row of "Check the phone" by eye: {row: screen|body|liquid, value, testSessionId?},
+      // or all three at once — "All fine — screen OK, body like new": {allFine: true, testSessionId?}.
       case "certify":
-        return certifyCase(u, id, { row: b.row, value: b.value, testSessionId: b.testSessionId });
+        return certifyCase(u, id, { row: b.row, value: b.value, testSessionId: b.testSessionId, allFine: b.allFine });
       case "bonus_override": {
         if (b.bp !== null && typeof b.bp !== "number") throw new HttpError(400, "Send the bonus in basis points, or null to reset it.");
         return setBonusOverride(u, id, { bp: b.bp, reason: str(b.reason) });
