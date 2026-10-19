@@ -18,8 +18,10 @@
  *            moves a price. The defects go in the note, at most two, then "+N more".
  *   market   M — what the buyback partner pays for this phone (the case's trade-in quote). Shown to
  *            the customer only from the partner's own price (a typed quote or its rate card): a
- *            PriceIQ trade-in is SwapUp's estimate, so the customer waits while staff see it.
- *   we_pay   W = M + the SwapUp premium (premium.ts). The premium is never named to the customer.
+ *            PriceIQ trade-in is SwapUp's estimate, so the customer waits while staff see it. It
+ *            names a grade only when the price is FOR the grade the grade line shows; otherwise
+ *            "Market price ₹X", and staff read which grade it was priced at.
+ *   we_pay  W = M + the SwapUp premium (premium.ts). The premium is never named to the customer.
  *   bonus    the upgrade bonus, with a new phone only.
  *   repair   the customer's repair price (the refurb quote), at the counter or once chosen.
  *
@@ -50,7 +52,7 @@ export type Answer = {
   /** The CUSTOMER's headline. Staff screens keep Offer.headline. */
   headline: string;
   grade: { letter: MarketGradeLetter; word: MarketGrade; note: string | null } | null;
-  /** letter/word = the grade the market line names; null when it names none (the price came from a lower grade). */
+  /** letter/word = the grade the market line names; null when it names none (the price is for another grade than the one shown). */
   market: { amount: Rupees; letter: MarketGradeLetter | null; word: MarketGrade | null; source: string } | null;
   premium: { amount: Rupees; bp: BasisPoints; rule: string } | null;
   wePay: Rupees | null;
@@ -207,10 +209,15 @@ export function buildAnswer(i: AnswerInput): Answer {
   const bonusAmount = traded && i.locked ? (i.locked.bonus ?? 0) : (i.bonus?.amount ?? 0);
   const bonus = i.newPhone && wePay !== null && bonusAmount > 0 && !chosen && !cancelled ? { amount: bonusAmount, bp: i.bonus?.bp ?? 0 } : null;
 
-  // ── The market line's grade: the phone's own, unless the price came from a lower one ──
+  // ── The market line's grade: named only when it is the grade the price is FOR (R13) ──
+  // The price is for the phone's look (what the trade-in is priced at; a source with no grade of
+  // its own prices that too), or for the lower grade a listing or a card's column came from. The
+  // line names it only when the grade line shows that same grade: a cracked back looks Superb and
+  // is priced off grade A less the back glass, but shows grade B — so "Market price ₹X", no grade.
   const wanted = tradeInGrade(i.condition);
   const lower = !!i.market?.priceGrade && !!wanted && i.market.priceGrade !== wanted;
-  const named = word && !lower ? word : null;
+  const pricedAt = i.market?.priceGrade ?? wanted;
+  const named = word && pricedAt === word ? word : null;
   const market: Answer["market"] =
     M === null ? null : { amount: M, letter: named ? MARKET_GRADE_LETTER[named] : null, word: named, source: i.market?.source ?? "none" };
 
@@ -261,10 +268,13 @@ export function buildAnswer(i: AnswerInput): Answer {
           : HEADLINE[i.recommendation ?? "cannot_say"];
 
   // ── Staff-only words ──
-  const marketNotes = [
-    open && i.market?.source === "priceiq" ? ESTIMATE_NOTE : null,
-    lower && wanted ? `Priced at grade ${MARKET_GRADE_LETTER[i.market!.priceGrade!]} — none listed at grade ${MARKET_GRADE_LETTER[wanted]}.` : null,
-  ].filter((x): x is string => !!x);
+  // The grade the price is for, whenever the line doesn't name it or it isn't the phone's look:
+  // "Priced at grade A less back glass cracked." / "Priced at grade C — none listed at grade B."
+  const pricedNote =
+    pricedAt && wanted && (lower || (word && !named))
+      ? `Priced at grade ${MARKET_GRADE_LETTER[pricedAt]}${note ? ` less ${note}` : ""}${lower ? ` — none listed at grade ${MARKET_GRADE_LETTER[wanted]}` : ""}.`
+      : null;
+  const marketNotes = [open && i.market?.source === "priceiq" ? ESTIMATE_NOTE : null, pricedNote].filter((x): x is string => !!x);
   const pct = premium && premium.bp ? ` (${fmtBp(premium.bp)}${premiumEdge !== null ? `, lifted to what ${inr(premiumEdge)} earns` : ""})` : "";
   const staffNotes = {
     market: market && marketNotes.length ? marketNotes.join(" ") : null,

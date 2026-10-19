@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { buildAnswer, customerAnswer, defectNote, displayGrade, CANCELLED_TEXT, CONFIRMING, ESTIMATE_NOTE, WORKING_OUT, type Answer, type AnswerInput } from "./answer.ts";
 import { HEALTHY, type ConditionAnswers } from "./condition.ts";
 import { gradeAfterRefurb, tradeInGrade, MARKET_GRADES, type MarketGrade } from "./marketSell.ts";
+import { DEFECT_DEDUCTIONS, priceFromCard, type RateCard } from "./ratecard.ts";
+import { CARD } from "./fixtures.ts";
 
 /* ─────────────────────────── fixtures (shared with swapup-mobile: copy verbatim) ─────────────────────────── */
 
@@ -306,6 +308,55 @@ test("market line: priced from a LOWER grade than the phone's — 'Market price 
   const own = buildAnswer(f1({ condition: cond({ body: "scuffed" }), market: { amount: 25_000, source: "partner_ratecard", priceGrade: "Good" } }));
   assert.equal(own.lines.find((l) => l.key === "market")!.text, "Market price for grade B ₹25,000");
   assert.equal(own.staffNotes.market, null);
+});
+
+/**
+ * F11 — a cracked back on a per-grade card (max 40,000 · good 30,000 · fair 25,000 · best value
+ * 20,000): its look is Superb, so the card prices it off grade A less 15% back glass = ₹34,000;
+ * the grade line shows grade B (never better than after repair). The card's own grade B is
+ * ₹30,000, so the market line names no grade (R13: it names the grade the price is FOR).
+ */
+const PER_GRADE: RateCard = {
+  ...CARD,
+  deductions: DEFECT_DEDUCTIONS,
+  source: { kind: "partner_ratecard", label: "Week 43", effectiveFrom: "2026-10-19" },
+  entries: [{ modelId: "galaxy-s23-ultra", variant: "256GB", maxPrice: 40_000, gradePrices: { Good: 30_000, Fair: 25_000, "Best Value": 20_000 } }],
+};
+const BACK_CRACKED = cond({ body: "back_cracked", accessories: { charger: true, box: true, bill: true }, age: "lt3m" });
+const F11_LINES = [
+  { key: "grade", text: "Current grade B", note: "back glass cracked", amount: null },
+  { key: "market", text: "Market price ₹34,000", note: null, amount: 34000 },
+  { key: "we_pay", text: "We pay you ₹35,020", note: null, amount: 35020 },
+];
+
+test("market line F11: a cracked back on a per-grade card — priced at grade A less the back glass, shown as grade B — 'Market price ₹34,000', the grade for staff only", () => {
+  const q = priceFromCard(PER_GRADE, "galaxy-s23-ultra", "256GB", BACK_CRACKED);
+  assert.ok(q.status === "priced");
+  assert.deepEqual([q.amount, q.grade], [34_000, "Superb"], "grade A's price less 15% back glass");
+  const a = buildAnswer(f1({ condition: BACK_CRACKED, market: { amount: q.amount, source: "partner_ratecard", priceGrade: q.grade ?? null }, newPhone: null, bonus: null, repair: { amount: null, covered: false, coverage: "none", nothingToRepair: true } }));
+  const c = customerAnswer(a);
+  assert.ok(c.ready);
+  if (!c.ready) return;
+  assert.deepEqual(c.lines, F11_LINES);
+  assert.deepEqual(c.grade, { letter: "B", word: "Good", note: "back glass cracked" });
+  assert.deepEqual(c.market, { amount: 34_000, letter: null, word: null });
+  assert.equal(a.staffNotes.market, "Priced at grade A less back glass cracked.");
+  // A typed quote is priced at the look too: the same phone names no grade either.
+  const typed = buildAnswer(f1({ condition: BACK_CRACKED, market: { amount: 34_000, source: "partner_manual", priceGrade: null } }));
+  assert.equal(typed.lines.find((l) => l.key === "market")!.text, "Market price ₹34,000");
+  assert.equal(typed.staffNotes.market, "Priced at grade A less back glass cracked.");
+  // Where the price IS for the grade shown, the line names it: a card listing nothing at A, priced at B.
+  const atB = buildAnswer(f1({ condition: BACK_CRACKED, market: { amount: 25_500, source: "partner_ratecard", priceGrade: "Good" } }));
+  assert.equal(atB.lines.find((l) => l.key === "market")!.text, "Market price for grade B ₹25,500");
+  assert.equal(atB.staffNotes.market, "Priced at grade B less back glass cracked — none listed at grade A.");
+  // Every look the grade line shows as its own still names it (F1 · F4 · F5 above, and these).
+  for (const body of ["flawless", "scuffed", "dented", "bent"] as const) {
+    const ph = cond({ body });
+    const at = tradeInGrade(ph)!;
+    const own = buildAnswer(f1({ condition: ph, market: { amount: 25_000, source: "partner_ratecard", priceGrade: at } }));
+    assert.equal(own.market!.word, at, body);
+    assert.equal(own.staffNotes.market, null, body);
+  }
 });
 
 /* ─────────────────────────── staff notes ─────────────────────────── */

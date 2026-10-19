@@ -392,6 +392,43 @@ test("rate card by grade: the market price is the card's price at the phone's gr
   }
 });
 
+test("rate card by grade: a cracked back is priced off grade A less the back glass but shows grade B — the customer's market line names no grade", async () => {
+  disconnectPriceiq();
+  resetPriceiqState();
+  try {
+    uploadRateCard(partner, {
+      label: "Week 43",
+      effectiveFrom: "2026-10-19",
+      quoteValidityDays: 3,
+      csv: "model_id,variant,max_price,good_price,fair_price,best_value_price\ngalaxy-s23-ultra,256GB,40000,30000,25000,20000\n",
+      deductions: DEFECT_DEDUCTIONS,
+      activate: true,
+    });
+    const t = await testedCase();
+    const v = await cases.updateCase(adv, t.caseId, {
+      modelId: "galaxy-s23-ultra",
+      variant: "256GB",
+      faults: ["back_cracked"],
+      condition: { ...COND, screen: "flawless", body: "back_cracked", accessories: { charger: true, box: true, bill: true }, age: "lt3m" },
+    });
+    assert.equal(v.quote?.source.kind, "partner_ratecard");
+    assert.deepEqual([v.quote?.amount, v.quote?.grade, v.quote?.lines[0].label], [34_000, "Superb", "Market price grade A · Week 43"]);
+    const staff = v.offer!.answer;
+    assert.equal(staff.staffNotes.market, "Priced at grade A less back glass cracked.");
+    const s = sessions.deviceStatus(t.ticket).answer;
+    assert.ok(s?.ready, JSON.stringify(s));
+    if (!s?.ready) return;
+    assert.deepEqual(s.lines, staff.lines, "the phone prints the desk's lines");
+    const [grade, market, wePay] = s.lines;
+    assert.deepEqual([grade.text, grade.note], ["Current grade B", "back glass cracked"]);
+    assert.equal(market.text, "Market price ₹34,000", "never 'for grade B': the card's grade B is ₹30,000");
+    assert.equal(wePay.text, "We pay you ₹35,020");
+    assert.deepEqual(s.market, { amount: 34_000, letter: null, word: null });
+  } finally {
+    connectPriceiq();
+  }
+});
+
 /* ─────────────────────────── one-tap "All fine" (R14) ─────────────────────────── */
 
 test("All fine: screen OK, body like new, liquid indicator 'Can't see' — by name, exactly as the three taps", async () => {

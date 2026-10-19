@@ -563,15 +563,20 @@ type Answer = {
 | key | when | `text` | `note` |
 | --- | --- | --- | --- |
 | `grade` | the case has a condition | `Current grade C (Fair)`; with a defect `Current grade A` | the defects, at most two then `+N more` ("screen cracked", "back glass cracked", "doesn't switch on" alone…); never scratches, scuffs, dents or a bent frame |
-| `market` | there is a market price | `Market price for grade C ₹25,000`; `Market price ₹25,000` when the price came from a lower grade than the phone's (or no grade is known) | — |
+| `market` | there is a market price | `Market price for grade C ₹25,000` when the price is FOR the grade the grade line shows; otherwise `Market price ₹25,000` (a lower grade's price, a cracked back priced at its grade A look but shown as B, or no grade known) | — |
 | `we_pay` | with `market` | `We pay you ₹26,000`; traded `We paid you ₹26,000` | — |
 | `bonus` | a new phone, a bonus > 0, a market price; not after "repair chosen" | `+ ₹6,199 bonus if you exchange with a new device`; traded `+ ₹6,199 bonus with the Galaxy S26 Ultra 256GB` | the new phone's label (open) |
 | `repair` | something to repair, not traded | `or repair it for ₹34,096` · `or repair it free — covered by warranty` / `… Care+` · `or repair it — the advisor will quote the price`; repair chosen `Repair ₹34,096` / `Repair — covered by warranty` | — |
 
 The grade is the worse of the look the trade-in is priced at (rule G1, defects set aside) and the
 grade after refurb — display only, so a cracked back never reads better than the report's
-after-repair grade. The market line names the phone's own grade; the "priced at grade C — none listed
-at grade B" detail is `staffNotes.market`.
+after-repair grade. The market line names a grade only when the grade the price is FOR (the
+listing's or the rate card column's grade; for a source with no grade, the look) is the grade the
+grade line shows (R13). Otherwise it prints `Market price ₹X`, and `staffNotes.market` says what it
+was priced at: "Priced at grade C — none listed at grade B." / "Priced at grade A less back glass
+cracked." — a cracked back on a per-grade card (max 40,000 · good 30,000 · fair 25,000 · best value
+20,000) reads `Current grade B · back glass cracked` · `Market price ₹34,000` · `We pay you ₹35,020`,
+never "for grade B" (the card's grade B is ₹30,000).
 
 | status | ready | final | lines | customer text when not ready |
 | --- | --- | --- | --- | --- |
