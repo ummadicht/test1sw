@@ -48,6 +48,8 @@ import {
 import { CERT_ROWS, certChoices, certifyNeeded, certifyRow, certifySignals, isCertRow, readCertification, type Certification, type CertRow, type CertifySignals } from "../domain/certify";
 import { cameraEvidence, type GiqRow } from "./gradeiqBridge";
 import type { DeviceReport } from "../domain/diagnostics";
+import type { ImeiLookup } from "./gradeiq";
+import { BLACKLISTED, imeiLookupView, isBlacklisted, lookupFor, resolveImei, tradeModelRefs, withLookup, type KymEarly, type StoredImeiLookup } from "./imeiResolve";
 
 /* ─────────────────────────── types ─────────────────────────── */
 
@@ -61,6 +63,15 @@ export const KYM_LABEL: Record<KymStatus, string> = {
   duplicate: "Duplicate IMEI",
   in_use: "Already in use",
 };
+
+/**
+ * Where the case's model came from (migration 17): the IMEI (its type code, or the model number
+ * GradeIQ's lookup returned — a claim the phone's own code confirms), the phone's model code at
+ * Apply, the customer's pick on their phone (a claim), a Phonecheck report, or staff.
+ */
+export type ModelSource = "imei" | "phone" | "customer" | "phonecheck" | "advisor";
+const MODEL_SOURCES = new Set<string>(["imei", "phone", "customer", "phonecheck", "advisor"]);
+const readModelSource = (s: string | null): ModelSource | null => (s && MODEL_SOURCES.has(s) ? (s as ModelSource) : null);
 
 export type Checks = {
   ownership: boolean;
@@ -164,6 +175,10 @@ type CaseRow = {
   storage_quotes: string | null;
   measured_storage: string | null;
   certification: string | null;
+  /** Migration 17 (lib/server/imeiResolve.ts): each IMEI's resolution, the early KYM answer, where the model came from. */
+  imei_lookup: string | null;
+  kym_early: string | null;
+  model_source: string | null;
 };
 
 /** The store's own cost to put the phone right (BUY vs SELL). Not the customer's repair price. */
@@ -299,6 +314,18 @@ export type CaseView = {
   /** Second IMEI on a dual-SIM phone, when recorded. */
   imei2: string | null;
   imei2Check: "valid" | "invalid" | null;
+  /** Where the model came from — "imei" when the IMEI named it (null: no model, or a case from before). */
+  modelSource: ModelSource | null;
+  /**
+   * THE IMEI FIRST (docs/MOBILE-API.md): what the case's IMEI resolved to, once — make, model, the
+   * maker's model number and the GSMA blacklist ("unknown" = not checked, never clean). null = no
+   * IMEI, one that fails its check digit, one saved before 0.9.0 — and always for the partner.
+   */
+  imeiLookup: ImeiLookup | null;
+  /** Said as soon as the IMEI is saved (the lock still enforces): "This IMEI is already on trade-in SU-AND-00031." [] for the partner. */
+  imeiWarnings: string[];
+  /** The government KYM answer the advisor tapped right after the IMEI; Lock pre-fills from it (and still needs "clear"). */
+  kymEarly: { status: KymStatus; reference: string | null } | null;
   closedReason: string | null;
   faults: FaultId[];
   /** Where each fault came from: the phone's own test, the customer, the store camera (GradeIQ), the advisor. */
@@ -514,6 +541,10 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     imeiCheck: (c.imei_check as "valid" | "invalid" | null) ?? null,
     imei2: c.imei2,
     imei2Check: (c.imei2_check as "valid" | "invalid" | null) ?? null,
+    modelSource: tm ? readModelSource(c.model_source) : null,
+    imeiLookup: imeiLookupView(lookupFor(c.imei_lookup, c.imei)),
+    imeiWarnings: imeiWarnings(c, tm),
+    kymEarly: kymEarlyView(c.kym_early),
     closedReason: c.closed_reason,
     faults,
     faultSources: reconcileFaultSources(parseJson<FaultSources>(c.fault_sources, {}), faults),
@@ -578,8 +609,47 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
   return view;
 }
 
+/**
+ * One phone, one trade-in — the open trade-in (locked, collected…) that already has either of
+ * these IMEIs. The lock refuses on it; the case view warns as soon as the IMEI is saved.
+ */
+function imeiOnOpenTradeIn(caseId: string, imeis: (string | null)[]): { ref: string; name: string } | undefined {
+  const mine = imeis.filter((x): x is string => !!x);
+  if (!mine.length) return undefined;
+  const ph = mine.map(() => "?").join(",");
+  return db()
+    .prepare(
+      `SELECT c.ref, s.name FROM cases c JOIN stores s ON s.id = c.store_id
+       WHERE c.id != ? AND c.status IN (${OPEN_TRADE_STATUSES.map(() => "?").join(",")})
+         AND (c.imei IN (${ph}) OR c.imei2 IN (${ph})) LIMIT 1`
+    )
+    .get(caseId, ...OPEN_TRADE_STATUSES, ...mine, ...mine) as { ref: string; name: string } | undefined;
+}
+
+/** What the advisor is told the moment the IMEI is on a case at the counter (the lock still decides). */
+function imeiWarnings(c: CaseRow, tm: TradeModel | null): string[] {
+  if (!EDITABLE.includes(c.status) || !c.imei) return [];
+  const out: string[] = [];
+  const dup = imeiOnOpenTradeIn(c.id, [c.imei, c.imei2]);
+  if (dup) out.push(`This IMEI is already on trade-in ${dup.ref}.`);
+  // The IMEI names another model than the one on the case (staff's, or the phone's code): said, not changed.
+  const said = lookupFor(c.imei_lookup, c.imei);
+  if (said?.modelId && tm && said.modelId !== tm.id) {
+    const other = getTradeModel(said.modelId);
+    if (other) out.push(`The IMEI says ${other.brand} ${other.model}; the case has ${tm.brand} ${tm.model} — check Settings › About phone.`);
+  }
+  return out;
+}
+
+function kymEarlyView(raw: string | null): CaseView["kymEarly"] {
+  const k = parseJson<KymEarly | null>(raw, null);
+  return k && Object.hasOwn(KYM_LABEL, k.status) ? { status: k.status, reference: k.reference ?? null } : null;
+}
+
 function lockBlockers(v: CaseView): string[] {
   const out: string[] = [];
+  // GSMA's blacklist, or an early KYM answer that isn't clear: the trade-in stops here.
+  if (v.imeiLookup?.blacklist === "blacklisted" || (v.kymEarly && v.kymEarly.status !== "clear")) out.push(BLACKLISTED);
   if (!v.device || !v.device.variant) out.push("Choose the phone's model and storage.");
   if (!v.imei) out.push("Record the IMEI (dial *#06#).");
   if (!v.condition) out.push("Record the condition.");
@@ -639,6 +709,9 @@ export function forViewer(u: SessionUser, view: CaseView): CaseView {
     ...view,
     refurbCost: null,
     offer: null,
+    // GradeIQ's lookup and the counter's IMEI warnings are the store's (contract I3).
+    imeiLookup: null,
+    imeiWarnings: [],
     // The premium is the programme's, not the partner's — and the new phone's price with what the
     // customer paid would give it away (new phone − payable − trade-in − bonus).
     premiumValue: null,
@@ -966,6 +1039,8 @@ export type CasePatch = {
   imei?: string | null;
   /** Second IMEI (dual-SIM). */
   imei2?: string | null;
+  /** The government KYM answer, tapped right after the IMEI (contract I3); null clears it. */
+  kymEarly?: { status?: unknown; reference?: unknown } | null;
   faults?: string[];
   coverage?: Coverage;
   condition?: unknown;
@@ -1001,6 +1076,8 @@ const EDITABLE: CaseStatus[] = ["draft", "quoted"];
  */
 export type UpdateInternal = {
   variantSource?: "measured" | "catalogue" | "customer";
+  /** Where patch.modelId came from (Apply: the phone's code or the customer's pick; a Phonecheck attach). Default "advisor". */
+  modelSource?: "phone" | "customer" | "phonecheck";
   autoUpgrade?: boolean;
   measuredStorage?: string | null;
   /** Why the grading report gets a new version, when it does (default "edited"): Apply says "swapup_check", a Phonecheck attach "phonecheck". */
@@ -1008,20 +1085,48 @@ export type UpdateInternal = {
 };
 
 /**
+ * The IMEI this patch saves, resolved — when it is new on the case and passes its check digit
+ * (a misread is never paid for). Once per case + IMEI: an IMEI the case had before is answered
+ * from cases.imei_lookup, with no call (fresh: false). Saving the IMEI the case already has → null.
+ */
+async function resolveNewImei(u: SessionUser, id: string, raw: unknown): Promise<{ rec: StoredImeiLookup; fresh: boolean } | null> {
+  if (typeof raw !== "string" || !raw) return null;
+  const r = readImei(raw);
+  if (!r.ok || r.checkDigit !== "valid") return null;
+  const { c } = caseInScope(u, id);
+  if (!EDITABLE.includes(c.status) || r.imei === c.imei) return null;
+  const cached = lookupFor(c.imei_lookup, r.imei);
+  if (cached) return { rec: cached, fresh: false };
+  return { rec: await resolveImei(r.imei, tradeModelRefs(), nowIso()), fresh: true };
+}
+
+/**
  * Save what the advisor has learned about the device, then re-price.
  * Partner calls happen OUTSIDE any transaction.
  */
 export async function updateCase(u: SessionUser, id: string, patch: CasePatch, internal: UpdateInternal = {}): Promise<CaseView> {
   requireCounter(u);
+  // THE IMEI FIRST: a new IMEI is resolved once (lib/server/imeiResolve.ts) — the free TAC model and
+  // GradeIQ's lookup (≤ 10 s) — BEFORE the case is read for the save, so no network call sits
+  // between that read and the write.
+  const resolved = await resolveNewImei(u, id, patch.imei);
   const { c, store } = caseInScope(u, id);
   if (!EDITABLE.includes(c.status)) throw new HttpError(409, "The case is past the counter.");
 
   const sets: Record<string, unknown> = {};
   let pricingChanged = false;
 
-  if (patch.modelId !== undefined) {
-    const tm = patch.modelId ? getTradeModel(patch.modelId) : null;
-    if (patch.modelId && !tm) throw new HttpError(400, "Unknown model.");
+  // The model the new IMEI names — only for a case with none, or one an earlier IMEI named (that
+  // IMEI is gone, so is its basis). Staff's own model, the phone's code and the customer's pick stand.
+  let imeiModel: string | null | undefined;
+  if (patch.modelId === undefined && resolved) {
+    if (!c.model_id && resolved.rec.modelId) imeiModel = resolved.rec.modelId;
+    else if (c.model_id && c.model_source === "imei" && resolved.rec.modelId !== c.model_id) imeiModel = resolved.rec.modelId;
+  }
+  const modelPatch = patch.modelId !== undefined ? patch.modelId : imeiModel;
+  if (modelPatch !== undefined) {
+    const tm = modelPatch ? getTradeModel(modelPatch) : null;
+    if (modelPatch && !tm) throw new HttpError(400, "Unknown model.");
     sets.model_id = tm?.id ?? null;
     if (tm?.id !== c.model_id) {
       sets.variant = null;
@@ -1030,6 +1135,9 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     pricingChanged = true;
   }
   const modelChanged = "model_id" in sets && sets.model_id !== c.model_id;
+  // Where the model came from. The phone's own code confirming the model on the case makes it the phone's.
+  if (modelChanged) sets.model_source = sets.model_id ? (patch.modelId !== undefined ? (internal.modelSource ?? "advisor") : "imei") : null;
+  else if (patch.modelId && internal.modelSource === "phone" && c.model_source !== "phone") sets.model_source = "phone";
   let variantChanged = false;
   if (patch.variant !== undefined) {
     const tm = getTradeModel((sets.model_id as string | undefined) ?? c.model_id);
@@ -1070,6 +1178,34 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
       if (first && r.imei === first) throw new HttpError(400, "IMEI 2 can't be the same as IMEI 1.");
       sets.imei2 = r.imei;
       sets.imei2_check = r.checkDigit;
+    }
+  }
+  if (resolved && sets.imei === resolved.rec.imei) {
+    sets.imei_lookup = withLookup(c.imei_lookup, resolved.rec);
+    if (resolved.fresh)
+      audit({
+        userId: u.id,
+        orgId: c.org_id,
+        storeId: store.id,
+        action: "case.imei_lookup",
+        entity: "case",
+        entityId: id,
+        detail: { source: resolved.rec.source, blacklist: resolved.rec.blacklist, modelId: resolved.rec.modelId, modelNumber: resolved.rec.modelNumber, ...(imeiModel !== undefined ? { setModel: imeiModel } : {}) },
+      });
+  }
+  // The early KYM answer was for the numbers the case had: a new number needs its own check.
+  const numbersChanged = ("imei" in sets && sets.imei !== c.imei) || ("imei2" in sets && sets.imei2 !== c.imei2);
+  if (numbersChanged && patch.kymEarly === undefined && c.kym_early) sets.kym_early = null;
+  if (patch.kymEarly !== undefined) {
+    if (patch.kymEarly === null) sets.kym_early = null;
+    else {
+      if (typeof patch.kymEarly !== "object" || Array.isArray(patch.kymEarly)) throw new HttpError(400, "Send the KYM answer as {status, reference}.");
+      if (!("imei" in sets ? sets.imei : c.imei)) throw new HttpError(400, "Record the IMEI first (dial *#06#).");
+      const status = String(patch.kymEarly.status ?? "");
+      if (!Object.hasOwn(KYM_LABEL, status)) throw new HttpError(400, "Record the KYM IMEI check result.");
+      const reference = String(patch.kymEarly.reference ?? "").trim().slice(0, 80) || null;
+      sets.kym_early = JSON.stringify({ status: status as KymStatus, reference, by: u.name, at: nowIso() } satisfies KymEarly);
+      audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.kym_early", entity: "case", entityId: id, detail: { status, reference } });
     }
   }
   let faults = parseJson<FaultId[]>(c.faults, []);
@@ -1160,7 +1296,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   }
   // A partner quote read off its app describes ONE device in ONE condition. If
   // the description changes, that quote no longer belongs to this phone.
-  const describes = patch.modelId !== undefined || variantChanged || patch.faults !== undefined || patch.condition !== undefined || patch.conditionFromFaults;
+  const describes = modelPatch !== undefined || variantChanged || patch.faults !== undefined || patch.condition !== undefined || patch.conditionFromFaults;
   if (describes && c.partner_manual) sets.partner_manual = null;
   if (patch.partnerQuote !== undefined) {
     if (patch.partnerQuote === null) sets.partner_manual = null;
@@ -1551,6 +1687,8 @@ export type LockInput = {
  */
 export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseView {
   requireCounter(u);
+  // Reported lost or stolen (GSMA, or the early KYM answer): refused before anything else is asked.
+  if (isBlacklisted(caseInScope(u, id).c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
   const name = String(input?.customer?.name || "").trim();
   const phone = digitsOnly(input?.customer?.phone);
   const idType = String(input?.customer?.idType || "");
@@ -1578,6 +1716,7 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
 
   return tx(() => {
     const { c, store } = caseInScope(u, id);
+    if (isBlacklisted(c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
     const view = toView(c, store);
     assertTransition(c.status, "locked");
     // A claimed storage is enough to SHOW a price; moving money needs it seen —
@@ -1591,15 +1730,7 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
 
     // One phone, one trade-in — matched on EITHER of its IMEIs, so presenting
     // the second number of a dual-SIM phone does not get it past the check.
-    const mine = [c.imei, c.imei2].filter(Boolean) as string[];
-    const ph = mine.map(() => "?").join(",");
-    const dup = db()
-      .prepare(
-        `SELECT c.ref, s.name FROM cases c JOIN stores s ON s.id = c.store_id
-         WHERE c.id != ? AND c.status IN (${OPEN_TRADE_STATUSES.map(() => "?").join(",")})
-           AND (c.imei IN (${ph}) OR c.imei2 IN (${ph})) LIMIT 1`
-      )
-      .get(c.id, ...OPEN_TRADE_STATUSES, ...mine, ...mine) as { ref: string; name: string } | undefined;
+    const dup = imeiOnOpenTradeIn(c.id, [c.imei, c.imei2]);
     if (dup) throw new HttpError(409, `IMEI already traded in (${dup.ref}, ${dup.name}).`);
 
     const M = view.quote!.amount!;

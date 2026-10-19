@@ -26,10 +26,17 @@ import { readScreen, readSnapshot, publicPhotoUrl, type GiqScreen, type GradeiqS
  *                       there is no demo or fallback grade anywhere, and no
  *                       variable that could turn one on.
  *
+ *   GRADEIQ_SERVER_KEY  the shared server token GradeIQ asks for on its IMEI
+ *                       routes (header x-gradeiq-server-key): call 0 (read the
+ *                       *#06# screen) and call A (the IMEI lookup). Unset → both
+ *                       are skipped: the screen reader is "off" and the blacklist
+ *                       stays "unknown". Never logged, never sent anywhere else.
+ *
  * Calls SwapUp never makes: /offer, /accept, /value, /grade-manual, /reprocess
  * (a price, a paid Phonecheck lookup, an anonymous grade overwrite). And no
  * IMEI is ever sent at create — every create with a 15-digit IMEI makes paid
- * Phonecheck calls.
+ * Phonecheck calls. The ONE paid IMEI call is call A, once per case + IMEI
+ * (lib/server/imeiResolve.ts).
  */
 
 export type GradeiqConfig = {
@@ -42,6 +49,12 @@ export type GradeiqConfig = {
   timeoutMs: number;
   /** Call 7 (/ocr) is one vision-model read of a screenshot, and answers with the whole session. */
   ocrTimeoutMs: number;
+  /** GRADEIQ_SERVER_KEY — the IMEI routes' token; "" = not set (calls 0 and A are skipped). */
+  serverKey: string;
+  /** Call A: GradeIQ's IMEI lookup (Phonecheck / GSMA behind it) — ≤ 10 s, the advisor is waiting. */
+  imeiTimeoutMs: number;
+  /** Call 0: one vision read of a *#06# photo — ~20 s. */
+  imeiOcrTimeoutMs: number;
 };
 
 export function gradeiqConfig(): GradeiqConfig {
@@ -56,6 +69,9 @@ export function gradeiqConfig(): GradeiqConfig {
     createTimeoutMs: ms(e.GRADEIQ_CREATE_TIMEOUT_MS, 20_000),
     timeoutMs: ms(e.GRADEIQ_TIMEOUT_MS, 5_000),
     ocrTimeoutMs: ms(e.GRADEIQ_OCR_TIMEOUT_MS, 30_000),
+    serverKey: (e.GRADEIQ_SERVER_KEY || "").trim(),
+    imeiTimeoutMs: ms(e.GRADEIQ_IMEI_TIMEOUT_MS, 10_000),
+    imeiOcrTimeoutMs: ms(e.GRADEIQ_IMEI_OCR_TIMEOUT_MS, 20_000),
   };
 }
 
@@ -91,7 +107,7 @@ function sessionPath(id: string, rest = ""): string {
  * downloading it: several GradeIQ routes echo the whole session back, and the
  * session carries base64 copies of every photo once they are taken.
  */
-async function call(path: string, init: { method?: "GET" | "POST"; body?: unknown; timeoutMs?: number; read?: boolean } = {}): Promise<unknown> {
+async function call(path: string, init: { method?: "GET" | "POST"; body?: unknown; timeoutMs?: number; read?: boolean; headers?: Record<string, string> } = {}): Promise<unknown> {
   const cfg = gradeiqConfig();
   if (!cfg.enabled) throw new GradeiqError("disabled", "Camera grading is switched off (GRADEIQ_ENABLED=0).");
   const ctl = new AbortController();
@@ -101,7 +117,11 @@ async function call(path: string, init: { method?: "GET" | "POST"; body?: unknow
   try {
     res = await fetch(`${cfg.baseUrl}${path}`, {
       method: init.method ?? "GET",
-      headers: init.body === undefined ? { accept: "application/json" } : { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+        ...(init.headers ?? {}),
+      },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: ctl.signal,
       cache: "no-store",
@@ -260,4 +280,79 @@ export type CameraPass = "photos" | "screen";
  */
 export function cameraUrl(id: string, pass?: CameraPass): string {
   return `${gradeiqConfig().publicUrl}/v2/cam/${id}${pass ? `?pass=${pass}` : ""}`;
+}
+
+/* ─────────────────────────── the IMEI calls (contract §1, calls 0 and A) ─────────────────────────── */
+
+/** What SwapUp keeps of GradeIQ's IMEI lookup (cases.imei_lookup; the case view's `imeiLookup`). */
+export type ImeiLookup = {
+  brand: string | null;
+  model: string | null;
+  /** The maker's model number the lookup returned ("SM-S918B"); for Samsung, matched like the phone's own code. */
+  modelNumber: string | null;
+  /** GSMA's blacklist (lost / stolen). "unknown" = not checked — never shown as clean. */
+  blacklist: "clean" | "blacklisted" | "unknown";
+  /** Where GradeIQ's answer came from ('esn' | 'station' | 'gsma' | 'tac' | 'stub'; older GradeIQ: 'api'). */
+  source: string;
+  at: string;
+};
+
+const IMEI15 = /^\d{15}$/;
+const text = (x: unknown): string | null => (typeof x === "string" && x.trim() ? x.trim().slice(0, 80) : null);
+
+function serverKeyHeader(): Record<string, string> {
+  const cfg = gradeiqConfig();
+  if (!cfg.serverKey) throw new GradeiqError("disabled", "No GRADEIQ_SERVER_KEY — GradeIQ's IMEI routes are not called.");
+  return { "x-gradeiq-server-key": cfg.serverKey };
+}
+
+/** GradeIQ's ImeiInfo → what SwapUp keeps. A "stub" with no name is GradeIQ saying it doesn't know. */
+export function readImeiInfo(raw: unknown, at: string): ImeiLookup {
+  const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const model = text(r.model);
+  const blacklist = r.blacklist === "clean" || r.blacklist === "blacklisted" ? r.blacklist : "unknown";
+  return {
+    brand: text(r.brand),
+    model: model && !/^unknown device\b/i.test(model) ? model : null,
+    modelNumber: text(r.modelNumber),
+    blacklist,
+    source: text(r.source) ?? "gradeiq",
+    at,
+  };
+}
+
+/**
+ * Call A — GET /api/imei/{imei}: the make, model, model number and GSMA blacklist, from
+ * GradeIQ's IMEI lookup (paid Phonecheck / GSMA checks behind it; GradeIQ caches them).
+ * SwapUp calls it once per case + IMEI and never again for that IMEI
+ * (lib/server/imeiResolve.ts). ≤ GRADEIQ_IMEI_TIMEOUT_MS (10 s).
+ */
+export async function lookupImei(imei: string, at: string): Promise<ImeiLookup> {
+  if (!IMEI15.test(imei)) throw new GradeiqError("shape", "Not a 15-digit IMEI.");
+  const headers = serverKeyHeader();
+  const raw = await call(`/api/imei/${imei}`, { headers, timeoutMs: gradeiqConfig().imeiTimeoutMs });
+  return readImeiInfo(raw, at);
+}
+
+/** What call 0 read: the IMEI (and a second one, if GradeIQ ever sends it), or why not. */
+export type ImeiScreenRead = { imei: string | null; imei2: string | null; error: string | null };
+
+/**
+ * Call 0 — POST /api/imei/ocr {photo}: GradeIQ's AI reads a *#06# screen. Stateless on
+ * GradeIQ's side: no session, no lookup, no Phonecheck (never /api/sessions/{id}/ocr, which
+ * re-keys a session and pays for a lookup). One vision call, ≤ GRADEIQ_IMEI_OCR_TIMEOUT_MS.
+ * GradeIQ's own error codes come back as they are (ai_quota, ai_key, ai_error,
+ * ai_not_configured, not_found, bad_image); the caller words them.
+ */
+export async function readImeiScreen(photo: string): Promise<ImeiScreenRead> {
+  const headers = serverKeyHeader();
+  const raw = (await call("/api/imei/ocr", { method: "POST", body: { photo }, headers, timeoutMs: gradeiqConfig().imeiOcrTimeoutMs })) as Record<string, unknown> | null;
+  const d = (x: unknown) => (typeof x === "string" ? x.replace(/\D/g, "") : "");
+  const imei = d(raw?.imei);
+  const imei2 = d(raw?.imei2);
+  return {
+    imei: imei.length === 15 ? imei : null,
+    imei2: imei2.length === 15 && imei2 !== imei ? imei2 : null,
+    error: typeof raw?.error === "string" && raw.error ? raw.error : null,
+  };
 }

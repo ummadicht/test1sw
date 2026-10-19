@@ -11,7 +11,7 @@ export async function handle<T>(fn: () => Promise<T> | T, status = 200): Promise
     const data = await fn();
     return NextResponse.json(data ?? { ok: true }, { status, headers: { "cache-control": "no-store" } });
   } catch (e) {
-    if (e instanceof HttpError) return NextResponse.json({ error: e.message }, { status: e.status });
+    if (e instanceof HttpError) return NextResponse.json({ error: e.message, ...(e.extra ?? {}) }, { status: e.status });
     // Domain rule violations (lib/domain/errors.ts) — duck-typed so a second
     // copy of the module in another bundle chunk still matches.
     if (e && typeof e === "object" && (e as { name?: string }).name === "RuleError") {

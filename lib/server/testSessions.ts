@@ -25,6 +25,7 @@ import {
   deviceCameraLink,
 } from "./gradeiqBridge";
 import { GradeiqError, gradeiqConfig, readBatteryHealth } from "./gradeiq";
+import { assertNotBlacklisted } from "./imeiResolve";
 import { readCertification, withCertification } from "../domain/certify";
 import { applyCameraFloor, addFaultSources, blankCameraCheck, resultsWithCameraDisplay, type CaseCameraCheck } from "../domain/gradeiqMap";
 import {
@@ -53,6 +54,7 @@ import {
   type DeviceReport,
   type DiagnosticSummary,
   type TradeModelRef,
+  type ModelMatch,
   type StoreWifi,
 } from "../domain/diagnostics";
 import { autoApplyState, type AutoApplyView } from "../domain/autoApply";
@@ -446,6 +448,8 @@ export function createTestSession(
   if (caseId) {
     const c = getCase(u, caseId); // scope check
     if (!["draft", "quoted"].includes(c.status)) throw new HttpError(409, "That case is past the counter — start a new one.");
+    // The IMEI came first (contract I3): a phone reported lost or stolen is not tested at all.
+    assertNotBlacklisted(caseId);
   } else {
     caseId = createCase(u, { customerName: input.customerName, customerPhone: input.customerPhone, via: internal.via }).id;
   }
@@ -537,7 +541,15 @@ export async function applyTestSession(u: SessionUser, id: string, opts: { auto?
   const refs = tradeModelRefs();
   const pick = v.declared?.picked ?? null;
   const picked = pick ? (refs.find((m) => m.id === pick.modelId) ?? null) : null;
-  if (s.model.modelId) {
+  // The IMEI named the case's model first (lib/server/imeiResolve.ts): a phone code that names
+  // ANOTHER model is a flag for the advisor, never a silent overwrite — and its match is then not
+  // used for the storage either (it would be the other model's sizes).
+  const byImei = c.modelSource === "imei" && c.device ? c.device : null;
+  const disagrees = !!s.model.modelId && !!byImei && s.model.modelId !== byImei.modelId;
+  const match: typeof s.model = disagrees ? { ...s.model, modelId: null, label: null, variant: null, match: "none" } : s.model;
+  if (disagrees) {
+    identityFlags.push(`Model: phone code says ${s.model.label ?? "another model"}; the IMEI says ${byImei!.brand} ${byImei!.model} — check Settings › About phone.`);
+  } else if (s.model.modelId) {
     patch.modelId = s.model.modelId;
     // The phone's code matched, but the customer picked another model (or said "No"
     // and picked nothing): record it — the match stands, the advisor checks. Saying
@@ -568,11 +580,11 @@ export async function applyTestSession(u: SessionUser, id: string, opts: { auto?
   const measuredNow = storageVariant(v.device?.totalDiskBytes);
   const claim = picked && pick ? { modelId: picked.id, variant: pick.variant ?? null } : null;
   const caseModel = { caseModelId: c.device?.modelId ?? null, caseVariant: c.device?.variant ?? null };
-  const sizesOf = storageModelId({ match: s.model, picked: claim, caseModelId: caseModel.caseModelId });
+  const sizesOf = storageModelId({ match, picked: claim, caseModelId: caseModel.caseModelId });
   const earlier = sizesOf && sizesOf === caseModel.caseModelId ? c.measuredStorage : null;
   const measured = measuredNow ?? earlier;
   const storage = storageFromTest({
-    match: s.model,
+    match,
     picked: claim,
     variants: refs.find((m) => m.id === sizesOf)?.variants ?? [],
     ...caseModel,
@@ -668,6 +680,7 @@ export async function applyTestSession(u: SessionUser, id: string, opts: { auto?
   // camera record names this session now, so its results are the report's evidence.
   const after = await updateCase(u, r.case_id, patch, {
     variantSource: storage.source ?? undefined,
+    ...(patch.modelId ? { modelSource: s.model.modelId && !disagrees ? ("phone" as const) : ("customer" as const) } : {}),
     autoUpgrade: true,
     measuredStorage: measuredNow ?? (earlier ? undefined : null),
     reportReason: "swapup_check",
@@ -1088,7 +1101,7 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
     audit({ orgId: r.org_id, storeId: r.store_id, action: firstJoin ? "test_session.join" : "test_session.rejoin", entity: "test_session", entityId: r.id, detail: { model: device.modelName, ip } });
     const v = view(rowById(r.id)!);
     const refs = tradeModelRefs();
-    const match = v.summary?.model ?? matchModel(device, refs);
+    const match = caseModelForJoin(v.summary?.model ?? matchModel(device, refs), r.case_id, refs, storageVariant(device.totalDiskBytes));
     return {
       ticket,
       session: {
@@ -1111,6 +1124,31 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
       },
     };
   });
+}
+
+/**
+ * The model the join tells the phone (owner, 2026-10-19: "IMEI first"). The case's own model when it
+ * has one — the IMEI or the advisor named it, so an iPhone or a browser (which can't name themselves)
+ * skips the customer's picker — reported as a match. The phone's own code still wins when it matched,
+ * except against a model the IMEI named: then the case's model is shown and Apply flags the code.
+ */
+function caseModelForJoin(phone: ModelMatch, caseId: string, refs: TradeModelRef[], measured: string | null): ModelMatch {
+  const row = db().prepare(`SELECT model_id, variant, model_source FROM cases WHERE id = ?`).get(caseId) as
+    | { model_id: string | null; variant: string | null; model_source: string | null }
+    | undefined;
+  if (!row?.model_id) return phone;
+  if (phone.modelId && (phone.modelId === row.model_id || row.model_source !== "imei")) return phone;
+  const m = refs.find((x) => x.id === row.model_id);
+  if (!m) return phone;
+  const size = measured ?? row.variant;
+  const variant = size && m.variants.includes(size) ? size : null;
+  return {
+    modelId: m.id,
+    label: `${m.brand} ${m.model}`,
+    variant,
+    match: "exact",
+    why: row.model_source === "imei" ? `The store has this phone as the ${m.model} (from its IMEI).` : `The store has this phone as the ${m.model}.`,
+  };
 }
 
 /**

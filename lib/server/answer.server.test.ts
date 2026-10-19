@@ -235,8 +235,8 @@ test("migration 16: an older database's locked case keeps premium_value NULL —
   const r = old.prepare(`SELECT trade_value, premium_value, premium_bp, premium_funded_by FROM cases WHERE id = 'c_old'`).get() as Record<string, unknown>;
   assert.deepEqual(r, { trade_value: 25000, premium_value: null, premium_bp: null, premium_funded_by: null });
   old.close();
-  assert.equal(MIGRATIONS.length, 16);
-  assert.equal((db().prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string }).value, "16");
+  assert.equal(MIGRATIONS.length, 17, "16 + the IMEI-first columns (17)");
+  assert.equal((db().prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string }).value, "17");
   // The same case on this database: locked before premiums.
   const saved = rowOf(locked);
   db().prepare(`UPDATE cases SET premium_value = NULL, premium_bp = NULL, premium_funded_by = NULL WHERE id = ?`).run(locked);

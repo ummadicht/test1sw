@@ -470,7 +470,10 @@ export async function attachRecord(u: SessionUser, caseId: string, recordId: str
   // disclosure on the report (DS8), never written over the case.
   const internal: UpdateInternal = { reportReason: "phonecheck" };
   const match = matchModel(pcDeviceReport(rec), refs);
-  if (!v.device && match.modelId && !ai) patch.modelId = match.modelId;
+  if (!v.device && match.modelId && !ai) {
+    patch.modelId = match.modelId;
+    internal.modelSource = "phonecheck";
+  }
   const modelId = patch.modelId ?? v.device?.modelId ?? null;
   if (!ai && modelId && modelId === match.modelId && !v.device?.variant && rec.variant) {
     const sizes = refs.find((m) => m.id === modelId)?.variants ?? [];

@@ -28,8 +28,9 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
   const [idType, setIdType] = useState("");
   const [idLast4, setIdLast4] = useState("");
   const [handover, setHandover] = useState(false);
-  const [kym, setKym] = useState<Kym | "">("");
-  const [kymRef, setKymRef] = useState("");
+  // The KYM answer tapped right after the IMEI (kymEarly) pre-fills — still editable, still "clear" to lock.
+  const [kym, setKym] = useState<Kym | "">(view.kymEarly?.status ?? "");
+  const [kymRef, setKymRef] = useState(view.kymEarly?.reference ?? "");
   const [imeiAck, setImeiAck] = useState(false);
   // The storage tick confirms ONE size: if the storage changes, it is unticked.
   const [storageSeenFor, setStorageSeenFor] = useState<string | null>(null);

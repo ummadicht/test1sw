@@ -200,9 +200,12 @@ export async function getSession(): Promise<SessionUser | null> {
 
 export class HttpError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** More fields for the JSON body beside `error` — a machine-readable `reason` the apps branch on. */
+  extra?: Record<string, string>;
+  constructor(status: number, message: string, extra?: Record<string, string>) {
     super(message);
     this.status = status;
+    if (extra) this.extra = extra;
   }
 }
 

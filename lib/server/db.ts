@@ -500,6 +500,19 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE cases ADD COLUMN premium_bp INTEGER;
   ALTER TABLE cases ADD COLUMN premium_funded_by TEXT;
   `,
+  /* 17 — the IMEI first (lib/server/imeiResolve.ts, owner 2026-10-19). imei_lookup: what each
+          IMEI the case has had resolved to, once per IMEI — the TAC model and GradeIQ's lookup
+          (make, model, model number, GSMA blacklist), JSON [{imei, brand, model, modelNumber,
+          blacklist, source, at, modelId, modelWhy}], newest last; never asked twice for one IMEI.
+          kym_early: the government KYM answer the advisor tapped right after the IMEI
+          ({status, reference, by, at}) — Lock pre-fills from it and still requires "clear"; it
+          goes when the IMEI changes. model_source: where the case's model came from — 'imei',
+          'phone' (its model code at Apply), 'customer' (their pick, a claim), 'phonecheck',
+          'advisor'; NULL on cases from before. Additive only. */ `
+  ALTER TABLE cases ADD COLUMN imei_lookup TEXT;
+  ALTER TABLE cases ADD COLUMN kym_early TEXT;
+  ALTER TABLE cases ADD COLUMN model_source TEXT;
+  `,
 ];
 
 function migrate(conn: Database.Database): void {
