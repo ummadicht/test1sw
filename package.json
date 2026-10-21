@@ -7,7 +7,7 @@
     "dev": "next dev -p ${PORT:-4500}",
     "build": "next build --webpack",
     "start": "next start -p ${PORT:-4500}",
-    "test": "node --test --experimental-strip-types --no-warnings lib/domain/*.test.ts components/counter/*.test.ts lib/server/*.test.ts",
+    "test": "node --test --experimental-strip-types --no-warnings lib/domain/*.test.ts components/counter/*.test.ts lib/server/*.test.ts deploy/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
