@@ -12,8 +12,10 @@ One flow, the same on the store tablet (SwapUp Store), the customer's phone (Swa
 and the desk (`/desk`, `/cases/:id`) — the fewest steps that keep the law, the money and safety
 (owner, 2026-10-17: "Reduce the flow"):
 
-1. **New trade-in** — the advisor types the customer's mobile (a returning customer's name fills
-   in), or the customer scans the store's counter QR alone.
+1. **New trade-in** — the IMEI first: the customer dials *#06#, the advisor scans it (store app),
+   reads the screen from a photo or types it (store app and desk), then the customer's mobile (a
+   returning customer's name fills in); or the customer scans the store's counter QR alone. The
+   case opens on what the IMEI says — the model, the GSMA blacklist, an IMEI already traded in.
 2. **The customer's phone connects** — it scans the test code. Its own steps are **Scan → Test →
    Done**: nobody asks about condition. "Is this your phone?" only when the model match isn't
    exact, the storage only when the phone can't measure it, and the battery screenshot only when

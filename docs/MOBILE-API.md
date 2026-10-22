@@ -148,6 +148,14 @@ stays as the fallback ("Skip — scan at hand-over").
 `POST /api/test-sessions {customerName, customerPhone}`. Phone-led (counter QR): the same card on the
 Session screen, `PATCH` on the session's existing case.
 
+**The desk** (since SUP-35) takes the same order on `/desk` New trade-in: the IMEI field first (typed,
+with the check-digit warning and "Record it anyway"; or "Read the screen" — a photo through `POST
+/api/imei/read`, confirmed before it is used), then `POST /api/cases` → the same `PATCH {imei, imei2}`.
+The case's Phone step opens with the IMEI on top and what the server found under it before any test:
+the model and GSMA's word ("Galaxy S23 Ultra · not blacklisted (GSMA)", "Blacklist not checked"), the
+`imeiWarnings`, and the stop banner. A failed save keeps the case it opened; Start again saves on it.
+Rules: `components/counter/imeiFirst.ts`.
+
 `POST /api/imei/read` (Bearer, advisor / store manager) — "Read the screen"
 `{ "photo": "data:image/jpeg;base64,…" }` → SwapUp's server sends it to GradeIQ's stateless reader
 (`POST /api/imei/ocr`, ~20 s; never a session's `/ocr`). Nothing is saved: show "Read: 35… — confirm".
