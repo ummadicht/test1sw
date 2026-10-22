@@ -133,12 +133,60 @@ Demo accounts (password `swapup2026`, override with `SWAPUP_DEMO_PASSWORD` befor
 boot): `advisor`, `manager`, `samsung` (programme admin), `partner` (buyback partner), `platform`;
 `advisor.kor` / `manager.kor`; `xc.admin` / `xc.manager` / `xc.advisor`.
 
+## Build
+
+The server is built by the deploy. The two apps — SwapUp Store and SwapUp Check, from
+`../swapup-mobile` — are built as browser apps and Android APKs by:
+
+```bash
+BUILD_ONLY=1 bash deploy/release.sh 0.9.1   # build, or check the kept build; nothing on the VM
+```
+
+It builds from swapup-mobile's committed HEAD in clean worktrees, never from a working tree, and
+keeps the result outside git and outside `/private/tmp` (macOS clears it; a cold APK build takes
+about 2.5 hours, a warm one about 5 minutes), in `~/projects/swapup-release-work/<version>/`:
+`dist/` (both APKs and their manifests), `dist-web/` (both browser builds), `BUILT.json` (their
+sha256s) and `logs/`. A kept build is used again only when it was built from swapup-mobile's HEAD
+for that version and versionCode, and each APK's sha256 is the one in its manifest and in
+`BUILT.json`. Anything else is refused, never shipped: delete the folder to build it fresh. The
+version must be the same in swapup-mobile's `app.json` and `app.config.js` and in this repo's
+`package.json`. Bump `versionCode` in `app.config.js` for every APK published.
+
 ## Deploy
 
-`bash deploy/deploy.sh` — builds locally in a clean copy (webpack), ships to the
-denovo-erp VM, installs production dependencies there, runs pm2 `swapup` on :4500 and
-adds the Caddy site `swapup.104-197-168-25.sslip.io`. The session secret lives in
-`/etc/swapup.env` on the VM, minted once and reused. Before shipping it checks, from the VM,
-that PriceIQ answers 200 for a known phone (Galaxy S23 Ultra 256GB) with the key in
-`/etc/swapup.env` — skipped, with a message, while that key is missing — and it never ships a
-`.csv` (there is no bundled price file).
+A release (server, browser apps and APKs) from the committed HEADs of both repos:
+
+```bash
+bash deploy/release.sh 0.9.1 --plan   # what it would do; the price check is read only
+bash deploy/release.sh 0.9.1
+```
+
+In order, it:
+
+1. refuses uncommitted changes in either repo, or a version the repos don't say;
+2. builds the apps, or reuses the kept build (see Build);
+3. checks, read only, that the live site can price a trade-in. With no active rate card and no
+   PriceIQ key it stops with one sentence (since 0.9.1 nobody types a price, so every trade-in would
+   read "No market price yet");
+4. backs up the live database to `~/swapup-backups/swapup-pre-<version>-<UTC time>.db` on the VM;
+5. runs `deploy/deploy.sh` from a clean worktree, with the kept builds;
+6. verifies: the versions served at `/app/<app>/version.json`, the APKs on `/downloads` (sha256),
+   that no page names the partner, and that no case still stores a retired sentence;
+7. adds both APKs' version, versionCode, commit and sha256 to `deploy/RELEASES.json`. Commit that
+   file; the next release refuses to start until you do.
+
+Rate cards (the partner's weekly price sheets) live in `~/projects/swapup-ops/rate-cards/`, outside
+git, because no price file ever ships: the partner uploads one at `/partner/rate-cards`. What the
+release asks the VM (the price check, the backup, the verify) is in `deploy/vm.sh`.
+`deploy/release.test.ts` runs `release.sh` against a folder standing in for the VM (`FAKE_SSH`),
+never the VM itself.
+
+`bash deploy/deploy.sh` on its own builds the server locally in a clean copy (webpack), ships it to
+the denovo-erp VM, installs production dependencies there, runs pm2 `swapup` on :4500 and adds the
+Caddy site `swapup.104-197-168-25.sslip.io`, uploading whatever is in `../swapup-mobile/dist` and
+`dist-web` (or `MOBILE_DIST` / `WEB_DIST`). The session secret lives in `/etc/swapup.env` on the VM,
+minted once and reused. Before shipping it checks, from the VM, that PriceIQ answers 200 for a known
+phone (Galaxy S23 Ultra 256GB) with the key in `/etc/swapup.env` (skipped, with a message, while
+that key is missing) and that the live site can price a trade-in (the same check as `release.sh`).
+It takes its own database backup unless `release.sh` already has, and it never ships a `.csv`
+(there is no bundled price file).

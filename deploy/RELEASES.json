@@ -1,0 +1,18 @@
+{
+  "about": "Every SwapUp release: the commits, and each APK's version, versionCode, commit and sha256 — never the APK, an env file or a key. deploy/release.sh adds an entry after each deploy; commit it.",
+  "releases": [
+    {
+      "version": "0.9.0",
+      "releasedAt": "2026-10-19",
+      "swapup": "4c3ed44",
+      "mobile": "cabb067",
+      "apks": [
+        { "app": "store", "version": "0.9.0", "versionCode": 12, "commit": "cabb067", "sha256": null },
+        { "app": "check", "version": "0.9.0", "versionCode": 12, "commit": "cabb067", "sha256": null }
+      ],
+      "dbBackup": "/home/ammar/swapup-backups/swapup-pre-0.9.0-20261019T025440Z.db",
+      "verify": "passed",
+      "note": "Added by hand from the 0.9.0 release log (released by a session script before deploy/release.sh existed). Its full APK sha256s were not kept on this Mac; the live ones are in /var/www/swapup-downloads/swapup-*.json on the VM."
+    }
+  ]
+}

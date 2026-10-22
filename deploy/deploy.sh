@@ -97,6 +97,12 @@ echo "✗ PriceIQ did not answer 200 with graded prices at $BASE (401 = the key;
 exit 1
 REMOTE
 
+# Gate: the live site can price a trade-in. Since 0.9.1 nobody types a price (owner, 2026-10-19), so
+# with no active rate card AND no PriceIQ key every trade-in would read "No market price yet". Read
+# only (deploy/vm.sh prices); it stops with one sentence saying where the rate cards are.
+echo "▸ gate: the live site can price a trade-in"
+VM="$VM" KEY="$KEY" bash "$ROOT/deploy/vm.sh" prices
+
 # The browser versions of the two apps (Expo web exports, swapup-mobile
 # dist-web/<app>/). Caddy serves them at /app/<app>/, so each export must load
 # its scripts from /app/<app>/_expo/… (baseUrl) — a root /_expo/… path would
@@ -124,6 +130,16 @@ if find "$BUILD" -path "$BUILD/node_modules" -prune -o -name '*.csv' -type f -pr
 rsync -a --delete "$ROOT/node_modules/" "$BUILD/node_modules/"
 (cd "$BUILD" && rm -rf .next && npx next build --webpack)
 if ls "$BUILD/.next/server/chunks" 2>/dev/null | grep -q '\[turbopack\]'; then echo "turbopack chunks found — refusing to ship" >&2; exit 1; fi
+
+# Every deploy leaves a timestamped copy of the live database in ~/swapup-backups on the VM, taken
+# before anything ships (a new build migrates the database when it starts). deploy/release.sh takes it
+# itself and says so in SWAPUP_DB_BACKUP.
+echo "▸ live database backup"
+if [ -n "${SWAPUP_DB_BACKUP:-}" ]; then
+  echo "  taken by release.sh: $SWAPUP_DB_BACKUP"
+else
+  VM="$VM" KEY="$KEY" bash "$ROOT/deploy/vm.sh" backup "swapup-pre-$(node -p 'require(process.argv[1]).version' "$ROOT/package.json")-$(date -u +%Y%m%dT%H%M%SZ).db"
+fi
 
 echo "▸ ship"
 "${SSH[@]}" "mkdir -p ~/swapup/data"

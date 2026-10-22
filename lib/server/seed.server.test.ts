@@ -305,7 +305,9 @@ test("test cases still on a quote from a retired source: relabelled, the old cav
     partner: DEMO_PARTNER.name,
     partnerRef: null,
     quotedAt: "2026-10-12T10:00:00Z",
-    validUntil: "2026-10-19T10:00:00Z",
+    // Still in date whenever the test runs, so a lapse can only come from the retired source (a fixed
+    // 2026-10-19 here failed every run after that morning: "a closed case isn't re-priced").
+    validUntil: new Date(Date.now() + 7 * 86_400_000).toISOString(),
   });
   const decision = JSON.stringify({ recommendation: "trade_in", caveats: [OLD_CAVEAT, KEPT_CAVEAT] });
   const put = (id: string, status: string, extra: Record<string, unknown> = {}) =>

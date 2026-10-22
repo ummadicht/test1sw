@@ -418,7 +418,7 @@ export const REWORDED_QUOTE_TEXTS: readonly (readonly [string, string])[] = [
 ];
 // An older build's flag for a size not on file, with the size in it ("… if it's really 1TB.").
 const OLDER_SIZE_FLAG = / Check Settings › About phone, and enter the partner's quote on the full case if it's really [^."]+\./g;
-const OLDER_SIZE_FLAG_NEEDLE = "enter the partner's quote on the full case";
+export const OLDER_SIZE_FLAG_NEEDLE = "enter the partner's quote on the full case";
 
 /**
  * On every boot: those sentences, reworded wherever a case stores them — its quote's reason, its
