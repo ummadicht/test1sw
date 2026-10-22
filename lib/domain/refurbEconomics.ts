@@ -6,16 +6,16 @@
  *   Pre-refurb value   M — the market price for the phone as it is: the case's trade-in quote, the
  *                      answer's own figure (Offer.swap.tradeIn; frozen at lock). Under it, the
  *                      answer's own words and where it came from: "Market price — priced at grade A
- *                      ₹34,960, less 15% back glass cracked" (the grade it was priced AT, never "the
- *                      phone is grade A": the answer's grade line may say B — R13).
+ *                      ₹34,960, less 15% back glass cracked" — the grade the answer shows (one grade:
+ *                      marketSell.ts tradeInGrade).
  *   Repair cost        the store's own figure when staff entered one (the case's refurbCost), else
  *                      SwapUp's repair estimate for the recorded faults — parts + labour + GST, the
  *                      price-book estimate the customer's repair line is built from, at list price,
  *                      never the customer's covered price (a part with no book price: no figure) —
  *                      else "Nothing to repair" (₹0) when there is no fault.
  *   Post-repair value  the SAME rate card's price for the phone once its faults are repaired: the
- *                      case's condition healed the card's way (repairedOnCard — healedCondition, with
- *                      the look the card priced kept) and priced through the card (ratecard.ts
+ *                      case's condition healed (condition.ts healedCondition: a new back glass is the
+ *                      look the grade already priced) and priced through the card (ratecard.ts
  *                      priceFromCard), so it reads the grade column the trade-in did, less only what
  *                      the repair leaves.
  *   Repair uplift      post-repair − pre-refurb − repair cost, said as the decision:
@@ -33,7 +33,7 @@
 import { fmtBp, inr, type Rupees } from "./money.ts";
 import { BODY_LABEL, BODY_ORDER, FAULT_BY_ID, HEALTHY, PART_LABEL, SCREEN_LABEL, SCREEN_ORDER, healedCondition, type ConditionAnswers, type FaultId } from "./condition.ts";
 import { priceFromCard, type QuoteLine, type RateCard } from "./ratecard.ts";
-import { MARKET_GRADE_LETTER, isDefectState, type MarketGrade, type MarketGradeLetter } from "./marketSell.ts";
+import { MARKET_GRADE_LETTER, type MarketGrade, type MarketGradeLetter } from "./marketSell.ts";
 import { defectNote } from "./answer.ts";
 import type { RepairEstimate } from "./repair.ts";
 import type { Offer, OfferQuote } from "./offer.ts";
@@ -125,10 +125,8 @@ function deductionWords(label: string): string {
 }
 
 /**
- * A rate card's trace in one line, naming the grade it was priced AT (the answer's staff note: "Priced
- * at grade A (₹34,960) less back glass cracked") — never "grade A" as the phone's grade, which the
- * answer's grade line says (R13): "priced at grade A ₹34,960, less 15% back glass cracked" (a row with
- * grade columns), "priced at the best-condition price ₹24,000, less 12% back glass cracked" (one
+ * A rate card's trace in one line, naming the grade it was priced at — the phone's grade, as the
+ * answer shows it: "priced at grade A ₹34,960, less 15% back glass cracked" (a row with grade columns), "priced at the best-condition price ₹24,000, less 12% back glass cracked" (one
  * without). Only the percentages are named; the cash step, a cap or the card's minimum are in the
  * trade-in's details. Nothing taken off: "grade B price" — the figure beside it IS that price, so it
  * isn't said twice.
@@ -140,21 +138,6 @@ export function cardTraceLine(lines: QuoteLine[], grade: MarketGrade | null | un
   if (!off.length) return grade ? `grade ${MARKET_GRADE_LETTER[grade]} price` : "best-condition price";
   const at = grade ? `grade ${MARKET_GRADE_LETTER[grade]}` : "the best-condition price";
   return `priced at ${at} ${inr(base.amount)}, less ${joinAnd(off.map((l) => `${fmtBp(l.bp!)} ${deductionWords(l.label)}`))}`;
-}
-
-/**
- * The phone repaired, as the price list reads it: healedCondition undoes what each fault implied
- * (the screen, the back, the functional issues, switching on, calls), and the look the card priced
- * the trade-in at stays. The card never saw a look under a cracked back — a defect state is graded as
- * flawless and taken off as a % (marketSell.ts tradeInGrade) — so repairing the back gives back that
- * % and nothing else: the "scuffed" frame healedCondition assumes there is the SwapUp grade's caution
- * (gradeAfterRefurb, the answer's grade line), not wear the card took off. Wear the card did price
- * (scratches, scuffs, dents, a bent frame) stays. Owner, SUP-92 (a): a cracked back on a flawless
- * phone, repaired → grade A ₹34,960.
- */
-export function repairedOnCard(condition: ConditionAnswers, faults: FaultId[]): ConditionAnswers {
-  const healed = healedCondition(condition, faults);
-  return isDefectState.body(condition.body) && !isDefectState.body(healed.body) ? { ...healed, body: "flawless" } : healed;
 }
 
 const upperFirst = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
@@ -224,7 +207,7 @@ export function refurbEconomics(i: RefurbInput): RefurbEconomics {
   else if (!condition) postRepair = missingPost(NO_CONDITION);
   else if (!device?.variant) postRepair = missingPost(swap.why ?? NO_TRADE_IN);
   else {
-    const r = priceFromCard(card, device.modelId, device.variant, repairedOnCard(condition, faults));
+    const r = priceFromCard(card, device.modelId, device.variant, healedCondition(condition, faults));
     postRepair =
       r.status === "priced"
         ? { amount: r.amount, grade: r.grade ? MARKET_GRADE_LETTER[r.grade] : null, source: upperFirst(cardTraceLine(r.lines, r.grade) ?? ""), why: null }

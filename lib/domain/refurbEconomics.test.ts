@@ -5,7 +5,6 @@ import {
   refurbEconomics,
   cardTraceLine,
   refurbDecisionShown,
-  repairedOnCard,
   NOTHING_TO_REPAIR,
   NOT_FROM_PRICE_LIST,
   PRICE_LIST_GONE,
@@ -118,7 +117,7 @@ function sameAsAnswer(e: RefurbEconomics, offer: ReturnType<typeof buildOffer>) 
 
 test("(a) cracked back, screen flawless: grade A less 15%, the back glass repaired → grade A ₹34,960, repair before pickup +₹654", () => {
   const { e, offer } = run({ condition: cond({ body: "back_cracked" }), faults: ["back_cracked"] });
-  // The grade it was priced AT, in the answer's own words — not "the phone is grade A" (R13).
+  // The grade it was priced at — the phone's grade, as the answer shows it (one grade).
   assert.deepEqual(e.preRefurb, { amount: 29_710, grade: "A", source: "Market price — priced at grade A ₹34,960, less 15% back glass cracked", why: null });
   assert.deepEqual(e.repairCost, { amount: 4_596, basis: "estimate", source: "SwapUp's repair estimate: back glass / cover ₹3,470 + labour ₹425 + GST ₹701", why: null });
   // The card priced this phone at grade A and took 15% off for the back: repaired, the 15% comes back
@@ -133,26 +132,22 @@ test("(a) cracked back, screen flawless: grade A less 15%, the back glass repair
     source: "As on the answer · + ₹4,649 bonus with the Galaxy S26 Ultra 256GB",
     why: null,
   });
-  // The customer's answer is unchanged: its grade line still reads the SwapUp grade, "Current grade B".
-  assert.equal(offer.answer.grade?.letter, "B");
+  // One grade: the customer's answer shows the grade the panel priced before and after — "Current grade A".
+  assert.equal(offer.answer.grade?.letter, "A");
   sameAsAnswer(e, offer);
 });
 
-test("repaired the card's way: healedCondition, keeping the look the card priced (a cracked back was priced as no look, never as scuffed)", () => {
+test("repaired: one grade — a new back glass is the look the grade priced, so the repaired phone is the grade it was shown at", () => {
   const back = cond({ body: "back_cracked" });
-  // healedCondition and the answer's grade line keep their caution: a new back on a frame nobody has seen bare.
-  assert.equal(healedCondition(back, ["back_cracked"]).body, "scuffed");
-  assert.equal(gradeAfterRefurb(back), "Good");
-  // The card never took that wear off, so the post-repair price doesn't either.
-  assert.deepEqual(repairedOnCard(back, ["back_cracked"]), { ...healedCondition(back, ["back_cracked"]), body: "flawless" });
+  assert.equal(healedCondition(back, ["back_cracked"]).body, "flawless");
+  assert.equal(gradeAfterRefurb(back), "Superb");
   // Wear the card did price stays: a scratched screen keeps grade B with the back repaired.
   const scratched = run({ condition: cond({ screen: "scratched", body: "back_cracked" }), faults: ["back_cracked"] }).e;
   assert.deepEqual([scratched.preRefurb.grade, scratched.postRepair.grade, scratched.postRepair.amount], ["B", "B", 33_574]);
   // A cracked back no fault explains isn't repaired: it stays, and so does its 15%.
-  assert.equal(repairedOnCard(back, []).body, "back_cracked");
-  // Everything else is healedCondition's, unchanged.
-  const screen = cond({ screen: "cracked", body: "dented", issues: ["wifi_bt"] });
-  assert.deepEqual(repairedOnCard(screen, ["screen_cracked"]), healedCondition(screen, ["screen_cracked"]));
+  assert.equal(healedCondition(back, []).body, "back_cracked");
+  // A bent frame still heals only as far as scuffs.
+  assert.equal(healedCondition(cond({ body: "bent" }), ["frame_damage"]).body, "scuffed");
 });
 
 test("(b) cracked screen: the display costs more than it adds — send as-is", () => {

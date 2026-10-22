@@ -390,11 +390,9 @@ per defect, the seeded price book, the S26 Ultra 256GB with a 3% bonus — `lib/
 | Not on the card / no card | — | — | — | — | — (`refurbEconomics: null`: no trade-in price) |
 
 A cracked back comes out at **grade A** (owner, SUP-92 (a)): the card priced the phone at grade A and
-took 15% off for the back glass, so the repair gives back that 15% at the same grade. The answer's
-grade line still reads "Current grade B · back glass cracked" — the SwapUp grade's caution
-(`gradeAfterRefurb`: a new back on a frame nobody has seen bare), which the card never took off and
-the post-repair price doesn't either. That is why the pre-refurb line says "priced at grade A", never
-"grade A".
+took 15% off for the back glass, so the repair gives back that 15% at the same grade
+(`healedCondition`: a new back glass heals to the look the grade priced). One grade (SUP-93): the
+answer's grade line says the same — "Current grade A · back glass cracked".
 
 **The store's repair cost** — `PATCH /api/cases/<id>` (Bearer, `advisor` / `store_manager` of the
 case's store; the case still `draft` or `quoted`) `{ "refurbCost": { "amount": 4200 } }` → the whole
