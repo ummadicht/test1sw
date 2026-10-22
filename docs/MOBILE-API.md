@@ -333,57 +333,82 @@ result in) → `complete` (app said done) → `applied` (staff applied it to the
 A session expires 30 min after creation unless joined; a joined session expires 2 h after
 joining.
 
-## 3b. Refurb cost quote and BUY vs SELL (store side)
+## 3b. The refurb decision (`refurbEconomics`, store side, staff only — since SUP-92)
 
-After the test is applied, the advisor enters the refurb cost and the trade-in is shown as
-buy vs sell — the same four lines on the desk's case page ("Store margin · staff only", under the
-answer) and in the store app
-(`lib/domain/buySell.ts` is the reference implementation).
+Owner, 2026-10-22: "staff refurb decision", the post-repair value from the **price list's** grade
+price. Every staff case response (`GET`/`PATCH /api/cases/<id>` and every `/action` response) carries
+`refurbEconomics`: five lines the server works out once (`lib/domain/refurbEconomics.ts`, from
+`cases.ts toView`) and the desk and SwapUp Store print **as sent** — the apps own only the labels.
+It replaced "Store margin · staff only" (buy / refurb / sell / margin): the sell price was PriceIQ's,
+and PriceIQ isn't the price list. On the desk the card is **"Refurb decision · staff only"**, closed,
+under the answer (`#refurb-decision`; the old `#store-margin` still opens the answer). The customer's
+answer and SwapUp Check are unchanged.
 
-**Since 2026-10-17 this is the store's margin, staff only.** In the store app the card sits in a
-collapsed "Store margin · staff only" row at the bottom of the answer screen (§3c), closed by
-default; its box is relabelled **"Store's refurb cost"** (it was "Refurb cost · your quote" in the
-app and "Refurb cost (quote)" on the desk), so it can't be confused with the answer's **Refurb
-quote** — the CUSTOMER's repair price. The figures and the logic below are unchanged.
+```ts
+type RefurbLine = { amount: number | null; source: string | null; why: string | null }; // source or why, never both
+CaseView += {
+  refurbEconomics: {
+    preRefurb:  RefurbLine & { grade: "A" | "B" | "C" | "D" | null };
+    repairCost: RefurbLine & { basis: "store" | "estimate" | "none" | null };
+    postRepair: RefurbLine & { grade: "A" | "B" | "C" | "D" | null };
+    uplift: { amount: number | null; verdict: "repair" | "as_is" | "nothing_to_repair" | null; text: string | null; why: string | null };
+    offer:      RefurbLine & { bonus: number | null; newPhone: string | null };
+  } | null;   // null for the partner; never on the customer's status (§4)
+};
+```
 
-| Line | From the case (`GET /api/cases/<id>`) |
-| --- | --- |
-| Buy — pay the customer | `quote.amount` when `quote.status === "priced"` — the case quote, whichever source priced it (§3c "Where the trade-in comes from") |
-| Store's refurb cost | `refurbCost.amount`, else `repair.listTotal ?? repair.customerPays` when `repair.status === "quoted"`, else ₹0 when `faults` is empty |
-| Sell — after refurb | `marketSell.amount` (PriceIQ's refurbished-market listing less 2–5%), else `repairedQuote.amount` when `repairedQuote.status === "priced"` |
-| Margin | Sell − Buy − Refurb, only when all three are known (negative = a loss) |
+| Label | Figure | The line under it |
+| --- | --- | --- |
+| **Pre-refurb value** | `preRefurb.amount` = M, the market price for the phone as it is: the case's trade-in quote, the answer's own figure (`offer.swap.tradeIn`; frozen at lock) | `source`: "grade A ₹34,960 − 15% back glass cracked" (a card row without grade columns: "best-condition price ₹24,000 − …"; a PriceIQ quote: the trade-in's one line) |
+| **Repair cost** | `repairCost.amount`: the store's own figure (`refurbCost`, basis `store`), else SwapUp's repair estimate for the recorded faults at list price — parts + labour + GST, the price-book estimate the customer's repair line is built from (`repair.listTotal ?? repair.customerPays`, basis `estimate`), else ₹0 with no fault (basis `none`) | `source`: "The store's own figure, entered by Ravi" / "SwapUp's repair estimate: back glass / cover ₹3,470 + labour ₹425 + GST ₹701" / "Nothing to repair" |
+| **Post-repair value** | `postRepair.amount`: the SAME rate card's price (the card the quote was read off, by `quote.source.rateCardId` — a newer card doesn't move it) for the phone with its faults repaired: `healedCondition` (only what each fault implied is undone; wear stays) priced through `priceFromCard` | `source`: "grade B price" (nothing taken off — the figure beside it is that price), or "grade A ₹34,960 − 15% Wi-Fi / Bluetooth faulty" for a fault no repair covers |
+| **Repair uplift** | `uplift.amount` = post-repair − pre-refurb − repair cost; `uplift.text` is the decision, word for word — print it alone (it says its own figure) | "Repair before pickup: +₹654" · "Send as-is — repairing costs ₹732 more than it adds" · "Send as-is — repairing only breaks even" · "Nothing to repair" (no fault and no store figure: `amount` null) |
+| **SwapUp offer** | `offer.amount` = what we pay (M + the SwapUp premium) — the answer's `wePay` | `source`: "+ ₹4,649 bonus with the Galaxy S26 Ultra 256GB" with a new phone and a bonus, else null |
 
-`marketSell` is `{ amount, listing, markdownBp, grade, gradeWanted, listings, week, ageDays, stale, note, why: null, source }`
-or `{ amount: null, why, source }` (`source: "PriceIQ · refurbished market"`). `listing` is the
-lowest refurbished-market listing at `grade` for that model + storage, from PriceIQ's live
-`/api/market-grades` (server to server; the app never talks to PriceIQ); the markdown is 5% up to
-₹15,000, 4% up to ₹30,000, 3% up to ₹50,000, 2% above (`lib/domain/marketSell.ts`). Market data over
-14 days old is priced with `stale: true` and `note` "Refurbished market price, week 2026-W35, 52 days
-old."; over 90 days old there is no price; PriceIQ unreachable → the last good answer with `note`
-"PriceIQ unreachable, last answer 2026-10-18 08:30 UTC.". `grade` is the grade the phone comes out at after
-refurb (`gradeAfterRefurb`); when the market lists none at it, the next lower listed grade is used
-and `gradeWanted` keeps the one it should have been. Show it in one line under the sell price, the
-same on the desk and the tablet (`lib/domain/buySell.ts` `marketSource`): "Refurbished market price
-₹21,999 (Good) − 4% · PriceIQ", plus " · none at Superb" when a lower grade was used; the partner's
-repaired price is "Partner's repaired price". The refurb box's reasons are the same words in both
-apps: "Needs a look on the bench — enter your refurb cost.", "No repair price for this phone — enter
-your refurb cost.", "No repair estimate yet — enter your refurb cost."
+**A missing figure stays missing** (`amount: null`) and `why` says why, in the server's words — never
+a guess: "This phone isn't on the rate card yet." / "No rate card is active yet." (pre-refurb and
+post-repair alike), "The trade-in isn't from the price list — no post-repair price to compare." (a
+PriceIQ trade-in), "Bench check needed (Liquid damage) — enter the store's repair cost.", "No book
+price for Speaker — enter the store's repair cost.", "No repair estimate — enter the store's repair
+cost.". With any of the three figures missing there is no decision: `uplift.why` names what it needs
+("Needs the repair cost.").
+
+Worked examples (S23 Ultra 256GB, week-42 card A 34,960 · B 33,574 · C 32,255 · D 30,672, SwapUp's %
+per defect, the seeded price book, the S26 Ultra 256GB with a 3% bonus — `lib/domain/refurbEconomics.test.ts`):
+
+| Phone | Pre-refurb | Repair cost | Post-repair | Decision | Offer |
+| --- | --- | --- | --- | --- | --- |
+| Cracked back | ₹29,710 (A − 15%) | ₹4,596 | ₹33,574 (B) | Send as-is — repairing costs ₹732 more than it adds | ₹30,898 + ₹4,649 |
+| Cracked screen | ₹20,970 (A − 40%) | ₹34,096 | ₹34,960 (A) | Send as-is — repairing costs ₹20,106 more than it adds | ₹21,808 + ₹4,649 |
+| Scratched, scuffed | ₹33,574 (B) | ₹0 | ₹33,574 (B) | Nothing to repair | ₹34,581 + ₹4,649 |
+| Not on the card | — | ₹34,096 | — | — (needs both values) | — |
+
+A cracked back comes out at **grade B**: `healedCondition` heals a cracked back only as far as
+"scuffed" (a new back panel on a frame nobody has seen bare) — the same rule the answer's grade line
+reads, which already shows this phone as "Current grade B".
+
+**The store's repair cost** — `PATCH /api/cases/<id>` (Bearer, `advisor` / `store_manager` of the
+case's store; the case still `draft` or `quoted`) `{ "refurbCost": { "amount": 4200 } }` → the whole
+`CaseView`. `amount` is whole rupees 0–5,00,000; the staff member's name and the time are stored with
+it (`refurbCost.by`, `refurbCost.at`). `{ "refurbCost": null }` goes back to SwapUp's estimate. It is
+the STORE's figure: it changes no price — the partner is not re-asked, and the advice, bonus and
+decision never read it (`manualRepair` is the customer's repair price and still does). On the desk the
+box sits on the Repair cost line, labelled "Store's own ₹", prefilled with the line's figure. Errors:
+`400` bad amount, `401` session over, `403` not a counter role, `404` case not in your store, `409` the
+case is past the counter.
+
+**Who sees it.** Staff only. A partner viewing the case gets `refurbEconomics: null` (and
+`refurbCost: null`); the customer's phone reads only `GET /api/device/status` → `answer` (§4), which
+never carries it.
+
+**Store apps before SUP-92** read the old "Store margin" card from `quote`, `refurbCost`, `repair`,
+`marketSell` and `repairedQuote` — all still on the `CaseView`, unchanged, so they keep working. Move
+the card to `refurbEconomics` and print its lines; `marketSell` (PriceIQ's refurbished-market listing
+less 2–5%) is no longer shown on the desk.
 
 **Screens never name the buyback partner company** (owner, 2026-10-17): they say "the partner" or
 print the partner's name the server sends (`quote.partner`; the demo programme's is "Buyback
 Partner (demo)").
-
-A missing number is shown as "—" with why (no quote yet; PriceIQ has no listing and the
-partner gave no repaired price; the repair needs a bench quote) — never guessed.
-
-`PATCH /api/cases/<id>` (Bearer, `advisor` / `store_manager` of the case's store; the case still
-`draft` or `quoted`) `{ "refurbCost": { "amount": 4200 } }` → the whole `CaseView`. `amount` is
-whole rupees 0–5,00,000; the staff member's name and the time are stored with it
-(`refurbCost.by`, `refurbCost.at`). `{ "refurbCost": null }` goes back to SwapUp's estimate.
-The refurb cost is the STORE's figure: it changes no price — the partner is not re-asked, and the
-advice, bonus and decision never read it (`manualRepair` is the customer's repair price and still
-does). A partner viewing the case sees `refurbCost: null`. Errors: `400` bad amount, `401` session
-over, `403` not a counter role, `404` case not in your store, `409` the case is past the counter.
 
 ## 3c. The answer (`offer`) — refurb quote vs we pay + bonus
 
@@ -630,7 +655,8 @@ accepted, never W − accepted).
 
 The offer is worked out for every status; `open` says whether it can still be acted on. Once the
 case is closed (`repair_chosen`, `walked_away`, `locked` and later) `asks` is `[]` and every action
-is "This case is closed.". A partner viewing a case gets `offer: null` (and `refurbCost: null`).
+is "This case is closed.". A partner viewing a case gets `offer: null` (and `refurbCost: null`,
+`refurbEconomics: null`).
 
 ### The strings, word for word
 
@@ -1331,8 +1357,9 @@ version says, and `phonecheck: null`. Show the grade line **outside** the price 
 stay partner money.
 
 **Partner fixes (2026-10-17).** For a partner viewer every case response now carries
-`refurbCost: null`, `offer: null` and `marketSell: { amount: null, why: "Not shown to the partner.",
-source }` — the PriceIQ sell price is the store's margin and used to reach the partner. Its
+`refurbCost: null`, `offer: null`, `refurbEconomics: null` (since SUP-92) and `marketSell: { amount:
+null, why: "Not shown to the partner.", source }` — the PriceIQ sell price is the store's own and used to
+reach the partner. Its
 `camera` also comes without the store camera's own grade: `grade: null`, `gradeRange: null`,
 `flags: []` (GradeIQ's Premium–D letter is staff-only; beside the report's A–D it would read as a
 second SwapUp grade). The camera's faults stay — they are on the case.

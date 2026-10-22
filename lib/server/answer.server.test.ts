@@ -545,3 +545,69 @@ test("All fine: the liquid indicator only where the card asks for it", () => {
   const seen = caseRow({ ...graded, lcd: { cameraChecked: false, verdict: null, reason: null } }, { liquid: { value: "clean", by: "Asha", at } });
   assert.deepEqual(taps(seen), ["screen:ok", "body:like_new"]);
 });
+
+/* ─────────────────────────── the refurb decision, staff only (SUP-92) ─────────────────────────── */
+
+test("refurb decision: staff get the five lines off the card the trade-in came from, the answer's own offer, the real price book — never the partner or the customer", async () => {
+  disconnectPriceiq();
+  resetPriceiqState();
+  // Week 42 with SwapUp's % per defect, charger / box / bill / age at 0.
+  const deductions = { ...DEFECT_DEDUCTIONS, noChargerBp: 0, noBoxBp: 0, noBillBp: 0, age: { lt3m: 0, "3to11m": 0, gt11m: 0 } };
+  const upload = (label: string, row: string) =>
+    uploadRateCard(partner, {
+      label,
+      effectiveFrom: "2026-10-12",
+      quoteValidityDays: 3,
+      csv: `model_id,variant,max_price,good_price,fair_price,best_value_price\n${row}\n`,
+      deductions,
+      activate: true,
+    });
+  try {
+    upload("Week 42", "galaxy-s23-ultra,256GB,34960,33574,32255,30672");
+    const t = await testedCase();
+    const cracked = { ...COND, screen: "cracked", body: "flawless" };
+    const v = await cases.updateCase(adv, t.caseId, { modelId: "galaxy-s23-ultra", variant: "256GB", faults: ["screen_cracked"], condition: cracked, upgradeDeviceId: S26U_256 });
+    const e = v.refurbEconomics!;
+    assert.deepEqual([e.preRefurb.amount, e.preRefurb.grade, e.preRefurb.source], [20_970, "A", "grade A ₹34,960 − 40% screen cracked"]);
+    // The seeded Samsung price book and the programme's repair policy: display ₹28,470 + tier S labour ₹425 + 18% GST.
+    assert.deepEqual([e.repairCost.amount, e.repairCost.basis, e.repairCost.source], [34_096, "estimate", "SwapUp's repair estimate: display assembly ₹28,470 + labour ₹425 + GST ₹5,201"]);
+    assert.equal(e.repairCost.amount, v.offer!.repair.amount, "the estimate the customer's repair line uses");
+    assert.deepEqual([e.postRepair.amount, e.postRepair.grade], [34_960, "A"]);
+    assert.deepEqual([e.uplift.amount, e.uplift.verdict, e.uplift.text], [-20_106, "as_is", "Send as-is — repairing costs ₹20,106 more than it adds"]);
+    // Each number once: the offer is the answer's.
+    const answer = v.offer!.answer;
+    assert.equal(e.preRefurb.amount, answer.market?.amount);
+    assert.equal(e.offer.amount, answer.wePay);
+    assert.equal(e.offer.bonus, answer.bonus?.amount ?? null);
+    assert.ok(e.offer.bonus && e.offer.source === `+ ₹${e.offer.bonus.toLocaleString("en-IN")} bonus with the Galaxy S26 Ultra 256GB`, e.offer.source ?? "");
+
+    // A cracked back: grade A less 15%; repaired, the card's grade B (healedCondition heals the back to "scuffed").
+    const back = await cases.updateCase(adv, t.caseId, { faults: ["back_cracked"], condition: { ...COND, screen: "flawless", body: "back_cracked" } });
+    const b = back.refurbEconomics!;
+    assert.deepEqual([b.preRefurb.amount, b.repairCost.amount, b.postRepair.amount, b.postRepair.grade, b.uplift.amount], [29_710, 4_596, 33_574, "B", -732]);
+    assert.equal(b.offer.amount, 30_898);
+    // The store's own repair cost wins over the estimate, and turns the decision.
+    const own = await cases.updateCase(adv, t.caseId, { refurbCost: { amount: 2_000 } });
+    assert.deepEqual([own.refurbEconomics!.repairCost.basis, own.refurbEconomics!.uplift.text], ["store", "Repair before pickup: +₹1,864"]);
+    assert.match(own.refurbEconomics!.repairCost.source!, /^The store's own figure, entered by /);
+
+    // A newer card goes live: the quote stands, and so does the card it was read off.
+    upload("Week 43", "galaxy-s23-ultra,256GB,30000,29000,28000,27000");
+    assert.equal(cases.getCase(adv, t.caseId).refurbEconomics!.postRepair.amount, 33_574, "the SAME card as the trade-in");
+
+    // Never the partner's, never the customer's.
+    assert.equal(cases.forViewer(partner, own).refurbEconomics, null);
+    const s = JSON.stringify(sessions.deviceStatus(t.ticket));
+    for (const bad of ["refurbEconomics", "Pre-refurb", "post-repair", "Repair before pickup", "Send as-is", "store's own"]) assert.ok(!s.includes(bad), `${bad} reached the customer`);
+
+    // Not on the card: both values missing with the card's reason, no uplift.
+    const off = await testedCase();
+    const n = await cases.updateCase(adv, off.caseId, { modelId: "galaxy-s23-ultra", variant: "512GB", faults: ["screen_cracked"], condition: cracked });
+    const ne = n.refurbEconomics!;
+    assert.deepEqual([ne.preRefurb.amount, ne.preRefurb.why, ne.postRepair.amount, ne.postRepair.why], [null, "This phone isn't on the rate card yet.", null, "This phone isn't on the rate card yet."]);
+    assert.deepEqual([ne.uplift.amount, ne.uplift.why], [null, "Needs the pre-refurb value and the post-repair value."]);
+  } finally {
+    db().prepare(`UPDATE rate_cards SET active = 0`).run();
+    connectPriceiq();
+  }
+});

@@ -83,6 +83,7 @@ After the counter:
 | Care+ plan fee | Samsung Care+ smartphone terms (ADLD processing fee per repair, tax incl.) where published per model; otherwise the programme default |
 | New phone prices | samsung.com/in selling prices, read 2026-10-15 — `scripts/research-samsung-lineup-2026-10-15.csv` |
 | Trade-in values | PriceIQ's lowest refurbished-market listing at the grade (live, `GET /api/market-grades`) less the 5%→2% markdown and SwapUp's % per defect, else the partner's uploaded rate card, else no price ("No market price yet", with why). Never typed in |
+| Post-repair value (staff "Refurb decision") | the same rate card the trade-in was read off, at the phone's grade once its faults are repaired (`healedCondition` → `priceFromCard`); none from PriceIQ — `lib/domain/refurbEconomics.ts` |
 | Update support | release year + Samsung's update policy per series (approximate; check Samsung's security-update page) |
 
 Regenerate the seed after refreshing the snapshots: `python3 scripts/build-seed-data.py`.

@@ -1,7 +1,7 @@
 import { db, tx, nowIso, todayIso, newId, nextSeq, parseJson, audit } from "./db";
 import { HttpError, orgSettings, type SessionUser } from "./auth";
 import { getOrg, getStore, ownStore, storeInScope, canSeeStore, orgPartnerId, type StoreRow } from "./scope";
-import { partnerQuote, partnerMode, type PartnerQuote, type PartnerMode } from "./buyback";
+import { partnerQuote, partnerMode, rateCardById, type PartnerQuote, type PartnerMode } from "./buyback";
 import { tradeInQuote, priceiqRepaired } from "./tradeIn";
 import { storeEvents, storePolicy, postEvents } from "./credit";
 import { activeCampaigns, newDevices } from "./catalog";
@@ -26,6 +26,7 @@ import { decide, type Decision } from "../domain/decision";
 import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
 import { buildOffer, EXPIRED_BLOCKER, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
 import { customerAnswer, type CustomerAnswer } from "../domain/answer";
+import { refurbEconomics, type RefurbEconomics } from "../domain/refurbEconomics";
 import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } from "../domain/premium";
 import { RuleError } from "../domain/errors";
 import { retiredSource } from "../domain/ratecard";
@@ -180,7 +181,7 @@ type CaseRow = {
   model_source: string | null;
 };
 
-/** The store's own cost to put the phone right (BUY vs SELL). Not the customer's repair price. */
+/** The store's own cost to put the phone right (the refurb decision's repair cost). Not the customer's repair price. */
 export type RefurbCost = { amount: number; by: string; at: string };
 
 export type Clearance = { outcome: string; accepted: number; shortfall: number; reason: string | null; by: string; at: string };
@@ -353,9 +354,13 @@ export type CaseView = {
   /** Why there is no trade-in quote although the phone is described (the camera's identity check). */
   quoteBlocked: string | null;
   manualRepair: ManualQuote | null;
-  /** The store's refurb cost quote (BUY vs SELL) — never read by the advice, the bonus or the partner quote. */
+  /** The store's own repair cost (the refurb decision) — never read by the advice, the bonus or the partner quote. */
   refurbCost: RefurbCost | null;
-  /** SELL: what the phone sells for refurbished — PriceIQ's refurbished-market listing less 2–5% (lib/domain/marketSell.ts). */
+  /**
+   * PriceIQ's refurbished-market listing less 2–5% (lib/domain/marketSell.ts). No screen of the desk
+   * shows it since SUP-92 (the refurb decision prices the repaired phone off the price list); kept
+   * for SwapUp Store builds whose "Store margin" card still reads it (docs/MOBILE-API.md §3b).
+   */
   marketSell: CaseMarketSell;
   /** The centre does not repair this brand — only an outside quote can be compared. */
   repairNotServiced: string | null;
@@ -400,6 +405,13 @@ export type CaseView = {
   measuredStorage: string | null;
   /** THE ANSWER — refurb quote vs trade-in + bonus, and the one thing still missing (lib/domain/offer.ts). null for the partner. */
   offer: Offer | null;
+  /**
+   * REFURB DECISION · STAFF ONLY (lib/domain/refurbEconomics.ts, docs/MOBILE-API.md §3b): pre-refurb
+   * value, repair cost, post-repair value off the same rate card, the repair uplift said as the
+   * decision, and the SwapUp offer — the answer's own figures. null for the partner; never on the
+   * customer's status.
+   */
+  refurbEconomics: RefurbEconomics | null;
   /**
    * THE GRADE (docs/GRADING.md): one grade from every phone check — SwapUp Check and Phonecheck —
    * as the SwapUp grade with its letter ("Good (B)"), the one-line why, and the report link. Staff: the
@@ -586,6 +598,7 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     variantSource: c.variant ? readVariantSource(c.variant_source) : null,
     measuredStorage: c.measured_storage ?? null,
     offer: null,
+    refurbEconomics: null,
     grading: caseGrading(c.id, viewer.partner ? "partner" : "staff"),
   };
   const legacyChecks = parseJson<Checks | null>(c.checks, null);
@@ -604,6 +617,20 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
   }
   // The answer is worked out for every status; `open` says whether it can still be acted on.
   view.offer = offerFor(c, store);
+  // The staff refurb decision, from the answer's own figures and the card the trade-in was read off.
+  if (!viewer.partner) {
+    const cardId = quote?.status === "priced" && quote.source.kind === "partner_ratecard" ? quote.source.rateCardId : null;
+    view.refurbEconomics = refurbEconomics({
+      swap: view.offer.swap,
+      quote,
+      card: cardId ? rateCardById(cardId) : null,
+      device: tm ? { modelId: tm.id, variant: c.variant } : null,
+      condition,
+      faults,
+      repair: view.repair,
+      refurbCost: view.refurbCost,
+    });
+  }
   return view;
 }
 
@@ -696,9 +723,9 @@ export function getCase(u: SessionUser, id: string): CaseView {
 
 /**
  * What the buyback partner may see of a case. The store's own money is its
- * business: its refurb cost, the answer it gave its customer (refurb quote vs
- * trade-in + bonus) and its SELL price — PriceIQ's refurbished-market listing, which the
- * store app labels "Store margin · staff only". Applied on every read path
+ * business: its repair cost and refurb decision ("Refurb decision · staff only"), the
+ * answer it gave its customer (refurb quote vs trade-in + bonus) and PriceIQ's
+ * refurbished-market listing (`marketSell`). Applied on every read path
  * (getCase), so no list or action response can carry them to a partner.
  *
  * Nor does the partner get the store camera's OWN grade: GradeIQ's letter
@@ -713,6 +740,7 @@ export function forViewer(u: SessionUser, view: CaseView): CaseView {
     ...view,
     refurbCost: null,
     offer: null,
+    refurbEconomics: null,
     // GradeIQ's lookup and the counter's IMEI warnings are the store's (contract I3).
     imeiLookup: null,
     imeiWarnings: [],

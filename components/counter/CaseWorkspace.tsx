@@ -16,7 +16,7 @@ import { LockedSummary } from "./LockedSummary";
 import { AnswerCard } from "./AnswerCard";
 import { CheckByEye } from "./CheckByEye";
 import { PhonecheckPanel } from "./PhonecheckPanel";
-import { StoreMargin } from "./StoreMargin";
+import { RefurbDecision } from "./RefurbDecision";
 import { StepHeader, StepDock } from "./StepNav";
 import { STEP_ANCHOR, canShow, landingStep, stepDone, stepFromAnchor, stepOrder, testedCase, type StepId } from "./caseSteps";
 import { fmtWhen } from "./shared";
@@ -70,7 +70,7 @@ const AT_COUNTER = ["draft", "quoted"];
  * with "Step 2 of 3 · What's wrong" on top (tap it for the list of steps) and Back / Next docked
  * at the bottom. Each step asks one question and says one line; the rest is behind its "Show
  * details", closed. The answer is the answer card (refurb quote vs trade-in + bonus, the SwapUp
- * grade, Repair / Swap up / Walked away) with "Store margin · staff only" closed under it; its
+ * grade, Repair / Swap up / Walked away) with "Refurb decision · staff only" closed under it; its
  * asks and "Change" links open the Repair quote and the Trade-in as pages of their own ("The
  * answer › Repair quote", Back to the answer); "Swap up" opens the last step. One answer on the
  * page: no comparison panel beside it.
@@ -171,8 +171,8 @@ export function CaseWorkspace({
   const lockedOrLater = !AT_COUNTER.includes(view.status) && view.status !== "repair_chosen" && view.status !== "walked_away";
   const showCustomer = role !== "partner";
   const isPartner = role === "partner";
-  /** "Store margin · staff only", closed, under the answer — before the trade-in, once there is a quote. */
-  const margin = !isPartner && !lockedOrLater && view.quote ? <StoreMargin ops={ops} /> : null;
+  /** "Refurb decision · staff only", closed, under the answer — before the trade-in, once there is a quote. */
+  const refurb = !isPartner && !lockedOrLater && view.quote ? <RefurbDecision ops={ops} /> : null;
 
   /* ─────────── the steps ─────────── */
   const hasAnswer = view.offer !== null;
@@ -330,7 +330,7 @@ export function CaseWorkspace({
           {hasAnswer ? (
             <div hidden={current !== "answer"} data-step="answer" className="space-y-5">
               <AnswerCard ops={ops} isManager={isManager} onStep={onStep} onSwap={swapUp} />
-              {margin}
+              {refurb}
             </div>
           ) : null}
           {canLock && lockOpen ? (

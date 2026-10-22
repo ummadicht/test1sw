@@ -68,6 +68,8 @@ const ANCHOR_STEP: Record<string, StepId> = {
   answer: "answer",
   "step-answer": "answer",
   grade: "answer",
+  "refurb-decision": "answer",
+  // The card's name before SUP-92: an older link still opens the answer.
   "store-margin": "answer",
   "step-lock": "lock",
 };

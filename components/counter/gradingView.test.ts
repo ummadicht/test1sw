@@ -548,8 +548,9 @@ test("static: one answer on the case page — the grade sits on the answer card,
   assert.ok(!ws.includes("why-answer"), "no second 'why' panel");
   assert.ok(!ws.includes("DecisionPanel"), "no comparison panel at all — the answer step is the one answer");
   assert.equal((ws.match(/<AnswerCard/g) ?? []).length, 1, "the answer is mounted once");
-  assert.ok(!read("./StepTradeIn.tsx").includes("buySell"), "the store margin left the trade-in step for the card under the answer");
-  assert.ok(read("./StoreMargin.tsx").includes("Store margin · staff only"));
+  assert.ok(!read("./StepTradeIn.tsx").includes("refurbEconomics"), "the refurb decision is the card under the answer, not the trade-in step");
+  assert.ok(read("./RefurbDecision.tsx").includes("Refurb decision · staff only"));
+  assert.ok(ws.includes("<RefurbDecision"), "the refurb decision sits under the answer");
 });
 
 test("static: the desk's own words never name the buyback partner's brand", () => {
@@ -559,8 +560,7 @@ test("static: the desk's own words never name the buyback partner's brand", () =
     "./answerAsks.ts",
     "./GradeRow.tsx",
     "./PhonecheckPanel.tsx",
-    "./StoreMargin.tsx",
-    "./marginLines.ts",
+    "./RefurbDecision.tsx",
     "./StepTradeIn.tsx",
     "./LockedSummary.tsx",
     "./CaseWorkspace.tsx",

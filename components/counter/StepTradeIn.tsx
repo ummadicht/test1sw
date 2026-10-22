@@ -66,8 +66,8 @@ function Trace({ quote }: { quote: PartnerQuote }) {
  * with the phone is the only thing that changes it), and the new phone it goes towards, with its
  * bonus in one line. The quote's working, its source and the bonus in full are behind "Show
  * details". What the customer pays and how it compares with the repair are the answer's, not
- * repeated here. The store's buy vs sell is "Store margin · staff only" under the answer
- * (StoreMargin.tsx); the partner sees what the phone is worth once repaired instead.
+ * repeated here. Whether the store repairs it first is "Refurb decision · staff only" under the
+ * answer (RefurbDecision.tsx); the partner sees what the phone is worth once repaired instead.
  */
 export function StepTradeIn({ ops, isPartner = false, isManager = false, bands = {} }: { ops: CaseOps; isPartner?: boolean; isManager?: boolean; bands?: Record<string, CampaignBand> }) {
   const { view, editable, act } = ops;
@@ -129,7 +129,7 @@ export function StepTradeIn({ ops, isPartner = false, isManager = false, bands =
       ) : null}
       {priced && !storeOnlyTrace ? <Trace quote={q!} /> : null}
 
-      {/* The partner: what the phone is worth once repaired, by its own price (store staff have the store margin under the answer) */}
+      {/* The partner: what the phone is worth once repaired, by its own price (store staff have the refurb decision under the answer) */}
       {isPartner && !storeOnlyTrace && view.faults.length > 0 && view.condition ? (
         <div>
           <div className="section-title">Worth once repaired</div>
