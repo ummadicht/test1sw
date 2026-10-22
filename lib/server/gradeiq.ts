@@ -193,7 +193,15 @@ export async function postDevice(id: string, body: DeviceForward): Promise<void>
  */
 export async function postFunctional(id: string, functional: Record<string, "pass" | "fail" | "skip">): Promise<void> {
   if (!functional || typeof functional !== "object") throw new GradeiqError("shape", "Nothing to forward.");
-  await call(sessionPath(id, "/functional"), { method: "POST", body: { functional, merge: true }, read: false });
+  // With the server key GradeIQ accepts a re-run pass over an earlier fail (its anonymous
+  // writers may only make a result worse — SUP-66); without it the fail is kept.
+  const { serverKey } = gradeiqConfig();
+  await call(sessionPath(id, "/functional"), {
+    method: "POST",
+    body: { functional, merge: true },
+    read: false,
+    ...(serverKey ? { headers: { "x-gradeiq-server-key": serverKey } } : {}),
+  });
 }
 
 /** Call 4 — the light pairing poll. An unknown id reads "idle", not 404. */
