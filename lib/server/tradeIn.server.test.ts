@@ -361,3 +361,61 @@ test("the partner never gets the store's SELL price or its answer: no PriceIQ li
   for (const n of [sell, listing, v.repairedQuote!.amount!, v.marketSell.amount!]) assert.ok(!numbers.includes(n), `${n} must not reach the partner`);
   assert.doesNotMatch(JSON.stringify(p), /Refurbished market price|Below the market price/);
 });
+
+/* ─────────────────────────── SUP-29: the condition names its fault ─────────────────────────── */
+
+test("SUP-29: a cracked screen set on the condition alone ticks its fault — the screen repair is quoted, never 'Nothing to repair' — and the trade-in is the same", async () => {
+  const flawless = COND({ body: "flawless" });
+  const cracked = COND({ body: "flawless", screen: "cracked" });
+  const c = cases.createCase(advisor, { customerName: "Condition Only" });
+  const v0 = await cases.updateCase(advisor, c.id, { modelId: "galaxy-s23-ultra", variant: "256GB", faults: [], condition: flawless, ...(s25u ? { upgradeDeviceId: s25u.id } : {}) });
+  assert.equal(v0.offer!.repair.nothingToRepair, true);
+  // The condition editor's own save: the condition, and nothing else.
+  const v = await cases.updateCase(advisor, c.id, { condition: cracked });
+  assert.deepEqual(v.faults, ["screen_cracked"]);
+  assert.deepEqual(v.faultSources, { screen_cracked: ["advisor"] });
+  assert.deepEqual(v.conditionProblems, []);
+  assert.equal(v.repair?.status, "quoted");
+  assert.deepEqual(v.repair!.lines.map((l) => [l.part, l.faults]), [["display", ["screen_cracked"]]]);
+  assert.equal(v.repair!.customerPays, Math.round((28_470 + 425) * 1.18), "Samsung's display + S-series labour + GST");
+  assert.equal(v.offer!.repair.nothingToRepair, false);
+  assert.equal(v.offer!.repair.amount, v.repair!.customerPays);
+  assert.notEqual(v.offer!.headline, "Nothing to repair — a straight trade-in");
+  assert.notEqual(v.decision?.recommendation, "no_repair");
+  assert.ok(v.offer!.answer.lines.some((l) => l.key === "repair"), "the answer carries the repair line");
+
+  // The trade-in is what the condition alone priced before: the same condition with no fault, re-priced.
+  db().prepare(`UPDATE cases SET faults = '[]', fault_sources = '{}' WHERE id = ?`).run(c.id);
+  const old = await cases.reprice(advisor, c.id, { requote: true });
+  assert.equal(old.offer!.repair.nothingToRepair, true, "the old way: no fault, nothing to repair");
+  assert.equal(v.quote?.status, "priced");
+  assert.equal(v.quote?.amount, old.quote?.amount);
+  assert.deepEqual(v.quote?.lines, old.quote?.lines);
+  // …and what ticking "Cracked screen" itself gives.
+  const t = cases.createCase(advisor, { customerName: "Fault Ticked" });
+  const viaFault = await cases.updateCase(advisor, t.id, { modelId: "galaxy-s23-ultra", variant: "256GB", faults: ["screen_cracked"], condition: cracked });
+  assert.equal(v.quote?.amount, viaFault.quote?.amount);
+  assert.equal(v.repair?.customerPays, viaFault.repair?.customerPays);
+});
+
+test("SUP-29: lines, a cracked back and a faulty part set on the condition each bring their fault; looks bring none; a fault list sent with it is taken as sent", async () => {
+  const c = cases.createCase(advisor, { customerName: "Condition Only 2" });
+  await cases.updateCase(advisor, c.id, { modelId: "galaxy-s23-ultra", variant: "256GB", faults: [], condition: COND({ body: "flawless" }) });
+  const looks = await cases.updateCase(advisor, c.id, { condition: COND({ screen: "scratched", body: "dented" }) });
+  assert.deepEqual(looks.faults, [], "scratches and dents are looks, not repairs");
+  assert.equal(looks.offer!.repair.nothingToRepair, true);
+  const v = await cases.updateCase(advisor, c.id, { condition: COND({ screen: "lines_or_spots", body: "back_cracked" }) });
+  assert.deepEqual(v.faults, ["display_lines", "back_cracked"]);
+  assert.equal(v.repair?.status, "quoted");
+  assert.deepEqual(v.repair!.lines.map((l) => l.part).sort(), ["back_cover", "display"]);
+  // A part the book has no price for: the centre's quote is asked for — never "Nothing to repair".
+  const spk = await cases.updateCase(advisor, c.id, { condition: COND({ screen: "lines_or_spots", body: "back_cracked", issues: ["speaker"] }) });
+  assert.deepEqual(spk.faults, ["display_lines", "back_cracked", "speaker"]);
+  assert.equal(spk.repair?.status, "unpriced");
+  assert.ok(spk.offer!.asks.some((a) => a.kind === "repair_quote"));
+  assert.notEqual(spk.offer!.headline, "Nothing to repair — a straight trade-in");
+  // "Nothing wrong" on the fault list sends the faults with the condition they leave: taken as sent.
+  const none = await cases.updateCase(advisor, c.id, { faults: [], condition: COND({ body: "flawless" }) });
+  assert.deepEqual(none.faults, []);
+  assert.equal(none.offer!.repair.nothingToRepair, true);
+});

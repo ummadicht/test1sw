@@ -719,6 +719,13 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
   re-quote. A fault or condition change the store camera contradicts is refused 409 with the camera's
   sentence ("Camera confirmed "Cracked screen", photo 2 — removing it needs a reason."); send the same
   patch again with `cameraOverride: {reason}` (8+ characters, kept with the advisor's name) and it saves.
+- **The condition names its fault** (SUP-29) — a `{condition}` patch with no `faults` that records a
+  repairable defect no fault explains adds that fault (source `advisor`): screen `cracked` →
+  `screen_cracked`, `lines_or_spots` → `display_lines`, body `back_cracked` → `back_cracked`, and the
+  issues touch / battery / charging / rear or front camera / speaker / mic / buttons → their fault. So
+  the answer prices the repair (or asks for the centre's quote) instead of "Nothing to repair". The
+  trade-in reads the condition only: its price doesn't move. Looks (scratches, scuffs, dents), a bent
+  frame, no power, no calls and liquid add nothing; a patch that sends `faults` is taken as sent.
 - **IMEI** — step 1 (§2d): asked first, on New trade-in (or the Session screen for a counter-QR
   trade-in), resolved once per case; Lock asks for it only when it was skipped.
 

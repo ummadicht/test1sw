@@ -14,6 +14,7 @@ import {
   conditionFloor,
   conditionFromFaults,
   healedCondition,
+  withConditionFaults,
   SCREEN_ORDER,
   BODY_ORDER,
   ISSUE_LABEL,
@@ -1266,8 +1267,21 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     sets.coverage = patch.coverage;
   }
   if (patch.condition !== undefined) {
-    sets.condition = patch.condition === null ? null : JSON.stringify(cleanCondition(patch.condition));
+    const next = patch.condition === null ? null : cleanCondition(patch.condition);
+    sets.condition = next === null ? null : JSON.stringify(next);
     pricingChanged = true;
+    // The condition edited by itself (staff "edit only conditions"): a defect it records that no fault
+    // explains — a cracked screen, lines, a cracked back, a faulty part — brings its fault, so the
+    // repair side prices it instead of saying "Nothing to repair". The trade-in reads the condition
+    // only, so its price doesn't move. A patch that says the faults (the fault list, Apply, Phonecheck)
+    // is taken as sent.
+    if (next && patch.faults === undefined) {
+      const named = withConditionFaults(faults, next);
+      if (named !== faults) {
+        faults = named;
+        sets.faults = JSON.stringify(faults);
+      }
+    }
   }
   const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   if (patch.conditionFromFaults) {
@@ -1278,7 +1292,8 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     sets.condition = JSON.stringify(camera ? applyCameraFloor(filled, camera.floor) : filled);
     pricingChanged = true;
   }
-  if (patch.faults !== undefined) sets.fault_sources = JSON.stringify(reconcileFaultSources(parseJson<FaultSources>(c.fault_sources, {}), faults));
+  // A fault the condition named is the advisor's (reconcileFaultSources).
+  if ("faults" in sets) sets.fault_sources = JSON.stringify(reconcileFaultSources(parseJson<FaultSources>(c.fault_sources, {}), faults));
   // The camera only ever makes the phone worse. Recording it better than the
   // camera confirmed needs a reason, kept with the advisor's name.
   if (camera && (patch.faults !== undefined || patch.condition !== undefined || patch.conditionFromFaults || patch.cameraOverride)) {

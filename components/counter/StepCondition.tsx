@@ -11,6 +11,7 @@ import {
   AGE_LABEL,
   conditionFromFaults,
   conditionFloor,
+  withConditionFaults,
   type ConditionAnswers,
   type IssueId,
   type AgeBand,
@@ -55,7 +56,9 @@ export function ConditionProblems({ ops }: { ops: CaseOps }) {
 
 /**
  * The trade-in condition — what the buyback partner prices. Filled in from the faults, never
- * better than them; on the "What's wrong" step, behind "Show details" (StepFaults).
+ * better than them; on the "What's wrong" step, behind "Show details" (StepFaults). A defect set
+ * here that a repair fixes (a cracked screen or back, lines, a faulty part) ticks its fault too
+ * (condition.ts faultsNamedByCondition), so the answer never says "Nothing to repair" for it.
  */
 export function ConditionEditor({ ops }: { ops: CaseOps }) {
   const { view, editable, save } = ops;
@@ -63,7 +66,9 @@ export function ConditionEditor({ ops }: { ops: CaseOps }) {
   const c = view.condition;
 
   async function put(next: ConditionAnswers) {
-    setErr(await save({ condition: next }, { condition: next, conditionProblems: conditionFloor(next, view.faults) }));
+    // A defect a repair fixes brings its fault (the server does the same): the repair side prices it.
+    const faults = withConditionFaults(view.faults, next);
+    setErr(await save({ condition: next }, { condition: next, faults, conditionProblems: conditionFloor(next, faults) }));
   }
 
   if (!c) {
@@ -89,7 +94,7 @@ export function ConditionEditor({ ops }: { ops: CaseOps }) {
     <div>
       <div className="section-title">Trade-in condition</div>
       <p className="text-[14px] text-ink-2 mt-1 mb-4">
-        Filled from the faults. You can only make it <strong>worse</strong>.
+        Filled from the faults. You can only make it <strong>worse</strong>. Damage a repair fixes is added to the faults.
       </p>
 
       <div className="space-y-5">
