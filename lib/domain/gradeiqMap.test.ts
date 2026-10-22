@@ -15,6 +15,8 @@ import {
   cameraOverrideProblems,
   addFaultSources,
   reconcileFaultSources,
+  conditionOnlyFaults,
+  faultsAfterConditionEdit,
   disagreements,
   assessmentView,
   pullWindowStart,
@@ -485,6 +487,29 @@ test("fault sources: several per fault, removed faults lose theirs, unsourced fa
   assert.deepEqual(s, { screen_cracked: ["declared", "camera_ai"], speaker: ["tested"] });
   s = reconcileFaultSources(s, ["screen_cracked", "battery_drain"]);
   assert.deepEqual(s, { screen_cracked: ["declared", "camera_ai"], battery_drain: ["advisor"] });
+});
+
+test("fault sources: a condition edit tags what it names \"condition\" and takes back only those (SUP-29 review)", () => {
+  const good: ConditionAnswers = { ...COND, body: "flawless", screen: "flawless" };
+  // The editor names the crack: tagged as the condition's.
+  const a = faultsAfterConditionEdit([], {}, { ...good, screen: "cracked" });
+  assert.deepEqual(a, { faults: ["screen_cracked"], sources: { screen_cracked: ["condition"] } });
+  assert.deepEqual(conditionOnlyFaults(a.sources, a.faults), ["screen_cracked"]);
+  // Changed back: gone, sources and all.
+  assert.deepEqual(faultsAfterConditionEdit(a.faults, a.sources, good), { faults: [], sources: {} });
+  // Nothing moves: the same arrays back.
+  const kept = faultsAfterConditionEdit(a.faults, a.sources, { ...good, screen: "cracked", accessories: { ...good.accessories, box: false } });
+  assert.equal(kept.faults, a.faults);
+  assert.equal(kept.sources, a.sources);
+  // Found again by a test (or Phonecheck, the camera, the fault list): no longer the condition's alone — it stays.
+  const tested = addFaultSources(a.sources, [{ id: "screen_cracked", source: "tested" }]);
+  assert.deepEqual(tested.screen_cracked, ["tested", "condition"]);
+  assert.deepEqual(conditionOnlyFaults(tested, a.faults), []);
+  assert.deepEqual(faultsAfterConditionEdit(a.faults, tested, good).faults, ["screen_cracked"]);
+  // A ticked fault keeps its source beside a fault the condition adds.
+  const both = faultsAfterConditionEdit(["mic"], { mic: ["advisor"] }, { ...good, issues: ["mic", "speaker"] });
+  assert.deepEqual(both, { faults: ["mic", "speaker"], sources: { mic: ["advisor"], speaker: ["condition"] } });
+  assert.deepEqual(faultsAfterConditionEdit(both.faults, both.sources, good), { faults: ["mic"], sources: { mic: ["advisor"] } });
 });
 
 test("apply: the camera never downgrades what the customer declared", () => {

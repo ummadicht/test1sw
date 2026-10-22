@@ -34,7 +34,7 @@ import {
   conditionFromFaults,
   isFaultId,
 } from "./condition.ts";
-import { addFaultSources, applyCameraFloor, type CameraFloor, type FaultSources } from "./gradeiqMap.ts";
+import { addFaultSources, applyCameraFloor, conditionOnlyFaults, type CameraFloor, type FaultSources } from "./gradeiqMap.ts";
 
 export const CERT_ROWS = ["screen", "body", "liquid"] as const;
 export type CertRow = (typeof CERT_ROWS)[number];
@@ -280,12 +280,16 @@ export function certifyRow(s: CertifyState, i: CertifyInput): CertifyResult | { 
   const kept = s.faults.filter((f) => !removed.includes(f));
   const add = choice.faults.filter((f) => !kept.includes(f));
   const faults = [...kept, ...add];
-  // This row's faults: the new ones, and the earlier tap's that are still its own.
-  const added = choice.faults.filter((f) => add.includes(f) || (prev?.added ?? []).includes(f));
+  // A fault only the condition named that this tap names too: the advisor's look confirms it, so it is
+  // this row's from now on (source "advisor") — the condition editor no longer takes it back
+  // (gradeiqMap.ts conditionOnlyFaults), this row's next tap does.
+  const adopted = conditionOnlyFaults(s.sources, choice.faults.filter((f) => kept.includes(f)));
+  // This row's faults: the new ones, the adopted ones, and the earlier tap's that are still its own.
+  const added = choice.faults.filter((f) => add.includes(f) || adopted.includes(f) || (prev?.added ?? []).includes(f));
 
   const sources: FaultSources = {};
-  for (const [k, v] of Object.entries(s.sources)) if (!removed.includes(k as FaultId)) sources[k as FaultId] = [...(v ?? [])];
-  const nextSources = addFaultSources(sources, add.map((id) => ({ id, source: "advisor" as const })));
+  for (const [k, v] of Object.entries(s.sources)) if (!removed.includes(k as FaultId)) sources[k as FaultId] = adopted.includes(k as FaultId) ? [] : [...(v ?? [])];
+  const nextSources = addFaultSources(sources, [...adopted, ...add].map((id) => ({ id, source: "advisor" as const })));
 
   // Condition (only once the case has one): the issues the earlier tap brought go with its faults
   // (unless another fault still implies them); then the row's value, never better than the faults

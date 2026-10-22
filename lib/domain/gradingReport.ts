@@ -62,6 +62,7 @@ export const FAULT_SOURCE_LABEL: Readonly<Record<FaultSource, string>> = {
   declared: "Customer said",
   camera_ai: "Store camera",
   advisor: "Advisor",
+  condition: "Advisor (condition)",
 };
 
 /* ─────────────────────────── the body ─────────────────────────── */

@@ -373,7 +373,7 @@ test("SUP-29: a cracked screen set on the condition alone ticks its fault — th
   // The condition editor's own save: the condition, and nothing else.
   const v = await cases.updateCase(advisor, c.id, { condition: cracked });
   assert.deepEqual(v.faults, ["screen_cracked"]);
-  assert.deepEqual(v.faultSources, { screen_cracked: ["advisor"] });
+  assert.deepEqual(v.faultSources, { screen_cracked: ["condition"] }, "the condition's own fault: the condition can take it back");
   assert.deepEqual(v.conditionProblems, []);
   assert.equal(v.repair?.status, "quoted");
   assert.deepEqual(v.repair!.lines.map((l) => [l.part, l.faults]), [["display", ["screen_cracked"]]]);
@@ -418,4 +418,56 @@ test("SUP-29: lines, a cracked back and a faulty part set on the condition each 
   const none = await cases.updateCase(advisor, c.id, { faults: [], condition: COND({ body: "flawless" }) });
   assert.deepEqual(none.faults, []);
   assert.equal(none.offer!.repair.nothingToRepair, true);
+});
+
+test("SUP-29 review: a crack tapped by mistake is undone in the condition editor — cracked, then flawless: no fault, the condition as set, nothing to repair, the same trade-in", async () => {
+  const good = COND({ body: "flawless", screen: "flawless" });
+  const c = cases.createCase(advisor, { customerName: "Mis-tap" });
+  const v0 = await cases.updateCase(advisor, c.id, { modelId: "galaxy-s23-ultra", variant: "256GB", faults: [], condition: good, ...(s25u ? { upgradeDeviceId: s25u.id } : {}) });
+  assert.equal(v0.offer!.repair.nothingToRepair, true);
+  assert.equal(v0.quote?.status, "priced");
+
+  // The mis-tap: the crack brings its fault, the condition's own.
+  const cracked = await cases.updateCase(advisor, c.id, { condition: COND({ body: "flawless", screen: "cracked" }) });
+  assert.deepEqual(cracked.faults, ["screen_cracked"]);
+  assert.deepEqual(cracked.faultSources, { screen_cracked: ["condition"] });
+  assert.equal(cracked.offer!.repair.nothingToRepair, false);
+  assert.notEqual(cracked.quote?.amount, v0.quote?.amount, "priced as a cracked phone");
+
+  // Undone where it was made: the fault goes with the answer, and the case is the phone before the mis-tap.
+  const v = await cases.updateCase(advisor, c.id, { condition: good });
+  assert.deepEqual(v.faults, []);
+  assert.deepEqual(v.faultSources, {});
+  assert.equal(v.condition?.screen, "flawless");
+  assert.deepEqual(v.conditionProblems, []);
+  assert.equal(v.offer!.repair.nothingToRepair, true);
+  assert.equal(v.offer!.repair.amount, v0.offer!.repair.amount);
+  assert.equal(v.offer!.headline, v0.offer!.headline);
+  assert.equal(v.quote?.status, "priced");
+  assert.equal(v.quote?.amount, v0.quote?.amount);
+  assert.deepEqual(v.quote?.lines, v0.quote?.lines);
+  const fresh = cases.getCase(advisor, c.id);
+  assert.deepEqual(fresh.faults, []);
+  assert.deepEqual(fresh.faultSources, {});
+
+  // Cracked, then meant "Lines / spots": the one fault swapped for the other.
+  await cases.updateCase(advisor, c.id, { condition: COND({ body: "flawless", screen: "cracked" }) });
+  const lines = await cases.updateCase(advisor, c.id, { condition: COND({ body: "flawless", screen: "lines_or_spots" }) });
+  assert.deepEqual(lines.faults, ["display_lines"]);
+  assert.deepEqual(lines.faultSources, { display_lines: ["condition"] });
+  assert.deepEqual(lines.conditionProblems, []);
+
+  // A back or an issue chip the same way; another fault the condition named stays.
+  const more = await cases.updateCase(advisor, c.id, { condition: COND({ body: "back_cracked", screen: "lines_or_spots", issues: ["mic", "speaker"] }) });
+  assert.deepEqual(more.faults, ["display_lines", "back_cracked", "mic", "speaker"]);
+  const less = await cases.updateCase(advisor, c.id, { condition: COND({ body: "flawless", screen: "lines_or_spots", issues: ["mic"] }) });
+  assert.deepEqual(less.faults, ["display_lines", "mic"]);
+  assert.deepEqual(less.conditionProblems, []);
+
+  // Ticked on the fault list: the advisor's, never the condition's to take back — a better answer is still refused.
+  await cases.updateCase(advisor, c.id, { faults: ["screen_cracked"], condition: COND({ body: "flawless", screen: "cracked" }) });
+  const ticked = await cases.updateCase(advisor, c.id, { condition: good });
+  assert.deepEqual(ticked.faults, ["screen_cracked"]);
+  assert.deepEqual(ticked.faultSources, { screen_cracked: ["advisor"] });
+  assert.ok(ticked.conditionProblems.length > 0, "the condition is better than a ticked fault allows");
 });

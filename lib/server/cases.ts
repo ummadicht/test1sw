@@ -14,7 +14,6 @@ import {
   conditionFloor,
   conditionFromFaults,
   healedCondition,
-  withConditionFaults,
   SCREEN_ORDER,
   BODY_ORDER,
   ISSUE_LABEL,
@@ -44,6 +43,7 @@ import {
   blankCameraCheck,
   cameraOverrideProblems,
   CAMERA_REASON_MIN,
+  faultsAfterConditionEdit,
   identityBlock,
   reconcileFaultSources,
 } from "../domain/gradeiqMap";
@@ -1271,15 +1271,17 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     sets.condition = next === null ? null : JSON.stringify(next);
     pricingChanged = true;
     // The condition edited by itself (staff "edit only conditions"): a defect it records that no fault
-    // explains — a cracked screen, lines, a cracked back, a faulty part — brings its fault, so the
-    // repair side prices it instead of saying "Nothing to repair". The trade-in reads the condition
-    // only, so its price doesn't move. A patch that says the faults (the fault list, Apply, Phonecheck)
-    // is taken as sent.
+    // explains — a cracked screen, lines, a cracked back, a faulty part — brings its fault (source
+    // "condition"), so the repair side prices it instead of saying "Nothing to repair"; a fault only
+    // the condition brought goes when the condition stops naming it (a mis-tap undone in the editor).
+    // The trade-in reads the condition only, so its price doesn't move. A patch that says the faults
+    // (the fault list, Apply, Phonecheck) is taken as sent.
     if (next && patch.faults === undefined) {
-      const named = withConditionFaults(faults, next);
-      if (named !== faults) {
-        faults = named;
+      const r = faultsAfterConditionEdit(faults, reconcileFaultSources(parseJson<FaultSources>(c.fault_sources, {}), faults), next);
+      if (r.faults !== faults) {
+        faults = r.faults;
         sets.faults = JSON.stringify(faults);
+        sets.fault_sources = JSON.stringify(r.sources);
       }
     }
   }
@@ -1292,8 +1294,8 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     sets.condition = JSON.stringify(camera ? applyCameraFloor(filled, camera.floor) : filled);
     pricingChanged = true;
   }
-  // A fault the condition named is the advisor's (reconcileFaultSources).
-  if ("faults" in sets) sets.fault_sources = JSON.stringify(reconcileFaultSources(parseJson<FaultSources>(c.fault_sources, {}), faults));
+  // A condition edit wrote its own sources (faultsAfterConditionEdit); a fault ticked with none is the advisor's.
+  if ("faults" in sets && !("fault_sources" in sets)) sets.fault_sources = JSON.stringify(reconcileFaultSources(parseJson<FaultSources>(c.fault_sources, {}), faults));
   // The camera only ever makes the phone worse. Recording it better than the
   // camera confirmed needs a reason, kept with the advisor's name.
   if (camera && (patch.faults !== undefined || patch.condition !== undefined || patch.conditionFromFaults || patch.cameraOverride)) {

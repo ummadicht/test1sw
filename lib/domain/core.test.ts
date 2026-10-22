@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pctOf, inr, roundDown, fmtBp } from "./money.ts";
 import { readImei, luhnValid, maskImei } from "./imei.ts";
-import { FAULT_BY_ID, conditionFromFaults, conditionFloor, faultsNamedByCondition, healedCondition, partsForFaults, withConditionFaults, type ConditionAnswers } from "./condition.ts";
+import { FAULT_BY_ID, conditionFromFaults, conditionFloor, faultsNamedByCondition, healedCondition, partsForFaults, withConditionFaults, type ConditionAnswers, type FaultId } from "./condition.ts";
 import { priceFromCard, linesSum } from "./ratecard.ts";
 import { estimateRepair } from "./repair.ts";
 import { computeBonus, validateCampaign, bestCampaign, type BonusContext } from "./bonus.ts";
@@ -83,6 +83,22 @@ test("condition names its fault (SUP-29): a crack, lines or a cracked back set o
     assert.deepEqual(conditionFromFaults(faults, c), c, "the faults imply exactly this condition");
     for (const id of faults) assert.ok(FAULT_BY_ID[id].part, `${id} is priced by the book`);
   }
+});
+
+test("condition takes back its own fault (SUP-29 review): a fault only the condition named goes when the answer changes; nothing else does", () => {
+  const healthy: ConditionAnswers = { powersOn: true, calls: true, screen: "flawless", body: "flawless", issues: [], ...ACC };
+  // "Cracked glass" tapped by mistake, then the right answer: the crack goes with it.
+  assert.deepEqual(withConditionFaults(["screen_cracked"], { ...healthy, screen: "flawless" }, ["screen_cracked"]), []);
+  // Cracked, then "Lines / spots": the one fault swapped for the other.
+  assert.deepEqual(withConditionFaults(["screen_cracked"], { ...healthy, screen: "lines_or_spots" }, ["screen_cracked"]), ["display_lines"]);
+  // Still named: kept, in place, and the same array back.
+  const same: FaultId[] = ["mic", "screen_cracked"];
+  assert.equal(withConditionFaults(same, { ...healthy, screen: "cracked", issues: ["mic"] }, ["screen_cracked"]), same);
+  // An issue chip off takes its fault; another issue's fault stays.
+  assert.deepEqual(withConditionFaults(["speaker", "mic"], { ...healthy, issues: ["mic"] }, ["speaker", "mic"]), ["mic"]);
+  // A fault from anywhere else (the fault list, a test, the camera) is never the condition's to remove.
+  assert.deepEqual(withConditionFaults(["screen_cracked"], { ...healthy, screen: "flawless" }, []), ["screen_cracked"]);
+  assert.deepEqual(withConditionFaults(["screen_cracked", "speaker"], { ...healthy, screen: "cracked" }, ["speaker"]), ["screen_cracked"]);
 });
 
 test("condition: one display fixes crack + lines + touch", () => {

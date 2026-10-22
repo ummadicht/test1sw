@@ -14,7 +14,8 @@
  * reports any answer that is better than the faults allow, so the UI can refuse.
  * A worse answer that IS a repairable defect (a cracked screen, a faulty speaker)
  * brings its fault with it (`faultsNamedByCondition`), so the repair quote and the
- * trade-in describe the same phone whichever list staff edited.
+ * trade-in describe the same phone whichever list staff edited — and takes it back
+ * when the answer is changed again (`withConditionFaults`).
  *
  * The condition dimensions follow the shape buyback partners in India price on
  * (switches on / calls / screen / body / functional issues / accessories / age).
@@ -261,10 +262,19 @@ export function faultsNamedByCondition(answers: ConditionAnswers, faults: FaultI
   return out;
 }
 
-/** The faults with what the condition names added (faultsNamedByCondition) — the case's faults after a condition edit. */
-export function withConditionFaults(faults: FaultId[], answers: ConditionAnswers): FaultId[] {
-  const named = faultsNamedByCondition(answers, faults);
-  return named.length ? [...faults, ...named] : faults;
+/**
+ * The case's faults after a condition edit: what the answers name (faultsNamedByCondition) is added.
+ * `fromCondition` are the faults only an earlier condition edit named (fault source "condition",
+ * gradeiqMap.ts faultsAfterConditionEdit): each stays while the answers still name it and goes when
+ * they don't, so "Cracked glass" tapped by mistake is undone by tapping the right answer. Every other
+ * fault stays — a condition edit never removes what staff, a test or the camera recorded. The same
+ * array back when nothing moves.
+ */
+export function withConditionFaults(faults: FaultId[], answers: ConditionAnswers, fromCondition: readonly FaultId[] = []): FaultId[] {
+  const standing = fromCondition.length ? faults.filter((f) => !fromCondition.includes(f)) : faults;
+  const named = faultsNamedByCondition(answers, standing);
+  const next = [...faults.filter((f) => standing.includes(f) || named.includes(f)), ...named.filter((f) => !faults.includes(f))];
+  return next.length === faults.length && next.every((f, i) => f === faults[i]) ? faults : next;
 }
 
 /**
