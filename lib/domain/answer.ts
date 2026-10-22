@@ -12,15 +12,17 @@
  * screens from drifting apart. The customer's phone gets `customerAnswer` — a whitelist copy with
  * no source, no percentage, no premium, no staff note.
  *
- *   grade    the SwapUp grade the phone shows: the worse of its look (rule G1 with its defects set
- *            aside — what the trade-in is priced at) and its grade after refurb, so a cracked back
- *            never reads better than the report's after-repair grade. Display only: the grade never
- *            moves a price. The defects go in the note, at most two, then "+N more".
- *   market   M — what the buyback partner pays for this phone (the case's trade-in quote). Shown to
- *            the customer only from the partner's own price (its rate card): a
- *            PriceIQ trade-in is SwapUp's estimate, so the customer waits while staff see it. It
- *            names a grade only when the price is FOR the grade the grade line shows; otherwise
- *            "Market price ₹X", and staff read which grade it was priced at.
+ *   grade    THE SwapUp grade (marketSell.ts tradeInGrade, owner 2026-10-22: "grade match"): rule
+ *            G1 on the phone's look with its defects set aside — the ONE grade the trade-in is
+ *            priced at, the report shows and the refurb comes out at. The defects go in the note,
+ *            at most two, then "+N more".
+ *   market   M — what the buyback partner pays for this phone (the case's trade-in quote), named
+ *            "for grade X" with the grade line's own grade. When the price took something off the
+ *            grade's price (a defect, missing accessories, age), the note is the calculation:
+ *            "₹34,960 less ₹5,250 for back glass cracked". Shown to the customer only from the
+ *            partner's own price (its rate card): a PriceIQ trade-in is SwapUp's estimate, so the
+ *            customer waits while staff see it. Only when nothing listed the phone's grade and a
+ *            lower one priced it does the line name no grade; staff read which grade it was.
  *   we_pay  W = M + the SwapUp premium (premium.ts). The premium is never named to the customer.
  *   bonus    the upgrade bonus, with a new phone only.
  *   repair   the customer's repair price (the refurb quote), at the counter or once chosen.
@@ -29,8 +31,8 @@
  * grading engine (grading.test.ts G49).
  */
 import { inr, fmtBp, type BasisPoints, type Rupees } from "./money.ts";
-import { MARKET_GRADES, MARKET_GRADE_LETTER, gradeAfterRefurb, tradeInGrade, type MarketGrade, type MarketGradeLetter } from "./marketSell.ts";
-import { ISSUE_LABEL, type ConditionAnswers } from "./condition.ts";
+import { MARKET_GRADE_LETTER, isDefectState, tradeInGrade, type MarketGrade, type MarketGradeLetter } from "./marketSell.ts";
+import { BODY_WORD, ISSUE_LABEL, SCREEN_WORD, type ConditionAnswers } from "./condition.ts";
 import { premiumOn, PREMIUM_RULE_VERSION } from "./premium.ts";
 import type { PriceSourceKind } from "./ratecard.ts";
 import type { Coverage } from "./repair.ts";
@@ -52,7 +54,7 @@ export type Answer = {
   /** The CUSTOMER's headline. Staff screens keep Offer.headline. */
   headline: string;
   grade: { letter: MarketGradeLetter; word: MarketGrade; note: string | null } | null;
-  /** letter/word = the grade the market line names; null when it names none (the price is for another grade than the one shown). */
+  /** letter/word = the grade the market line names — the grade line's; null only when a lower grade priced it (none listed at the phone's). */
   market: { amount: Rupees; letter: MarketGradeLetter | null; word: MarketGrade | null; source: string } | null;
   premium: { amount: Rupees; bp: BasisPoints; rule: string } | null;
   wePay: Rupees | null;
@@ -102,9 +104,11 @@ export type AnswerInput = {
     /**
      * The grade's own price before anything was taken off (a rate card grade column's price), when
      * the source has one. M below it means something was deducted (a defect, missing accessories,
-     * age), so M is no longer "the market price for grade X" — the line must not say it is.
+     * age): the market line's note works it out — "₹34,960 less ₹5,250 for back glass cracked".
      */
     gradePrice?: Rupees | null;
+    /** What was taken off, as the customer reads it ("back glass cracked", "no charger"), in the quote's order. */
+    takenOff?: string[] | null;
   } | null;
   /** An expired quote or the camera's identity block — nothing ready. */
   quoteExpired: boolean;
@@ -146,15 +150,8 @@ const HEADLINE: Record<Recommendation, string> = {
 const COVER_WORD: Record<Coverage, string> = { none: "", warranty: "warranty", care_plus: "Care+" };
 
 const lowerFirst = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s);
-const rank = (g: MarketGrade) => MARKET_GRADES.indexOf(g);
-const worse = (a: MarketGrade, b: MarketGrade): MarketGrade => (rank(a) >= rank(b) ? a : b);
-
-/** The grade the phone shows: the worse of its priced look and its grade after refurb. null = no condition. */
-export function displayGrade(c: Pick<ConditionAnswers, "screen" | "body"> | null | undefined): MarketGrade | null {
-  const look = tradeInGrade(c);
-  const after = gradeAfterRefurb(c);
-  return look && after ? worse(look, after) : (look ?? after);
-}
+/** At most two, then "+N more". */
+const atMostTwo = (all: string[]) => (all.length <= 2 ? all.join(", ") : `${all.slice(0, 2).join(", ")}, +${all.length - 2} more`);
 
 /**
  * The defects, in the deduction table's order — never a scratch, scuff, dent or bent frame: the
@@ -165,13 +162,10 @@ export function defectNote(c: AnswerInput["condition"]): string | null {
   if (!c.powersOn) return "doesn't switch on";
   const all: string[] = [];
   if (!c.calls) all.push("calls don't work");
-  if (c.screen === "lines_or_spots") all.push("screen lines or spots");
-  else if (c.screen === "cracked") all.push("screen cracked");
-  else if (c.screen === "not_working") all.push("screen not working");
-  if (c.body === "back_cracked") all.push("back glass cracked");
+  if (isDefectState.screen(c.screen)) all.push(SCREEN_WORD[c.screen]);
+  if (isDefectState.body(c.body)) all.push(BODY_WORD[c.body]);
   for (const i of c.issues) all.push(lowerFirst(ISSUE_LABEL[i]));
-  if (!all.length) return null;
-  return all.length <= 2 ? all.join(", ") : `${all.slice(0, 2).join(", ")}, +${all.length - 2} more`;
+  return all.length ? atMostTwo(all) : null;
 }
 
 function repairText(r: AnswerInput["repair"], chosen: boolean): string {
@@ -191,8 +185,8 @@ export function buildAnswer(i: AnswerInput): Answer {
   const cancelled = s === "cancelled";
   const final = !open;
 
-  // ── The grade ──
-  const word = displayGrade(i.condition);
+  // ── The grade: THE SwapUp grade — the one the price is for ──
+  const word = tradeInGrade(i.condition);
   const note = defectNote(i.condition);
   const grade = word ? { letter: MARKET_GRADE_LETTER[word], word, note } : null;
 
@@ -218,21 +212,19 @@ export function buildAnswer(i: AnswerInput): Answer {
   const bonusAmount = traded && i.locked ? (i.locked.bonus ?? 0) : (i.bonus?.amount ?? 0);
   const bonus = i.newPhone && wePay !== null && bonusAmount > 0 && !chosen && !cancelled ? { amount: bonusAmount, bp: i.bonus?.bp ?? 0 } : null;
 
-  // ── The market line's grade: named only when it is the grade the price is FOR (R13) ──
-  // The price is for the phone's look (what the trade-in is priced at; a source with no grade of
-  // its own prices that too), or for the lower grade a listing or a card's column came from. The
-  // line names it only when the grade line shows that same grade: a cracked back looks Superb and
-  // is priced off grade A less the back glass, but shows grade B — so "Market price ₹X", no grade.
-  const wanted = tradeInGrade(i.condition);
-  const lower = !!i.market?.priceGrade && !!wanted && i.market.priceGrade !== wanted;
-  const pricedAt = i.market?.priceGrade ?? wanted;
-  // Something taken off the grade's own price (liquid damage, a cracked screen, no charger…): M is
-  // what the partner pays for THIS phone, not the grade's market price — so the line names no grade
-  // and says what it is after. Seen on the W42 card: a grade-A phone with liquid damage read
-  // "Market price for grade A ₹19,220" while the card's grade A is ₹34,960.
+  // ── The market line: for the grade the grade line shows, worked out when something was taken off ──
+  // The price's base is for the phone's grade (a rate card's column, a PriceIQ listing; a source
+  // with no grade of its own prices that grade too) — unless nothing listed that grade and a lower
+  // one priced it: then the line names no grade, and staff read which it was.
+  const lower = !!i.market?.priceGrade && !!word && i.market.priceGrade !== word;
+  const pricedAt = i.market?.priceGrade ?? word;
+  const named = word && pricedAt === word ? word : null;
+  // Something taken off the grade's own price (a defect, no charger, age): the note is the sum —
+  // "₹34,960 less ₹5,250 for back glass cracked" — so the grade, its price and M always add up.
   const gradePrice = i.market?.gradePrice ?? null;
-  const deducted = M !== null && gradePrice !== null && M < gradePrice;
-  const named = word && pricedAt === word && !deducted ? word : null;
+  const takenOff = M !== null && gradePrice !== null && M < gradePrice ? gradePrice - M : 0;
+  const what = (i.market?.takenOff ?? []).filter((w) => !!w);
+  const sum = gradePrice !== null && takenOff ? `${inr(gradePrice)} less ${inr(takenOff)}${what.length ? ` for ${atMostTwo(what)}` : ""}` : null;
   const market: Answer["market"] =
     M === null ? null : { amount: M, letter: named ? MARKET_GRADE_LETTER[named] : null, word: named, source: i.market?.source ?? "none" };
 
@@ -261,7 +253,7 @@ export function buildAnswer(i: AnswerInput): Answer {
     lines.push({
       key: "market",
       text: market.letter ? `Market price for grade ${market.letter} ${inr(M)}` : `Market price ${inr(M)}`,
-      note: deducted ? (note ? `after ${note}` : "after accessories and age") : null,
+      note: named ? sum : null,
       amount: M,
     });
     lines.push({ key: "we_pay", text: traded ? `We paid you ${inr(wePay)}` : `We pay you ${inr(wePay)}`, note: null, amount: wePay });
@@ -288,11 +280,10 @@ export function buildAnswer(i: AnswerInput): Answer {
           : HEADLINE[i.recommendation ?? "cannot_say"];
 
   // ── Staff-only words ──
-  // The grade the price is for, whenever the line doesn't name it or it isn't the phone's look:
-  // "Priced at grade A less back glass cracked." / "Priced at grade C — none listed at grade B."
+  // The grade the price is for, when a lower one priced it: "Priced at grade C (₹30,672) — none listed at grade B."
   const pricedNote =
-    pricedAt && wanted && (lower || (word && !named))
-      ? `Priced at grade ${MARKET_GRADE_LETTER[pricedAt]}${gradePrice !== null ? ` (${inr(gradePrice)})` : ""}${note ? ` less ${note}` : deducted ? " less accessories and age" : ""}${lower ? ` — none listed at grade ${MARKET_GRADE_LETTER[wanted]}` : ""}.`
+    lower && pricedAt && word
+      ? `Priced at grade ${MARKET_GRADE_LETTER[pricedAt]}${gradePrice !== null ? ` (${inr(gradePrice)}${takenOff ? ` less ${inr(takenOff)}` : ""})` : ""} — none listed at grade ${MARKET_GRADE_LETTER[word]}.`
       : null;
   const marketNotes = [open && i.market?.source === "priceiq" ? ESTIMATE_NOTE : null, pricedNote].filter((x): x is string => !!x);
   const pct = premium && premium.bp ? ` (${fmtBp(premium.bp)}${premiumEdge !== null ? `, lifted to what ${inr(premiumEdge)} earns` : ""})` : "";

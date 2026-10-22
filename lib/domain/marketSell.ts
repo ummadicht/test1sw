@@ -63,24 +63,6 @@ export function sellFromListing(listing: Rupees): { amount: Rupees; markdownBp: 
 const rank = (g: MarketGrade) => MARKET_GRADES.indexOf(g);
 const worse = (a: MarketGrade, b: MarketGrade): MarketGrade => (rank(a) >= rank(b) ? a : b);
 
-/** The grade a phone in this condition comes out at after refurb, or null when the condition isn't known. */
-export function gradeAfterRefurb(condition: Pick<ConditionAnswers, "screen" | "body"> | null | undefined): MarketGrade | null {
-  if (!condition) return null;
-  // The refurb replaces a broken screen, so only a scratched one (not a fault) lowers the grade.
-  const screen: MarketGrade = condition.screen === "scratched" ? "Good" : "Superb";
-  const body: MarketGrade =
-    condition.body === "flawless"
-      ? "Superb"
-      : condition.body === "scuffed"
-        ? "Good"
-        : condition.body === "back_cracked"
-          ? "Good" // the back panel is replaced; the frame under it has usually taken wear
-          : condition.body === "dented"
-            ? "Fair"
-            : "Best Value"; // bent
-  return worse(screen, body);
-}
-
 /**
  * Rule G1 of the SwapUp grade (lib/domain/grading.ts): what the phone LOOKS like — the worse of the
  * screen's and the body's grade; null when either is off the grade ladder (lines, a cracked or dead
@@ -105,14 +87,28 @@ const onLadder = {
 export const isDefectState = { screen: (s: ScreenState) => !onLadder.screen(s), body: (b: BodyState) => !onLadder.body(b) };
 
 /**
- * The grade a trade-in is priced at: rule G1 on what the grade can see. A defect (lines, a cracked
- * or dead screen, a cracked back) is left out here and deducted instead. null = no condition.
- * The PriceIQ trade-in (priceiqTradeIn.ts) and a per-grade rate card (ratecard.ts) both read it.
+ * THE SwapUp GRADE — one grade for a phone, everywhere (owner, 2026-10-22: "auto grade ... grade
+ * match and also if I change condition re grade n price change in all"): rule G1 on what the grade
+ * can see, with a defect (lines, a cracked or dead screen, a cracked back) left out — the defect is
+ * named beside the grade and taken off its price instead. null = no condition.
+ *
+ * It is, all at once: the grade every answer shows ("Current grade A · back glass cracked"); the
+ * grade the trade-in is priced at (a per-grade rate card's column, ratecard.ts; PriceIQ's listing,
+ * priceiqTradeIn.ts); and the grade the phone comes out at after refurb, because the refurb replaces
+ * exactly what the grade leaves out (the screen, the back glass) and touches nothing it sees
+ * (scratches, scuffs, dents, a bent frame). So no screen ever shows one grade and prices another.
  */
 export function tradeInGrade(condition: Pick<ConditionAnswers, "screen" | "body"> | null | undefined): MarketGrade | null {
   if (!condition) return null;
   return cosmeticGrade({ screen: onLadder.screen(condition.screen) ? condition.screen : "flawless", body: onLadder.body(condition.body) ? condition.body : "flawless" });
 }
+
+/**
+ * The grade a phone in this condition comes out at after refurb — the SwapUp grade itself
+ * (tradeInGrade): a cracked screen or back glass is replaced, what the grade sees stays. Its own
+ * name for the sell side (the refurbished price, the repaired value, the report's after-repair grade).
+ */
+export const gradeAfterRefurb = tradeInGrade;
 
 /* ─────────────────────────── PriceIQ's answer, as SwapUp keeps it ─────────────────────────── */
 

@@ -78,6 +78,24 @@ export const BODY_LABEL: Record<BodyState, string> = {
   back_cracked: "Back glass cracked",
   bent: "Bent or broken frame",
 };
+/**
+ * The few words a customer reads for each screen and body state (the answer's grade note and the
+ * market line's "₹34,960 less ₹5,250 for back glass cracked"). "" = nothing to say.
+ */
+export const SCREEN_WORD: Record<ScreenState, string> = {
+  flawless: "",
+  scratched: "screen scratched",
+  lines_or_spots: "screen lines or spots",
+  cracked: "screen cracked",
+  not_working: "screen not working",
+};
+export const BODY_WORD: Record<BodyState, string> = {
+  flawless: "",
+  scuffed: "light scuffs",
+  dented: "dented frame",
+  back_cracked: "back glass cracked",
+  bent: "bent frame",
+};
 export const ISSUE_LABEL: Record<IssueId, string> = {
   touch: "Touch not responding",
   battery: "Battery drains / swollen",

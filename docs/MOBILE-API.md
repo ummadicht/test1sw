@@ -628,20 +628,25 @@ type Answer = {
 | key | when | `text` | `note` |
 | --- | --- | --- | --- |
 | `grade` | the case has a condition | `Current grade C (Fair)`; with a defect `Current grade A` | the defects, at most two then `+N more` ("screen cracked", "back glass cracked", "doesn't switch on" alone…); never scratches, scuffs, dents or a bent frame |
-| `market` | there is a market price | `Market price for grade C ₹25,000` when the price is FOR the grade the grade line shows; otherwise `Market price ₹25,000` (a lower grade's price, a cracked back priced at its grade A look but shown as B, or no grade known) | — |
+| `market` | there is a market price | `Market price for grade C ₹25,000` — the grade line's own grade; `Market price ₹25,000` only when a LOWER grade priced it (none listed at the phone's) or no grade is known | when the price took something off the grade's own price, the sum: `₹34,960 less ₹5,250 for back glass cracked` (at most two named, then `+N more`); else none |
 | `we_pay` | with `market` | `We pay you ₹26,000`; traded `We paid you ₹26,000` | — |
 | `bonus` | a new phone, a bonus > 0, a market price; not after "repair chosen" | `+ ₹6,199 bonus if you exchange with a new device`; traded `+ ₹6,199 bonus with the Galaxy S26 Ultra 256GB` | the new phone's label (open) |
 | `repair` | something to repair, not traded | `or repair it for ₹34,096` · `or repair it free — covered by warranty` / `… Care+` · `or repair it — the advisor will quote the price`; repair chosen `Repair ₹34,096` / `Repair — covered by warranty` | — |
 
-The grade is the worse of the look the trade-in is priced at (rule G1, defects set aside) and the
-grade after refurb — display only, so a cracked back never reads better than the report's
-after-repair grade. The market line names a grade only when the grade the price is FOR (the
-listing's or the rate card column's grade; for a source with no grade, the look) is the grade the
-grade line shows (R13). Otherwise it prints `Market price ₹X`, and `staffNotes.market` says what it
-was priced at: "Priced at grade C — none listed at grade B." / "Priced at grade A less back glass
-cracked." — a cracked back on a per-grade card (max 40,000 · good 30,000 · fair 25,000 · best value
-20,000) reads `Current grade B · back glass cracked` · `Market price ₹34,000` · `We pay you ₹35,020`,
-never "for grade B" (the card's grade B is ₹30,000).
+**One grade** (owner, 2026-10-22: "grade match … if I change condition re grade n price change in
+all"). The grade is THE SwapUp grade (`marketSell.ts tradeInGrade`): rule G1 on the phone's look with
+its defects (lines, a cracked or dead screen, a cracked back) set aside. It is the grade the trade-in
+is priced at (a per-grade rate card's column, PriceIQ's listing), the grade the report shows, and the
+grade the phone comes out at after refurb — the refurb replaces exactly what the grade leaves out. The
+market line names that grade; when the price took something off the grade's own price (a defect,
+missing accessories, age) its note is the sum, so grade, price and M always add up. A cracked back on
+a per-grade card (max 40,000 · good 30,000 · fair 25,000 · best value 20,000) reads
+`Current grade A · back glass cracked` · `Market price for grade A ₹34,000 · ₹40,000 less ₹6,000 for
+back glass cracked` · `We pay you ₹35,020`. Only when nothing listed the phone's grade and a lower
+one priced it does the line print `Market price ₹X`; `staffNotes.market` then says "Priced at grade C
+(₹25,000 less ₹3,750) — none listed at grade B." Every condition change (the condition saved whole,
+a Check the phone tap, the storage) re-grades and re-prices the case before it answers
+(`lib/server/oneGrade.server.test.ts` proves it on every surface).
 
 | status | ready | final | lines | customer text when not ready |
 | --- | --- | --- | --- | --- |

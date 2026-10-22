@@ -482,6 +482,8 @@ export function buildOffer(i: OfferInput): Offer {
               // line is that base ("Market price grade A · <card>", ratecard.ts priceFromCard).
               gradePrice:
                 q?.source.kind === "partner_ratecard" && q?.grade && typeof q?.lines?.[0]?.amount === "number" ? q.lines[0].amount : null,
+              // What the price took off, in the customer's words (ratecard.ts: each deduction line's `word`).
+              takenOff: (q?.lines ?? []).flatMap((l) => (l.word && l.amount < 0 ? [l.word] : [])),
             },
       quoteExpired: i.quoteExpired,
       quoteBlocked: !!i.quoteBlocked,

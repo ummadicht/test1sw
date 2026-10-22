@@ -37,6 +37,7 @@ import {
   BODY_LABEL,
 } from "./condition.ts";
 import type { Declared, TestOutcome, TestResults } from "./diagnostics.ts";
+import { MARKET_GRADE_LETTER, tradeInGrade } from "./marketSell.ts";
 
 /* ─────────────────────────── GradeIQ's shapes (the slice SwapUp reads) ─────────────────────────── */
 
@@ -296,6 +297,22 @@ export type Finality = {
   /** Why it is not final (empty when final). Sentences for the advisor. */
   reasons: string[];
 };
+
+/**
+ * The camera step's line about its grade, once it says anything (null = nothing yet). A FINAL grade
+ * is said in SwapUp's letter — the grade what the camera confirmed gives (its floor, rule G1:
+ * marketSell.ts tradeInGrade), the same grade the answer and the price use (owner, 2026-10-22:
+ * "auto grade ... grade match") — with GradeIQ's own letter (its Premium–D scale) only when it
+ * differs. A provisional grade is never applied, so it stays GradeIQ's letter, said as provisional.
+ */
+export function cameraGradeLine(fin: Finality, gradeiqLetter: string | null | undefined, floor: CameraFloor): string | null {
+  if (fin.final) {
+    const ours = MARKET_GRADE_LETTER[tradeInGrade(floor) ?? "Superb"];
+    return `Camera grade ${ours} (final)${gradeiqLetter && gradeiqLetter !== ours ? ` — GradeIQ said ${gradeiqLetter}` : ""}.`;
+  }
+  if (fin.provisional) return `Camera grade ${gradeiqLetter || ""} provisional${fin.reasons[0] ? ` — ${fin.reasons[0].charAt(0).toLowerCase()}${fin.reasons[0].slice(1)}` : "."}`;
+  return fin.status === "failed" ? (fin.reasons[0] ?? null) : null;
+}
 
 /**
  * A cosmetic grade is FINAL only when all of these hold: a grade letter, a real
