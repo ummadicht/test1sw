@@ -190,3 +190,16 @@ phone (Galaxy S23 Ultra 256GB) with the key in `/etc/swapup.env` (skipped, with 
 that key is missing) and that the live site can price a trade-in (the same check as `release.sh`).
 It takes its own database backup unless `release.sh` already has, and it never ships a `.csv`
 (there is no bundled price file).
+
+**Rollback.** Before anything ships, `deploy.sh` keeps the release that answers now in
+`~/swapup-prev` on the VM (everything but `data/` and `.next/cache`; `~/swapup-prev.kept` names it).
+After the restart it asks the new build, on the VM, for `/login` (200) and
+`/api/signup/programmes` (200 with its JSON). If that fails, or the ship, `npm install` or the
+restart fails, it puts the kept release back, restarts pm2, checks it answers, and exits 1 either
+way (`✗ ROLLED BACK`, or `✗ DOWN` when nothing was kept or the old one does not answer either).
+Caddy, the browser apps and the APKs are only touched once the new build answers, so a rolled-back
+deploy leaves them as they were. The database is left as the new build left it: migrations only
+add, so the build before runs on it, and the backup from before the deploy is in `~/swapup-backups`.
+A live app that does not answer is never kept over the release kept before it.
+`deploy/deploy.test.ts` runs `deploy.sh` against a folder standing in for the VM (`FAKE_SSH`, with a
+stand-in pm2 running each build's own server), never the VM itself.
