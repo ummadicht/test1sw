@@ -26,7 +26,7 @@ import { decide, type Decision } from "../domain/decision";
 import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
 import { buildOffer, EXPIRED_BLOCKER, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
 import { customerAnswer, type CustomerAnswer } from "../domain/answer";
-import { refurbEconomics, type RefurbEconomics } from "../domain/refurbEconomics";
+import { refurbDecisionShown, refurbEconomics, type RefurbEconomics } from "../domain/refurbEconomics";
 import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } from "../domain/premium";
 import { RuleError } from "../domain/errors";
 import { retiredSource } from "../domain/ratecard";
@@ -408,8 +408,9 @@ export type CaseView = {
   /**
    * REFURB DECISION · STAFF ONLY (lib/domain/refurbEconomics.ts, docs/MOBILE-API.md §3b): pre-refurb
    * value, repair cost, post-repair value off the same rate card, the repair uplift said as the
-   * decision, and the SwapUp offer — the answer's own figures. null for the partner; never on the
-   * customer's status.
+   * decision, and the SwapUp offer — the answer's own figures. null unless there is a priced trade-in
+   * still to decide on (draft, quoted, locked, in_pickup — refurbDecisionShown); null for the partner;
+   * never on the customer's status.
    */
   refurbEconomics: RefurbEconomics | null;
   /**
@@ -617,8 +618,9 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
   }
   // The answer is worked out for every status; `open` says whether it can still be acted on.
   view.offer = offerFor(c, store);
-  // The staff refurb decision, from the answer's own figures and the card the trade-in was read off.
-  if (!viewer.partner) {
+  // The staff refurb decision, from the answer's own figures and the card the trade-in was read off —
+  // only while there is a priced trade-in to decide on (at the counter, or traded in until pickup).
+  if (!viewer.partner && refurbDecisionShown(c.status, view.offer.swap)) {
     const cardId = quote?.status === "priced" && quote.source.kind === "partner_ratecard" ? quote.source.rateCardId : null;
     view.refurbEconomics = refurbEconomics({
       swap: view.offer.swap,

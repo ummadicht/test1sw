@@ -171,8 +171,11 @@ export function CaseWorkspace({
   const lockedOrLater = !AT_COUNTER.includes(view.status) && view.status !== "repair_chosen" && view.status !== "walked_away";
   const showCustomer = role !== "partner";
   const isPartner = role === "partner";
-  /** "Refurb decision · staff only", closed, under the answer — before the trade-in, once there is a quote. */
-  const refurb = !isPartner && !lockedOrLater && view.quote ? <RefurbDecision ops={ops} /> : null;
+  /**
+   * "Refurb decision · staff only", closed, under the answer — whenever the server sends it: a priced
+   * trade-in at the counter, or traded in until the partner's pickup (read-only). Never the partner's.
+   */
+  const refurb = !isPartner && view.refurbEconomics ? <RefurbDecision ops={ops} /> : null;
 
   /* ─────────── the steps ─────────── */
   const hasAnswer = view.offer !== null;
@@ -306,7 +309,11 @@ export function CaseWorkspace({
       ) : null}
 
       {lockedOrLater ? (
-        <LockedSummary ops={ops} isManager={isManager} isCounter={isCounter} isPartner={isPartner} showCustomer={showCustomer} pickup={pickup} />
+        <div className="space-y-5">
+          <LockedSummary ops={ops} isManager={isManager} isCounter={isCounter} isPartner={isPartner} showCustomer={showCustomer} pickup={pickup} />
+          {/* Traded in, before the pickup: the decision staff act on ("Repair before pickup"), read-only. */}
+          {refurb}
+        </div>
       ) : (
         <>
           <StepHeader steps={steps} current={current} done={done} busy={ops.busy} onGo={goTo} />

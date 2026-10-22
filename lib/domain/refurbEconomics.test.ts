@@ -1,11 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { refurbEconomics, cardTraceLine, NOTHING_TO_REPAIR, NOT_FROM_PRICE_LIST, PRICE_LIST_GONE, type RefurbEconomics } from "./refurbEconomics.ts";
+import {
+  refurbEconomics,
+  cardTraceLine,
+  refurbDecisionShown,
+  repairedOnCard,
+  NOTHING_TO_REPAIR,
+  NOT_FROM_PRICE_LIST,
+  PRICE_LIST_GONE,
+  REFURB_DECISION_STATUSES,
+  type RefurbEconomics,
+} from "./refurbEconomics.ts";
 import { buildOffer, type OfferInput, type OfferQuote } from "./offer.ts";
 import { priceFromCard, DEFECT_DEDUCTIONS, DEFECT_RULES, NOT_ON_CARD, type RateCard } from "./ratecard.ts";
 import { estimateRepair, type Coverage, type RepairBookEntry } from "./repair.ts";
 import { HEALTHY, healedCondition, type ConditionAnswers, type FaultId } from "./condition.ts";
+import { gradeAfterRefurb } from "./marketSell.ts";
 
 /* ─────────────────────────── fixtures: SUP-92's worked examples ─────────────────────────── */
 // The S23 Ultra 256GB on the week-42 card (A 34,960 · B 33,574 · C 32,255 · D 30,672), SwapUp's
@@ -105,25 +116,48 @@ function sameAsAnswer(e: RefurbEconomics, offer: ReturnType<typeof buildOffer>) 
 
 /* ─────────────────────────── the worked examples ─────────────────────────── */
 
-test("(a) cracked back, screen flawless: grade A less 15%, the back glass repaired — the post-repair grade is B, so send as-is", () => {
+test("(a) cracked back, screen flawless: grade A less 15%, the back glass repaired → grade A ₹34,960, repair before pickup +₹654", () => {
   const { e, offer } = run({ condition: cond({ body: "back_cracked" }), faults: ["back_cracked"] });
-  assert.deepEqual(e.preRefurb, { amount: 29_710, grade: "A", source: "grade A ₹34,960 − 15% back glass cracked", why: null });
+  // The grade it was priced AT, in the answer's own words — not "the phone is grade A" (R13).
+  assert.deepEqual(e.preRefurb, { amount: 29_710, grade: "A", source: "Market price — priced at grade A ₹34,960, less 15% back glass cracked", why: null });
   assert.deepEqual(e.repairCost, { amount: 4_596, basis: "estimate", source: "SwapUp's repair estimate: back glass / cover ₹3,470 + labour ₹425 + GST ₹701", why: null });
-  // SUP-92's example assumed grade A (₹34,960) once repaired, for +₹654. healedCondition — the one
-  // healing rule the repaired value, the answer's grade line and the report all read — heals a
-  // cracked back only as far as "scuffed" (a new back panel on a frame we haven't seen bare), so the
-  // card prices it at grade B, and the answer already shows this phone as "Current grade B".
-  assert.equal(healedCondition(cond({ body: "back_cracked" }), ["back_cracked"]).body, "scuffed");
-  assert.deepEqual(e.postRepair, { amount: 33_574, grade: "B", source: "grade B price", why: null });
-  assert.deepEqual(e.uplift, { amount: -732, verdict: "as_is", text: "Send as-is — repairing costs ₹732 more than it adds", why: null });
-  assert.deepEqual(e.offer, { amount: 30_898, bonus: 4_649, newPhone: "Galaxy S26 Ultra 256GB", source: "+ ₹4,649 bonus with the Galaxy S26 Ultra 256GB", why: null });
-  assert.equal(offer.answer.grade?.letter, "B", "the answer's grade line says the same grade the phone comes out at");
+  // The card priced this phone at grade A and took 15% off for the back: repaired, the 15% comes back
+  // and the grade the card read stays — owner, SUP-92 (a).
+  assert.deepEqual(e.postRepair, { amount: 34_960, grade: "A", source: "Grade A price", why: null });
+  assert.deepEqual(e.uplift, { amount: 654, verdict: "repair", text: "Repair before pickup: +₹654", why: null });
+  assert.equal(e.uplift.amount, 34_960 - 29_710 - 4_596);
+  assert.deepEqual(e.offer, {
+    amount: 30_898,
+    bonus: 4_649,
+    newPhone: "Galaxy S26 Ultra 256GB",
+    source: "As on the answer · + ₹4,649 bonus with the Galaxy S26 Ultra 256GB",
+    why: null,
+  });
+  // The customer's answer is unchanged: its grade line still reads the SwapUp grade, "Current grade B".
+  assert.equal(offer.answer.grade?.letter, "B");
   sameAsAnswer(e, offer);
+});
+
+test("repaired the card's way: healedCondition, keeping the look the card priced (a cracked back was priced as no look, never as scuffed)", () => {
+  const back = cond({ body: "back_cracked" });
+  // healedCondition and the answer's grade line keep their caution: a new back on a frame nobody has seen bare.
+  assert.equal(healedCondition(back, ["back_cracked"]).body, "scuffed");
+  assert.equal(gradeAfterRefurb(back), "Good");
+  // The card never took that wear off, so the post-repair price doesn't either.
+  assert.deepEqual(repairedOnCard(back, ["back_cracked"]), { ...healedCondition(back, ["back_cracked"]), body: "flawless" });
+  // Wear the card did price stays: a scratched screen keeps grade B with the back repaired.
+  const scratched = run({ condition: cond({ screen: "scratched", body: "back_cracked" }), faults: ["back_cracked"] }).e;
+  assert.deepEqual([scratched.preRefurb.grade, scratched.postRepair.grade, scratched.postRepair.amount], ["B", "B", 33_574]);
+  // A cracked back no fault explains isn't repaired: it stays, and so does its 15%.
+  assert.equal(repairedOnCard(back, []).body, "back_cracked");
+  // Everything else is healedCondition's, unchanged.
+  const screen = cond({ screen: "cracked", body: "dented", issues: ["wifi_bt"] });
+  assert.deepEqual(repairedOnCard(screen, ["screen_cracked"]), healedCondition(screen, ["screen_cracked"]));
 });
 
 test("(b) cracked screen: the display costs more than it adds — send as-is", () => {
   const { e, offer } = run({ condition: cond({ screen: "cracked" }), faults: ["screen_cracked"] });
-  assert.deepEqual(e.preRefurb, { amount: 20_970, grade: "A", source: "grade A ₹34,960 − 40% screen cracked", why: null });
+  assert.deepEqual(e.preRefurb, { amount: 20_970, grade: "A", source: "Market price — priced at grade A ₹34,960, less 40% screen cracked", why: null });
   assert.deepEqual(e.repairCost, {
     amount: 34_096,
     basis: "estimate",
@@ -131,7 +165,7 @@ test("(b) cracked screen: the display costs more than it adds — send as-is", (
     why: null,
   });
   assert.equal(e.repairCost.amount, offer.repair.amount, "the same estimate the customer's repair line uses");
-  assert.deepEqual(e.postRepair, { amount: 34_960, grade: "A", source: "grade A price", why: null });
+  assert.deepEqual(e.postRepair, { amount: 34_960, grade: "A", source: "Grade A price", why: null });
   assert.deepEqual(e.uplift, { amount: -20_106, verdict: "as_is", text: "Send as-is — repairing costs ₹20,106 more than it adds", why: null });
   assert.equal(e.offer.amount, 21_808);
   sameAsAnswer(e, offer);
@@ -139,9 +173,9 @@ test("(b) cracked screen: the display costs more than it adds — send as-is", (
 
 test("(c) light wear, no faults: grade B, nothing to repair, the same price after", () => {
   const { e, offer } = run({ condition: cond({ screen: "scratched", body: "scuffed" }), faults: [] });
-  assert.deepEqual(e.preRefurb, { amount: 33_574, grade: "B", source: "grade B price", why: null });
+  assert.deepEqual(e.preRefurb, { amount: 33_574, grade: "B", source: "Market price — grade B price", why: null });
   assert.deepEqual(e.repairCost, { amount: 0, basis: "none", source: NOTHING_TO_REPAIR, why: null });
-  assert.deepEqual(e.postRepair, { amount: 33_574, grade: "B", source: "grade B price", why: null });
+  assert.deepEqual(e.postRepair, { amount: 33_574, grade: "B", source: "Grade B price", why: null });
   assert.deepEqual(e.uplift, { amount: null, verdict: "nothing_to_repair", text: "Nothing to repair", why: null });
   assert.equal(e.offer.amount, 34_581);
   sameAsAnswer(e, offer);
@@ -163,14 +197,27 @@ test("(d) not on the card, or no card: pre-refurb and post-repair are missing wi
   }
 });
 
+test("the panel is there only with a priced trade-in to decide on: at the counter, and traded in until the partner's pickup", () => {
+  assert.deepEqual([...REFURB_DECISION_STATUSES], ["draft", "quoted", "locked", "in_pickup"]);
+  for (const s of REFURB_DECISION_STATUSES) assert.equal(refurbDecisionShown(s, { tradeIn: 29_710 }), true, s);
+  // No trade-in to decide on: the customer repairs, walked away, cancelled, or the partner has the phone.
+  for (const s of ["repair_chosen", "walked_away", "cancelled", "collected", "cleared", "regraded", "rejected", "not_received"] as const)
+    assert.equal(refurbDecisionShown(s, { tradeIn: 29_710 }), false, s);
+  // No trade-in price: the answer's Swap up side says why, once — not again under every line here.
+  assert.equal(refurbDecisionShown("quoted", { tradeIn: null }), false);
+});
+
 /* ─────────────────────────── the edges ─────────────────────────── */
 
 test("the store's own repair cost wins over SwapUp's estimate, and can turn the decision", () => {
   const { e } = run({ condition: cond({ body: "back_cracked" }), faults: ["back_cracked"], refurbCost: { amount: 2_000, by: "Ravi" } });
   assert.deepEqual(e.repairCost, { amount: 2_000, basis: "store", source: "The store's own figure, entered by Ravi", why: null });
-  assert.deepEqual(e.uplift, { amount: 1_864, verdict: "repair", text: "Repair before pickup: +₹1,864", why: null });
+  assert.deepEqual(e.uplift, { amount: 3_250, verdict: "repair", text: "Repair before pickup: +₹3,250", why: null });
+  // Dearer than SwapUp's estimate, it turns the other way.
+  const dear = run({ condition: cond({ body: "back_cracked" }), faults: ["back_cracked"], refurbCost: { amount: 6_000, by: "Ravi" } }).e;
+  assert.deepEqual([dear.uplift.amount, dear.uplift.verdict, dear.uplift.text], [-750, "as_is", "Send as-is — repairing costs ₹750 more than it adds"]);
   // Exactly even: no gain, so as-is.
-  const even = run({ condition: cond({ body: "back_cracked" }), faults: ["back_cracked"], refurbCost: { amount: 33_574 - 29_710, by: "Ravi" } }).e;
+  const even = run({ condition: cond({ body: "back_cracked" }), faults: ["back_cracked"], refurbCost: { amount: 34_960 - 29_710, by: "Ravi" } }).e;
   assert.deepEqual([even.uplift.amount, even.uplift.verdict, even.uplift.text], [0, "as_is", "Send as-is — repairing only breaks even"]);
   // With no fault, a figure the store typed is still a cost against no gain.
   const cosmetic = run({ condition: cond({ body: "scuffed" }), faults: [], refurbCost: { amount: 500, by: "Ravi" } }).e;
@@ -181,7 +228,7 @@ test("a repair with no price: the repair cost is missing with why, and there is 
   // Liquid damage needs a bench check; the post-repair value is still the card's price for it dried out.
   const wet = run({ condition: cond({ issues: ["liquid"] }), faults: ["water_damage"] }).e;
   assert.deepEqual(wet.repairCost, { amount: null, basis: null, source: null, why: "Bench check needed (Liquid damage) — enter the store's repair cost." });
-  assert.deepEqual(wet.preRefurb, { amount: 19_220, grade: "A", source: "grade A ₹34,960 − 45% signs of liquid damage", why: null });
+  assert.deepEqual(wet.preRefurb, { amount: 19_220, grade: "A", source: "Market price — priced at grade A ₹34,960, less 45% signs of liquid damage", why: null });
   assert.equal(wet.postRepair.amount, 34_960);
   assert.deepEqual(wet.uplift, { amount: null, verdict: null, text: null, why: "Needs the repair cost." });
   // A part the price book has no price for on this model.
@@ -192,17 +239,17 @@ test("a repair with no price: the repair cost is missing with why, and there is 
 
 test("wear the repair doesn't touch stays: a dented phone with a cracked screen comes out at grade C", () => {
   const { e } = run({ condition: cond({ screen: "cracked", body: "dented" }), faults: ["screen_cracked"] });
-  assert.deepEqual(e.preRefurb, { amount: 19_350, grade: "C", source: "grade C ₹32,255 − 40% screen cracked", why: null });
-  assert.deepEqual(e.postRepair, { amount: 32_255, grade: "C", source: "grade C price", why: null });
+  assert.deepEqual(e.preRefurb, { amount: 19_350, grade: "C", source: "Market price — priced at grade C ₹32,255, less 40% screen cracked", why: null });
+  assert.deepEqual(e.postRepair, { amount: 32_255, grade: "C", source: "Grade C price", why: null });
   assert.equal(e.uplift.amount, 32_255 - 19_350 - 34_096);
   // An issue no fault explains (no repair quoted for it) stays taken off after the repair.
   const wifi = run({ condition: cond({ screen: "cracked", issues: ["wifi_bt"] }), faults: ["screen_cracked"] }).e;
-  assert.deepEqual(wifi.postRepair, { amount: 29_710, grade: "A", source: "grade A ₹34,960 − 15% Wi-Fi / Bluetooth faulty", why: null });
+  assert.deepEqual(wifi.postRepair, { amount: 29_710, grade: "A", source: "Priced at grade A ₹34,960, less 15% Wi-Fi / Bluetooth faulty", why: null });
 });
 
-test("no new phone: the offer is what we pay, with no bonus", () => {
+test("no new phone: the offer is what we pay, as on the answer, with no bonus", () => {
   const { e, offer } = run({ condition: cond({ body: "back_cracked" }), faults: ["back_cracked"], upgrade: false });
-  assert.deepEqual(e.offer, { amount: 30_898, bonus: null, newPhone: null, source: null, why: null });
+  assert.deepEqual(e.offer, { amount: 30_898, bonus: null, newPhone: null, source: "As on the answer", why: null });
   sameAsAnswer(e, offer);
 });
 
@@ -255,7 +302,7 @@ test("the trace line: a card row without grade columns starts from its best-cond
       ],
       null
     ),
-    "best-condition price ₹24,000 − 35% screen lines or spots − 3% light scuffs − 2% no original box"
+    "priced at the best-condition price ₹24,000, less 35% screen lines or spots, 3% light scuffs and 2% no original box"
   );
   assert.equal(cardTraceLine([], "Good"), null);
   // Nothing taken off: the figure beside it is the price, so the line names the grade only.

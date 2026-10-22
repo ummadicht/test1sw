@@ -339,6 +339,12 @@ Owner, 2026-10-22: "staff refurb decision", the post-repair value from the **pri
 price. Every staff case response (`GET`/`PATCH /api/cases/<id>` and every `/action` response) carries
 `refurbEconomics`: five lines the server works out once (`lib/domain/refurbEconomics.ts`, from
 `cases.ts toView`) and the desk and SwapUp Store print **as sent** — the apps own only the labels.
+**It is there only while there is a priced trade-in to decide on** (`refurbDecisionShown`): status
+`draft` or `quoted` (the store's repair cost editable) or `locked` / `in_pickup` (traded in, before
+the partner's pickup — "Repair before pickup" is acted on then; read-only, M frozen at lock), AND
+`offer.swap.tradeIn` is not null. Otherwise `null`: no trade-in price (the answer's Swap up side
+already says why — not again under every line), the customer chose the repair, walked away or
+cancelled, or the partner has collected the phone. **Draw the panel exactly when it is not null.**
 It replaced "Store margin · staff only" (buy / refurb / sell / margin): the sell price was PriceIQ's,
 and PriceIQ isn't the price list. On the desk the card is **"Refurb decision · staff only"**, closed,
 under the answer (`#refurb-decision`; the old `#store-margin` still opens the answer). The customer's
@@ -353,17 +359,17 @@ CaseView += {
     postRepair: RefurbLine & { grade: "A" | "B" | "C" | "D" | null };
     uplift: { amount: number | null; verdict: "repair" | "as_is" | "nothing_to_repair" | null; text: string | null; why: string | null };
     offer:      RefurbLine & { bonus: number | null; newPhone: string | null };
-  } | null;   // null for the partner; never on the customer's status (§4)
+  } | null;   // null with no priced trade-in to decide on, and for the partner; never on the customer's status (§4)
 };
 ```
 
 | Label | Figure | The line under it |
 | --- | --- | --- |
-| **Pre-refurb value** | `preRefurb.amount` = M, the market price for the phone as it is: the case's trade-in quote, the answer's own figure (`offer.swap.tradeIn`; frozen at lock) | `source`: "grade A ₹34,960 − 15% back glass cracked" (a card row without grade columns: "best-condition price ₹24,000 − …"; a PriceIQ quote: the trade-in's one line) |
+| **Pre-refurb value** | `preRefurb.amount` = M, the market price for the phone as it is: the case's trade-in quote, the answer's own figure (`offer.swap.tradeIn`; frozen at lock) — the answer's "Market price" line | `source`: "Market price — priced at grade A ₹34,960, less 15% back glass cracked" (the grade it was priced AT, as the answer's staff note says it — not the phone's grade, which the answer's grade line says; a card row without grade columns: "Market price — priced at the best-condition price ₹24,000, less …"; nothing taken off: "Market price — grade B price"; a PriceIQ quote: "Market price — " + the trade-in's one line) |
 | **Repair cost** | `repairCost.amount`: the store's own figure (`refurbCost`, basis `store`), else SwapUp's repair estimate for the recorded faults at list price — parts + labour + GST, the price-book estimate the customer's repair line is built from (`repair.listTotal` — never the customer's covered price; an outside quote's `repair.customerPays`; basis `estimate`), else ₹0 with no fault (basis `none`) | `source`: "The store's own figure, entered by Ravi" / "SwapUp's repair estimate: back glass / cover ₹3,470 + labour ₹425 + GST ₹701" / "Nothing to repair" |
-| **Post-repair value** | `postRepair.amount`: the SAME rate card's price (the card the quote was read off, by `quote.source.rateCardId` — a newer card doesn't move it) for the phone with its faults repaired: `healedCondition` (only what each fault implied is undone; wear stays) priced through `priceFromCard` | `source`: "grade B price" (nothing taken off — the figure beside it is that price), or "grade A ₹34,960 − 15% Wi-Fi / Bluetooth faulty" for a fault no repair covers |
-| **Repair uplift** | `uplift.amount` = post-repair − pre-refurb − repair cost; `uplift.text` is the decision, word for word — print it alone (it says its own figure) | "Repair before pickup: +₹654" · "Send as-is — repairing costs ₹732 more than it adds" · "Send as-is — repairing only breaks even" · "Nothing to repair" (no fault and no store figure: `amount` null) |
-| **SwapUp offer** | `offer.amount` = what we pay (M + the SwapUp premium) — the answer's `wePay` | `source`: "+ ₹4,649 bonus with the Galaxy S26 Ultra 256GB" with a new phone and a bonus, else null |
+| **Post-repair value** | `postRepair.amount`: the SAME rate card's price (the card the quote was read off, by `quote.source.rateCardId` — a newer card doesn't move it) for the phone with its faults repaired, the card's way (`repairedOnCard`): `healedCondition` undoes only what each fault implied, and the look the card priced the trade-in at stays — so a repaired defect gives back exactly its %, and wear the card priced (scratches, scuffs, dents) stays — priced through `priceFromCard` | `source`: "Grade A price" (nothing taken off — the figure beside it is that price), or "Priced at grade A ₹34,960, less 15% Wi-Fi / Bluetooth faulty" for a fault no repair covers |
+| **Repair uplift** | `uplift.amount` = post-repair − pre-refurb − repair cost; `uplift.text` is the decision, word for word — print it alone (it says its own figure) | "Repair before pickup: +₹654" · "Send as-is — repairing costs ₹20,106 more than it adds" · "Send as-is — repairing only breaks even" · "Nothing to repair" (no fault and no store figure: `amount` null) |
+| **SwapUp offer · we pay you** | `offer.amount` = what we pay (M + the SwapUp premium) — the answer's `wePay`, its "We pay you" line (not a third price, and not the bonus added in) | `source`: "As on the answer", then " · + ₹4,649 bonus with the Galaxy S26 Ultra 256GB" with a new phone and a bonus |
 
 **A missing figure stays missing** (`amount: null`) and `why` says why, in the server's words — never
 a guess: "This phone isn't on the rate card yet." / "No rate card is active yet." (pre-refurb and
@@ -378,14 +384,17 @@ per defect, the seeded price book, the S26 Ultra 256GB with a 3% bonus — `lib/
 
 | Phone | Pre-refurb | Repair cost | Post-repair | Decision | Offer |
 | --- | --- | --- | --- | --- | --- |
-| Cracked back | ₹29,710 (A − 15%) | ₹4,596 | ₹33,574 (B) | Send as-is — repairing costs ₹732 more than it adds | ₹30,898 + ₹4,649 |
+| Cracked back | ₹29,710 (A − 15%) | ₹4,596 | ₹34,960 (A) | Repair before pickup: +₹654 | ₹30,898 + ₹4,649 |
 | Cracked screen | ₹20,970 (A − 40%) | ₹34,096 | ₹34,960 (A) | Send as-is — repairing costs ₹20,106 more than it adds | ₹21,808 + ₹4,649 |
 | Scratched, scuffed | ₹33,574 (B) | ₹0 | ₹33,574 (B) | Nothing to repair | ₹34,581 + ₹4,649 |
-| Not on the card | — | ₹34,096 | — | — (needs both values) | — |
+| Not on the card / no card | — | — | — | — | — (`refurbEconomics: null`: no trade-in price) |
 
-A cracked back comes out at **grade B**: `healedCondition` heals a cracked back only as far as
-"scuffed" (a new back panel on a frame nobody has seen bare) — the same rule the answer's grade line
-reads, which already shows this phone as "Current grade B".
+A cracked back comes out at **grade A** (owner, SUP-92 (a)): the card priced the phone at grade A and
+took 15% off for the back glass, so the repair gives back that 15% at the same grade. The answer's
+grade line still reads "Current grade B · back glass cracked" — the SwapUp grade's caution
+(`gradeAfterRefurb`: a new back on a frame nobody has seen bare), which the card never took off and
+the post-repair price doesn't either. That is why the pre-refurb line says "priced at grade A", never
+"grade A".
 
 **The store's repair cost** — `PATCH /api/cases/<id>` (Bearer, `advisor` / `store_manager` of the
 case's store; the case still `draft` or `quoted`) `{ "refurbCost": { "amount": 4200 } }` → the whole
@@ -393,11 +402,15 @@ case's store; the case still `draft` or `quoted`) `{ "refurbCost": { "amount": 4
 it (`refurbCost.by`, `refurbCost.at`). `{ "refurbCost": null }` goes back to SwapUp's estimate. It is
 the STORE's figure: it changes no price — the partner is not re-asked, and the advice, bonus and
 decision never read it (`manualRepair` is the customer's repair price and still does). On the desk the
-box sits on the Repair cost line, labelled "Store's own ₹", prefilled with the line's figure. Errors:
+box sits under the Repair cost line, labelled "Store's own ₹". The line always prints its figure; the
+box holds the store's own figure only — prefilled when `repairCost.basis` is `store`, otherwise empty
+("enter if different"), so SwapUp's estimate is never read as the store's — and Save takes any usable
+figure while the basis isn't `store` (the estimate's own figure included), or one that differs from
+the store's. The box shows only at the counter (`draft` / `quoted`). Errors:
 `400` bad amount, `401` session over, `403` not a counter role, `404` case not in your store, `409` the
 case is past the counter.
 
-**Who sees it.** Staff only. A partner viewing the case gets `refurbEconomics: null` (and
+**Who sees it.** Staff only, and only while there is a priced trade-in to decide on (above). A partner viewing the case gets `refurbEconomics: null` (and
 `refurbCost: null`); the customer's phone reads only `GET /api/device/status` → `answer` (§4), which
 never carries it.
 

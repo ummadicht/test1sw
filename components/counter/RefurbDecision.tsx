@@ -4,16 +4,16 @@ import { useState } from "react";
 import { Money, ErrorText } from "@/components/ui";
 import type { CaseOps } from "./ops";
 
-function LedgerRow({ label, sub, stack, children }: { label: string; sub: React.ReactNode; stack?: boolean; children: React.ReactNode }) {
-  // `stack`: the value goes under the label on a phone (an input needs the width).
-  const cols = stack ? "grid-cols-1 gap-y-2 sm:grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto]";
+function LedgerRow({ label, sub, below, children }: { label: string; sub: React.ReactNode; below?: React.ReactNode; children: React.ReactNode }) {
+  // `below`: a full-width line under the row (the store's own repair cost box).
   return (
-    <div className={`grid ${cols} items-center gap-x-4 px-5 py-3`}>
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 px-5 py-3">
       <dt className="min-w-0">
         <div className="text-[14px] font-semibold">{label}</div>
         {sub ? <div className="text-[12.5px] text-muted leading-snug mt-0.5">{sub}</div> : null}
       </dt>
-      <dd className={`${stack ? "sm:text-right" : "text-right"} text-[17px] font-semibold`}>{children}</dd>
+      <dd className="text-right text-[17px] font-semibold">{children}</dd>
+      {below ? <dd className="col-span-full mt-2">{below}</dd> : null}
     </div>
   );
 }
@@ -23,9 +23,15 @@ function LedgerRow({ label, sub, stack, children }: { label: string; sub: React.
  * (CaseView.refurbEconomics, lib/domain/refurbEconomics.ts), printed as sent: the phone's value
  * as it is, what repairing it costs the store, its value repaired off the same price list, the
  * uplift said as the decision ("Repair before pickup: +₹654" / "Send as-is — …"), and what SwapUp
- * pays — the answer's own figures. Each figure carries where it came from, or why it is missing.
+ * pays — the answer's own figures, in the answer's words ("Market price —", "SwapUp offer · we pay
+ * you", "As on the answer"). Each figure carries where it came from, or why it is missing. The server
+ * sends it only while there is a priced trade-in to decide on: at the counter (the store's repair
+ * cost editable), and read-only from the lock until the partner's pickup.
  * The repair cost is the store's to set: saved as the case's refurbCost, the store's own figure,
- * which moves no price. Never an offer to the customer; the partner never sees it.
+ * which moves no price. The line always prints its figure; the box under it holds the STORE's figure
+ * only — empty while the line is SwapUp's estimate (or nothing to repair), so it is never read as
+ * entered, and any figure, the estimate's own included, can be saved as the store's.
+ * Never an offer to the customer; the partner never sees it.
  */
 export function RefurbDecision({ ops }: { ops: CaseOps }) {
   const { view, editable, save } = ops;
@@ -36,9 +42,11 @@ export function RefurbDecision({ ops }: { ops: CaseOps }) {
   if (!e) return null;
   const { preRefurb: pre, repairCost: cost, postRepair: post, uplift, offer } = e;
 
-  const shown = draft ?? (cost.amount === null ? "" : String(cost.amount));
+  // The box holds the store's own figure only; SwapUp's estimate stays on the line, not in the box.
+  const own = cost.basis === "store";
+  const shown = draft ?? (own && cost.amount !== null ? String(cost.amount) : "");
   const typed = Number(shown.replace(/[,\s₹]/g, ""));
-  const changed = draft !== null && shown.trim() !== "" && typed !== cost.amount;
+  const changed = draft !== null && shown.trim() !== "" && (!own || typed !== cost.amount);
 
   async function saveCost(ev: React.FormEvent) {
     ev.preventDefault();
@@ -63,28 +71,32 @@ export function RefurbDecision({ ops }: { ops: CaseOps }) {
         <LedgerRow label="Pre-refurb value" sub={pre.source ?? pre.why}>
           <Money value={pre.amount} />
         </LedgerRow>
-        <LedgerRow label="Repair cost" sub={cost.source ?? cost.why} stack={editable}>
-          {editable ? (
-            <form onSubmit={saveCost} className="flex items-center sm:justify-end gap-2">
-              <span className="text-muted text-[13px] font-normal">Store&apos;s own ₹</span>
-              <input
-                className="input num !min-h-[38px] !py-1.5 w-[110px] text-right"
-                inputMode="numeric"
-                aria-label="The store's own repair cost in rupees"
-                value={shown}
-                placeholder="—"
-                onChange={(ev) => {
-                  setDraft(ev.target.value);
-                  setErr(null);
-                }}
-              />
-              <button className="btn btn-sm btn-primary" disabled={!changed || saving}>
-                {saving ? "Saving…" : "Save"}
-              </button>
-            </form>
-          ) : (
-            <Money value={cost.amount} />
-          )}
+        <LedgerRow
+          label="Repair cost"
+          sub={cost.source ?? cost.why}
+          below={
+            editable ? (
+              <form onSubmit={saveCost} className="flex items-center justify-end gap-2">
+                <span className="text-muted text-[13px]">Store&apos;s own ₹</span>
+                <input
+                  className="input num !min-h-[38px] !py-1.5 w-[150px] text-right"
+                  inputMode="numeric"
+                  aria-label="The store's own repair cost in rupees"
+                  value={shown}
+                  placeholder={!own && cost.amount !== null ? "enter if different" : "—"}
+                  onChange={(ev) => {
+                    setDraft(ev.target.value);
+                    setErr(null);
+                  }}
+                />
+                <button className="btn btn-sm btn-primary" disabled={!changed || saving}>
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              </form>
+            ) : null
+          }
+        >
+          <Money value={cost.amount} />
         </LedgerRow>
         <LedgerRow label="Post-repair value" sub={post.source ?? post.why}>
           <Money value={post.amount} />
@@ -95,7 +107,7 @@ export function RefurbDecision({ ops }: { ops: CaseOps }) {
           <dd className={`text-[17px] font-bold mt-0.5 ${uplift.verdict === "repair" ? "text-fix" : ""}`}>{uplift.text ?? "—"}</dd>
           {uplift.why ? <dd className="text-[12.5px] text-muted leading-snug mt-0.5">{uplift.why}</dd> : null}
         </div>
-        <LedgerRow label="SwapUp offer" sub={offer.source ?? offer.why}>
+        <LedgerRow label="SwapUp offer · we pay you" sub={offer.source ?? offer.why}>
           <Money value={offer.amount} />
         </LedgerRow>
       </dl>
