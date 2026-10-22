@@ -360,7 +360,7 @@ CaseView += {
 | Label | Figure | The line under it |
 | --- | --- | --- |
 | **Pre-refurb value** | `preRefurb.amount` = M, the market price for the phone as it is: the case's trade-in quote, the answer's own figure (`offer.swap.tradeIn`; frozen at lock) | `source`: "grade A ₹34,960 − 15% back glass cracked" (a card row without grade columns: "best-condition price ₹24,000 − …"; a PriceIQ quote: the trade-in's one line) |
-| **Repair cost** | `repairCost.amount`: the store's own figure (`refurbCost`, basis `store`), else SwapUp's repair estimate for the recorded faults at list price — parts + labour + GST, the price-book estimate the customer's repair line is built from (`repair.listTotal ?? repair.customerPays`, basis `estimate`), else ₹0 with no fault (basis `none`) | `source`: "The store's own figure, entered by Ravi" / "SwapUp's repair estimate: back glass / cover ₹3,470 + labour ₹425 + GST ₹701" / "Nothing to repair" |
+| **Repair cost** | `repairCost.amount`: the store's own figure (`refurbCost`, basis `store`), else SwapUp's repair estimate for the recorded faults at list price — parts + labour + GST, the price-book estimate the customer's repair line is built from (`repair.listTotal` — never the customer's covered price; an outside quote's `repair.customerPays`; basis `estimate`), else ₹0 with no fault (basis `none`) | `source`: "The store's own figure, entered by Ravi" / "SwapUp's repair estimate: back glass / cover ₹3,470 + labour ₹425 + GST ₹701" / "Nothing to repair" |
 | **Post-repair value** | `postRepair.amount`: the SAME rate card's price (the card the quote was read off, by `quote.source.rateCardId` — a newer card doesn't move it) for the phone with its faults repaired: `healedCondition` (only what each fault implied is undone; wear stays) priced through `priceFromCard` | `source`: "grade B price" (nothing taken off — the figure beside it is that price), or "grade A ₹34,960 − 15% Wi-Fi / Bluetooth faulty" for a fault no repair covers |
 | **Repair uplift** | `uplift.amount` = post-repair − pre-refurb − repair cost; `uplift.text` is the decision, word for word — print it alone (it says its own figure) | "Repair before pickup: +₹654" · "Send as-is — repairing costs ₹732 more than it adds" · "Send as-is — repairing only breaks even" · "Nothing to repair" (no fault and no store figure: `amount` null) |
 | **SwapUp offer** | `offer.amount` = what we pay (M + the SwapUp premium) — the answer's `wePay` | `source`: "+ ₹4,649 bonus with the Galaxy S26 Ultra 256GB" with a new phone and a bonus, else null |
@@ -369,7 +369,7 @@ CaseView += {
 a guess: "This phone isn't on the rate card yet." / "No rate card is active yet." (pre-refurb and
 post-repair alike), "The trade-in isn't from the price list — no post-repair price to compare." (a
 PriceIQ trade-in), "Bench check needed (Liquid damage) — enter the store's repair cost.", "No book
-price for Speaker — enter the store's repair cost.", "No repair estimate — enter the store's repair
+price for Speaker — enter the store's repair cost." (even when cover makes it free to the customer), "No repair estimate — enter the store's repair
 cost.". With any of the three figures missing there is no decision: `uplift.why` names what it needs
 ("Needs the repair cost.").
 

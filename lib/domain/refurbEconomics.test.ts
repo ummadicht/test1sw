@@ -213,6 +213,25 @@ test("a covered repair: the store's cost is the estimate at list price, not the 
   assert.equal(e.repairCost.source, "SwapUp's repair estimate: battery ₹2,760 + labour + GST");
 });
 
+test("a covered part with no book price: the store's cost is missing with why, never the customer's covered price", () => {
+  // The speaker has no price on this model. Cover makes it free to the customer, but the store
+  // still pays for the part, so there is no figure to count — and no "Repair before pickup".
+  for (const coverage of ["warranty", "care_plus"] as const) {
+    const { e, offer } = run({ condition: cond({ issues: ["speaker"] }), faults: ["speaker"], coverage });
+    assert.equal(offer.repair.amount, 0, `${coverage}: the customer's repair is still free`);
+    assert.deepEqual(e.repairCost, { amount: null, basis: null, source: null, why: "No book price for Speaker — enter the store's repair cost." }, coverage);
+    assert.deepEqual(e.uplift, { amount: null, verdict: null, text: null, why: "Needs the repair cost." }, coverage);
+  }
+  // Mixed warranty: the back glass is charged, the speaker covered with no price. The customer's
+  // figure counts only the back glass; the store's cost would be short by the speaker, so none.
+  const mixed = run({ condition: cond({ body: "back_cracked", issues: ["speaker"] }), faults: ["back_cracked", "speaker"], coverage: "warranty" }).e;
+  assert.deepEqual(mixed.repairCost, { amount: null, basis: null, source: null, why: "No book price for Speaker — enter the store's repair cost." });
+  assert.equal(mixed.uplift.amount, null);
+  // The store's own figure still wins.
+  const typed = run({ condition: cond({ issues: ["speaker"] }), faults: ["speaker"], coverage: "warranty", refurbCost: { amount: 1_200, by: "Ravi" } }).e;
+  assert.deepEqual([typed.repairCost.amount, typed.repairCost.basis], [1_200, "store"]);
+});
+
 test("the post-repair value is the price list's only: a PriceIQ trade-in, or a card no longer on file, gives none", () => {
   const priceiq: OfferQuote = { status: "priced", amount: 30_000, source: { kind: "priceiq" }, partnerRef: null, lines: [{ label: "Refurbished market price (Superb) · PriceIQ", amount: 36_000 }] };
   const p = run({ condition: cond({ body: "back_cracked" }), faults: ["back_cracked"], quote: priceiq }).e;

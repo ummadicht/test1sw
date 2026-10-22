@@ -8,7 +8,8 @@
  *                      came from: "grade A ₹34,960 − 15% back glass cracked".
  *   Repair cost        the store's own figure when staff entered one (the case's refurbCost), else
  *                      SwapUp's repair estimate for the recorded faults — parts + labour + GST, the
- *                      price-book estimate the customer's repair line is built from, at list price —
+ *                      price-book estimate the customer's repair line is built from, at list price,
+ *                      never the customer's covered price (a part with no book price: no figure) —
  *                      else "Nothing to repair" (₹0) when there is no fault.
  *   Post-repair value  the SAME rate card's price for the phone once its faults are repaired: the
  *                      case's condition healed (condition.ts healedCondition — only what each fault
@@ -114,7 +115,7 @@ function estimateLine(r: NonNullable<RefurbInput["repair"]>): string {
   if (r.basis === "manual") return r.notes[0] ?? "Service centre quote";
   const parts = r.lines.map((l) => `${lowerFirst(l.label)}${l.listPrice !== null ? ` ${inr(l.listPrice)}` : ""}`);
   // Nothing covered: the stored labour and GST are the list ones, so each is named with its figure.
-  const atList = r.listTotal === null || r.listTotal === r.customerPays;
+  const atList = r.listTotal === r.customerPays;
   const extras = atList ? [r.labour > 0 ? `labour ${inr(r.labour)}` : null, r.gst > 0 ? `GST ${inr(r.gst)}` : null] : ["labour", "GST"];
   return `SwapUp's repair estimate: ${[...parts, ...extras].filter((x): x is string => !!x).join(" + ")}`;
 }
@@ -143,9 +144,13 @@ export function refurbEconomics(i: RefurbInput): RefurbEconomics {
 
   // ── Repair cost: the store's own figure, else SwapUp's estimate at list price, else nothing to repair ──
   let repairCost: RefurbEconomics["repairCost"];
-  const estimate = repair?.status === "quoted" ? (repair.listTotal ?? repair.customerPays) : null;
+  // The book's estimate counts at list price only — what the parts cost the store, whatever the
+  // customer's cover makes them pay. A covered part the book has no price for leaves the list total
+  // unknown (null), and the customer's covered price would leave that part out, so there is no
+  // figure. The outside quote (manual) has no list total; its figure is the centre's own.
+  const estimate = repair?.status !== "quoted" ? null : repair.basis === "manual" ? repair.customerPays : repair.listTotal;
   if (refurbCost) repairCost = { amount: refurbCost.amount, basis: "store", source: `The store's own figure, entered by ${refurbCost.by}`, why: null };
-  else if (repair && estimate !== null && estimate !== undefined) repairCost = { amount: estimate, basis: "estimate", source: estimateLine(repair), why: null };
+  else if (repair && estimate !== null) repairCost = { amount: estimate, basis: "estimate", source: estimateLine(repair), why: null };
   else if (faults.length === 0 || repair?.status === "nothing_to_repair") repairCost = { amount: 0, basis: "none", source: NOTHING_TO_REPAIR, why: null };
   else if (repair?.status === "needs_inspection")
     repairCost = {
@@ -154,7 +159,8 @@ export function refurbEconomics(i: RefurbInput): RefurbEconomics {
       source: null,
       why: `Bench check needed (${repair.inspectionFaults.map((f) => FAULT_BY_ID[f].label).join(", ")}) — enter the store's repair cost.`,
     };
-  else if (repair?.status === "unpriced")
+  // Unpriced: a charged part has no price. Quoted with no list total: a covered one has none.
+  else if ((repair?.status === "unpriced" || repair?.status === "quoted") && repair.missingParts.length)
     repairCost = { amount: null, basis: null, source: null, why: `No book price for ${repair.missingParts.map((p) => PART_LABEL[p]).join(", ")} — enter the store's repair cost.` };
   else repairCost = { amount: null, basis: null, source: null, why: NO_ESTIMATE };
 
