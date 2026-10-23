@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAnswer, customerAnswer, defectNote, CANCELLED_TEXT, CONFIRMING, ESTIMATE_NOTE, WORKING_OUT, type Answer, type AnswerInput } from "./answer.ts";
+import { buildAnswer, customerAnswer, defectNote, CANCELLED_TEXT, CANT_PRICE, CONFIRMING, ESTIMATE_NOTE, TYPED_PRICE_NOTE, WORKING_OUT, type Answer, type AnswerInput } from "./answer.ts";
 import { HEALTHY, type ConditionAnswers } from "./condition.ts";
 import { gradeAfterRefurb, tradeInGrade } from "./marketSell.ts";
 import { DEFECT_DEDUCTIONS, priceFromCard, type RateCard } from "./ratecard.ts";
@@ -54,6 +54,8 @@ const F1 = {
 };
 /** F2 — customer, not ready. */
 const F2 = { ready: false, final: false, text: "The advisor is working out your price.", test: false };
+/** F2_CANT_PRICE — customer, not ready, and nothing can price the phone here: not on the active card, or no card (SUP-32). */
+const F2_CANT_PRICE = { ready: false, final: false, text: "This phone can't be priced for trade-in here yet — the advisor will explain.", test: false };
 /** F3 — customer, traded in (final). */
 const F3 = {
   ...F1,
@@ -162,6 +164,22 @@ test("answer F2: no price yet — one sentence for the customer, never half an o
   for (const over of [{ quoteExpired: true }, { quoteBlocked: true }] as Partial<AnswerInput>[]) {
     assert.deepEqual(customerAnswer(buildAnswer(f1(over))), F2, JSON.stringify(over));
   }
+});
+
+test("answer F2_CANT_PRICE: nothing can price the phone here — the customer is told so plainly, never 'working out' all visit (SUP-32)", () => {
+  const a = buildAnswer(f1({ market: null, cantPrice: true }));
+  assert.equal(a.ready, false);
+  assert.equal(a.text, CANT_PRICE);
+  assert.deepEqual(customerAnswer(a), F2_CANT_PRICE);
+  // The repair line stays where there is one: staff still see the grade and the repair.
+  assert.deepEqual(a.lines.map((l) => l.key), ["grade", "repair"]);
+  assert.equal(a.lines.find((l) => l.key === "repair")!.text, "or repair it for ₹34,096");
+  // Only an open case: past the counter the closed sentences stand.
+  assert.equal(customerAnswer(buildAnswer(f1({ status: "walked_away", market: null, cantPrice: true }))).ready, false);
+  assert.equal(buildAnswer(f1({ status: "walked_away", market: null, cantPrice: true })).text, "This case is closed.");
+  assert.equal(buildAnswer(f1({ status: "cancelled", market: null, cantPrice: true })).text, CANCELLED_TEXT);
+  // Not final (no reason given, a PriceIQ why): still the advisor working it out.
+  assert.deepEqual(customerAnswer(buildAnswer(f1({ market: null, cantPrice: false }))), F2);
 });
 
 test("answer F3 + F10: traded in — the locked figures, 'We paid you', the bonus with the phone, no repair line, and final", () => {
@@ -305,6 +323,15 @@ test("grade note: a dead phone says only that; at most two defects, then '+N mor
   assert.equal(defectNote(cond({ calls: false, screen: "cracked", body: "back_cracked", issues: ["battery", "mic"] })), "calls don't work, screen cracked, +3 more");
   assert.equal(defectNote(cond({ issues: ["speaker"] })), "speaker faulty");
   for (const c of [cond({ screen: "scratched" }), cond({ body: "scuffed" }), cond({ body: "dented" }), cond({ body: "bent" })]) assert.equal(defectNote(c), null);
+});
+
+test("grade note: a name keeps its capitals mid-sentence — 'Wi-Fi / Bluetooth faulty', never 'wi-Fi' (SUP-96)", () => {
+  assert.equal(defectNote(cond({ issues: ["wifi_bt"] })), "Wi-Fi / Bluetooth faulty");
+  assert.equal(defectNote(cond({ issues: ["wifi_bt", "fingerprint", "vibration"] })), "Wi-Fi / Bluetooth faulty, fingerprint sensor faulty, +1 more");
+  // The market line's working-out reads the rate card's own words: the same.
+  const q = priceFromCard(CARD, "galaxy-s22", "8/128", cond({ issues: ["wifi_bt"] }));
+  if (q.status !== "priced") return assert.fail("priced");
+  assert.equal(q.lines.find((l) => /bluetooth/i.test(l.word ?? ""))?.word, "Wi-Fi / Bluetooth faulty");
 });
 
 test("market line: priced from a LOWER grade than the phone's — 'Market price ₹X' with no grade; the detail is staff-only", () => {
@@ -547,6 +574,13 @@ test("a typed price (an older build's partner_manual) names no grade on a damage
   const m = locked.lines.find((l) => l.key === "market")!;
   assert.deepEqual([locked.lines[0].text, m.text, m.note], ["Current grade A", "Market price ₹18,888", null]);
   assert.equal(locked.market!.letter, null);
+  // Staff read what it is — a typed price — and nothing about a grade or a card (SUP-9).
+  assert.equal(locked.staffNotes.market, TYPED_PRICE_NOTE);
+  assert.equal(TYPED_PRICE_NOTE, "A price typed in by an older build.");
+  assert.doesNotMatch(TYPED_PRICE_NOTE, /grade|card/i);
+  assert.ok(!JSON.stringify(customerAnswer(locked)).includes(TYPED_PRICE_NOTE), "staff only");
+  // Every other source keeps its own note (none, here).
+  assert.equal(buildAnswer(f1({ status: "locked", locked: LOCKED })).staffNotes.market, null);
   // Nothing to take off: the typed price IS the phone's grade price.
   const clean = buildAnswer(f1({ condition: cond({ body: "scuffed" }), market: { amount: 30_000, source: "partner_manual", priceGrade: null } }));
   assert.equal(clean.lines.find((l) => l.key === "market")!.text, "Market price for grade B ₹30,000");

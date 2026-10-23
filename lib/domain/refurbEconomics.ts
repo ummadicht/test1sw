@@ -31,12 +31,12 @@
  * forViewer). Pure — no database, no clock.
  */
 import { fmtBp, inr, type Rupees } from "./money.ts";
-import { BODY_LABEL, BODY_ORDER, FAULT_BY_ID, HEALTHY, PART_LABEL, SCREEN_LABEL, SCREEN_ORDER, healedCondition, type ConditionAnswers, type FaultId } from "./condition.ts";
+import { BODY_LABEL, BODY_ORDER, FAULT_BY_ID, HEALTHY, PART_LABEL, SCREEN_LABEL, SCREEN_ORDER, healedCondition, lowerFirst, type ConditionAnswers, type FaultId } from "./condition.ts";
 import { priceFromCard, type QuoteLine, type RateCard } from "./ratecard.ts";
 import { MARKET_GRADE_LETTER, type MarketGrade, type MarketGradeLetter } from "./marketSell.ts";
-import { defectNote } from "./answer.ts";
+import { defectNote, unrecordedDefect } from "./answer.ts";
 import type { RepairEstimate } from "./repair.ts";
-import type { Offer, OfferQuote } from "./offer.ts";
+import { noFaultRecorded, type Offer, type OfferQuote } from "./offer.ts";
 import type { CaseStatus } from "./lifecycle.ts";
 
 /* ─────────────────────────── the contract (docs/MOBILE-API.md §3b) ─────────────────────────── */
@@ -107,9 +107,6 @@ export const NOT_FROM_PRICE_LIST = "The trade-in isn't from the price list — n
 export const PRICE_LIST_GONE = "The price list this trade-in came from isn't on file.";
 const NO_CONDITION = "Record the condition.";
 const NO_ESTIMATE = "No repair estimate — enter the store's repair cost.";
-
-/** "Back glass" → "back glass"; a first word with more capitals ("Wi-Fi") is a name and stays. */
-const lowerFirst = (s: string) => (s && !/[A-Z]/.test(s.split(" ")[0].slice(1)) ? s[0].toLowerCase() + s.slice(1) : s);
 
 /**
  * A deduction line in the answer's words: "Body: Back glass cracked" → "back glass cracked",
@@ -185,10 +182,10 @@ export function refurbEconomics(i: RefurbInput): RefurbEconomics {
   const estimate = repair?.status !== "quoted" ? null : repair.basis === "manual" ? repair.customerPays : repair.listTotal;
   // A defect in the condition with no fault recorded for it (a dead display, no power, liquid…): there
   // is something to repair, but nothing says what — never "Nothing to repair", and no repaired price.
-  const unrecorded = faults.length === 0 && condition ? defectNote(condition) : null;
+  const unrecorded = unrecordedDefect(faults.length, condition);
   if (refurbCost) repairCost = { amount: refurbCost.amount, basis: "store", source: `The store's own figure, entered by ${refurbCost.by}`, why: null };
   else if (repair && estimate !== null) repairCost = { amount: estimate, basis: "estimate", source: estimateLine(repair), why: null };
-  else if (unrecorded) repairCost = { amount: null, basis: null, source: null, why: `No fault recorded (${unrecorded}) — record it to price the repair.` };
+  else if (unrecorded) repairCost = { amount: null, basis: null, source: null, why: noFaultRecorded(unrecorded) };
   else if (faults.length === 0 || repair?.status === "nothing_to_repair") repairCost = { amount: 0, basis: "none", source: NOTHING_TO_REPAIR, why: null };
   else if (repair?.status === "needs_inspection")
     repairCost = {

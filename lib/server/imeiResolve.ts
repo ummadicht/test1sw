@@ -4,7 +4,7 @@ import { HttpError } from "./auth";
 import { db, parseJson } from "./db";
 import { GradeiqError, gradeiqConfig, lookupImei, readImeiScreen, type ImeiLookup } from "./gradeiq";
 import { tacModel, type TacDb } from "../domain/tac";
-import { luhnValid } from "../domain/imei";
+import { kymEarlyStop, luhnValid, type KymStatus } from "../domain/imei";
 import { matchModel, type DeviceReport, type TradeModelRef } from "../domain/diagnostics";
 
 /**
@@ -163,7 +163,7 @@ export async function resolveImei(imei: string, refs: TradeModelRef[], at: strin
 /** The sentence the 409 and the lock refusal carry, word for word (contract I3). */
 export const BLACKLISTED = "This phone is reported lost or stolen. It can't be traded in.";
 
-export type KymEarly = { status: "clear" | "blacklisted" | "duplicate" | "in_use"; reference: string | null; by: string; at: string };
+export type KymEarly = { status: KymStatus; reference: string | null; by: string; at: string };
 
 /**
  * GSMA says blacklisted for any IMEI ever saved on the case (blacklistedLookup), or the early KYM
@@ -181,12 +181,21 @@ export function gsmaBlacklisted(c: CaseImeis): boolean {
   return !!blacklistedLookup(c);
 }
 
-/** 409 when the case's phone is blacklisted — test sessions refuse with it (the lock: lockTradeIn). */
+/**
+ * 409 when the case's phone is blacklisted — test sessions refuse with it (the lock: lockTradeIn).
+ * GSMA's "blacklisted" says BLACKLISTED; an early KYM answer that isn't clear says the register's
+ * own words (domain/imei.ts kymEarlyStop: "IMEI register says "Duplicate IMEI" — check it before
+ * testing."), never "lost or stolen" for a duplicate or in-use IMEI (SUP-17). Both carry reason
+ * "blacklisted": the apps stop the trade-in on it and print the sentence.
+ */
 export function assertNotBlacklisted(caseId: string): void {
   const c = db().prepare(`SELECT imei, imei2, imei_lookup, kym_early FROM cases WHERE id = ?`).get(caseId) as
     | { imei: string | null; imei2: string | null; imei_lookup: string | null; kym_early: string | null }
     | undefined;
-  if (c && isBlacklisted(c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
+  if (!c || !isBlacklisted(c)) return;
+  if (gsmaBlacklisted(c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
+  const k = parseJson<KymEarly | null>(c.kym_early, null);
+  throw new HttpError(409, kymEarlyStop(k?.status ?? ""), { reason: "blacklisted" });
 }
 
 /* ─────────────────────────── call 0: read the *#06# screen ─────────────────────────── */

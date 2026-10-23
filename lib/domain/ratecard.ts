@@ -18,7 +18,7 @@
 
 import { type Rupees, type BasisPoints, pctOf, roundDown, clamp } from "./money.ts";
 import type { ConditionAnswers, ScreenState, BodyState, IssueId, AgeBand } from "./condition.ts";
-import { SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LABEL, SCREEN_WORD, BODY_WORD } from "./condition.ts";
+import { SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LABEL, SCREEN_WORD, BODY_WORD, lowerFirst } from "./condition.ts";
 // The look the card's grade columns price — rule G1 beside the grade's words, never the grading engine (G49).
 import { MARKET_GRADES, MARKET_GRADE_LETTER, isDefectState, tradeInGrade, type MarketGrade } from "./marketSell.ts";
 
@@ -178,6 +178,17 @@ export type RateQuote =
 
 /** The card is active, but the phone (model + storage) is not on it. */
 export const NOT_ON_CARD = "This phone isn't on the rate card yet.";
+/** Nothing priced the phone and no rate card is active (PriceIQ off, or it gave no reason) — lib/server/tradeIn.ts. */
+export const NO_RATE_CARD = "No rate card is active yet.";
+/**
+ * No price, and nothing at the counter will give one: the active card doesn't list the phone, or no
+ * card is active (SUP-32) — and PriceIQ can't answer either. PriceIQ's own reasons are not final (it
+ * timed out, was down, had no listing this week: it may answer on the next ask), so a quote that
+ * carries one (`priceiqWhy`, kept only while PriceIQ is connected — lib/server/tradeIn.ts
+ * withoutOffNote) is never final, whatever the card says.
+ */
+export const finalNoPrice = (q: { reason?: string | null; priceiqWhy?: string | null } | null | undefined): boolean =>
+  !!q && (q.reason === NOT_ON_CARD || q.reason === NO_RATE_CARD) && !q.priceiqWhy;
 
 export function findEntry(card: RateCard, modelId: string, variant: string): RateEntry | null {
   return card.entries.find((e) => e.modelId === modelId && e.variant === variant) ?? null;
@@ -206,8 +217,6 @@ export function priceFromCard(card: RateCard, modelId: string, variant: string, 
   const out = combineDeductions({ ceiling, start: ceiling, lines: [base], parts, rules });
   return { status: "priced", ceiling, ...out, ...(at ? { grade: at.grade } : {}) };
 }
-
-const lowerFirst = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s);
 
 /** One percentage the card takes off, with the words the trace shows and the few the customer reads. */
 export type DeductionPart = { label: string; bp: BasisPoints; word: string };

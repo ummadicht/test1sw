@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildOffer, EXPIRED_BLOCKER, NO_MARKET_PRICE, noPriceWhy, type Offer, type OfferInput } from "./offer.ts";
+import { buildOffer, currentDecision, nothingToRepairOn, EXPIRED_BLOCKER, NO_MARKET_PRICE, noPriceWhy, type Offer, type OfferInput } from "./offer.ts";
 import { decide, type DecisionInput } from "./decision.ts";
 import { premiumOn } from "./premium.ts";
-import { customerAnswer } from "./answer.ts";
+import { customerAnswer, unrecordedDefect } from "./answer.ts";
 import { estimateRepair, type Coverage, type RepairBookEntry } from "./repair.ts";
-import { HEALTHY, type FaultId } from "./condition.ts";
+import { HEALTHY, type ConditionAnswers, type FaultId } from "./condition.ts";
 
 /* ─────────────────────────── fixtures: the spec's worked example (§3.4) ─────────────────────────── */
 // org_samsung_svc, the partner's rate card, the seeded campaign and the S23 Ultra price book;
@@ -27,7 +27,7 @@ const BONUS = { amount: 6199, bp: 400, override: null };
 const REPAIRED_VALUE = 34800;
 
 /** decide() exactly as reprice() calls it: the as-is value is what we pay — the market price + the SwapUp premium. */
-function decisionFor(o: Pick<OfferInput, "repair" | "quote" | "upgrade" | "bonus" | "faultCount" | "manualRepair">, repairedValue: number | null = REPAIRED_VALUE) {
+function decisionFor(o: Pick<OfferInput, "repair" | "quote" | "upgrade" | "bonus" | "faultCount" | "manualRepair" | "condition">, repairedValue: number | null = REPAIRED_VALUE) {
   const repairPays = o.repair?.status === "quoted" ? o.repair.customerPays : null;
   const market = o.quote?.status === "priced" ? o.quote.amount : null;
   const premium = premiumOn(market)?.amount ?? 0;
@@ -43,7 +43,7 @@ function decisionFor(o: Pick<OfferInput, "repair" | "quote" | "upgrade" | "bonus
     upgrade: o.upgrade ? { label: o.upgrade.label, newPrice: o.upgrade.price, bonus, supportEndYear: 2033 } : null,
     old: { ageYears: 3, supportEndYear: 2028 },
     thisYear: 2026,
-    nothingToRepair: o.faultCount === 0 && !o.manualRepair,
+    nothingToRepair: o.faultCount === 0 && !o.manualRepair && !unrecordedDefect(o.faultCount, o.condition ?? null),
     faultCount: o.faultCount,
   };
   return decide(input);
@@ -253,6 +253,77 @@ test("offer 3: no faults — nothing to repair, a straight trade-in", () => {
   assert.equal(signalled.reason, "Security updates for this model ended in 2024.");
 });
 
+test("offer 3c: a defect in the condition with no fault recorded is never 'Nothing to repair' — the advisor quotes the repair (SUP-96)", () => {
+  const cond = (over: Partial<ConditionAnswers>): ConditionAnswers => ({ ...HEALTHY, issues: [], accessories: { charger: true, box: true, bill: true }, age: "lt3m", ...over });
+  const cases: [Partial<ConditionAnswers>, string][] = [
+    [{ powersOn: false }, "doesn't switch on"],
+    [{ screen: "not_working" }, "screen not working"],
+    [{ issues: ["liquid"] }, "signs of liquid damage"],
+    [{ calls: false }, "calls don't work"],
+    [{ issues: ["wifi_bt"] }, "Wi-Fi / Bluetooth faulty"],
+    [{ issues: ["fingerprint"] }, "fingerprint sensor faulty"],
+    [{ issues: ["vibration"] }, "vibration faulty"],
+  ];
+  for (const [over, said] of cases) {
+    const o = buildOffer(priced({ faultCount: 0, repair: null, condition: cond(over) }));
+    // True for every defect: Wi-Fi, fingerprint, vibration and a dead display have no fault to record.
+    const why = `No fault recorded (${said}) — enter the service centre's quote.`;
+    assert.equal(o.repair.nothingToRepair, false, said);
+    assert.equal(o.repair.amount, null, said);
+    assert.equal(o.repair.why, why, "the staff refurb panel's words");
+    assert.equal(o.actions.repair, why, said);
+    // The quote the customer is promised has a form: the answer asks for it, as for any repair nothing prices.
+    assert.deepEqual(o.asks.find((a) => a.kind === "repair_quote"), { kind: "repair_quote", title: "The repair needs a quote", text: why }, said);
+    assert.equal(o.headline, "The repair needs a quote", said);
+    assert.equal(o.reason, why, said);
+    // decide() is told there is a repair to weigh: no quote yet, so no verdict — never "a straight trade-in".
+    assert.equal(o.recommendation, "cannot_say", said);
+    assert.notEqual(o.headline, "Nothing to repair — a straight trade-in", said);
+    const c = customerAnswer(o.answer);
+    assert.ok(c.ready, said);
+    if (!c.ready) continue;
+    assert.equal(c.headline, "Your offer", said);
+    assert.equal(c.repair.nothingToRepair, false, said);
+    assert.deepEqual(c.lines.find((l) => l.key === "repair"), { key: "repair", text: "or repair it — the advisor will quote the price", note: null, amount: null }, said);
+    assert.equal(c.grade?.note, said, "the grade line names the defect");
+    // The trade-in doesn't move: the same market price and we pay as the phone with nothing wrong.
+    assert.equal(o.swap.tradeIn, CARD_QUOTE.amount, said);
+    assert.equal(o.swap.wePay, buildOffer(priced({ faultCount: 0, repair: null })).swap.wePay, said);
+  }
+  // Looks only (scratches, scuffs, dents, a bent frame) are the grade's: still nothing to repair, nothing to ask.
+  for (const over of [{ screen: "scratched" }, { body: "scuffed" }, { body: "dented" }, { body: "bent" }] as Partial<ConditionAnswers>[]) {
+    const o = buildOffer(priced({ faultCount: 0, repair: null, condition: cond(over) }));
+    assert.equal(o.repair.nothingToRepair, true, JSON.stringify(over));
+    assert.equal(o.headline, "Nothing to repair — a straight trade-in", JSON.stringify(over));
+    assert.ok(!o.asks.some((a) => a.kind === "repair_quote"), JSON.stringify(over));
+  }
+  // An outside quote on file prices it as before, and nothing is asked any more.
+  const quoted = buildOffer(priced({ faultCount: 0, condition: cond({ powersOn: false }), manualRepair: { amount: 9_000, reason: "Board repair" }, repair: repairFor([], "none", { amount: 9_000, reason: "Board repair" }) }));
+  assert.equal(quoted.repair.amount, 9_000);
+  assert.equal(quoted.repair.why, null);
+  assert.ok(!quoted.asks.some((a) => a.kind === "repair_quote"));
+  // Another brand: one reason for the one missing number — the customer's outside quote. Recording a
+  // fault never prices a brand this centre doesn't repair, so the tile never says so.
+  const OTHER = "This centre repairs Samsung only — enter the customer's outside quote.";
+  const other = buildOffer(priced({ faultCount: 0, repair: null, repairNotServiced: OTHER, condition: cond({ powersOn: false }) }));
+  assert.equal(other.repair.why, OTHER);
+  assert.equal(other.actions.repair, OTHER);
+  assert.deepEqual(other.asks.filter((a) => a.kind === "repair_quote"), [{ kind: "repair_quote", title: "The repair needs a quote", text: OTHER }]);
+  assert.ok(!JSON.stringify(other).includes("No fault recorded"));
+  // A decision stored before this rule ("Nothing to repair") is not used for such a phone.
+  const stale = priced({ faultCount: 0, repair: null });
+  const o = buildOffer({ ...stale, condition: cond({ powersOn: false }) });
+  assert.equal(stale.decision!.recommendation, "no_repair");
+  assert.equal(o.recommendation, null);
+  assert.equal(o.headline, "The repair needs a quote", "the ask, never the stale 'Nothing to repair'");
+  assert.equal(currentDecision(stale.decision, false), null, "the case view and the lists read it the same way");
+  assert.equal(currentDecision(stale.decision, true), stale.decision);
+  assert.equal(nothingToRepairOn(0, null, cond({ powersOn: false })), false);
+  assert.equal(nothingToRepairOn(0, null, cond({ body: "scuffed" })), true);
+  const c = customerAnswer(o.answer);
+  assert.ok(c.ready && c.headline === "Your offer" && c.lines.some((l) => l.key === "repair"));
+});
+
 test("offer 3b: a desk-only case (no test applied) never says a test found or measured anything", () => {
   // No faults recorded on a case no phone test ran on: the verdict is decide()'s, the sentence is true.
   const o = buildOffer(priced({ faultCount: 0, repair: null, tested: false }));
@@ -399,6 +470,44 @@ test("offer 7b: nothing priced it — 'No market price yet' and the reason why, 
   assert.equal(noPriceWhy(NO_MARKET_PRICE), null);
   assert.equal(noPriceWhy("  "), null);
   assert.equal(noPriceWhy(null), null);
+});
+
+test("offer 7d: nothing can price it here (not on the active card, no card) — the customer is told so; any other why, still 'working out' (SUP-32)", () => {
+  const CANT = { ready: false, final: false, text: "This phone can't be priced for trade-in here yet — the advisor will explain.", test: false };
+  const WORKING = { ready: false, final: false, text: "The advisor is working out your price.", test: false };
+  const unpriced = (reason: string) => ({ status: "unpriced" as const, amount: null, source: { kind: "none" as const }, partnerRef: null, reason });
+  for (const reason of ["This phone isn't on the rate card yet.", "No rate card is active yet."]) {
+    const o = buildOffer(priced({ quote: unpriced(reason) }));
+    assert.deepEqual(customerAnswer(o.answer), CANT, reason);
+    // Staff still read the why, once, and the repair line stays on the answer.
+    assert.deepEqual(o.asks.find((a) => a.kind === "no_price"), { kind: "no_price", title: "No market price yet", text: reason });
+    assert.deepEqual(o.answer.lines.map((l) => l.key), ["repair"]);
+    assert.equal(o.answer.lines[0].text, "or repair it for ₹34,096");
+    // The camera's identity block or a lapsed quote: the advisor has something to do — not final.
+    assert.deepEqual(customerAnswer(buildOffer(priced({ quote: unpriced(reason), quoteBlocked: "The camera saw a different phone." })).answer), WORKING, reason);
+    assert.deepEqual(customerAnswer(buildOffer(priced({ quote: unpriced(reason), quoteExpired: true })).answer), WORKING, reason);
+    // Closed: the closed sentence.
+    assert.deepEqual(customerAnswer(buildOffer(priced({ status: "walked_away", quote: unpriced(reason) })).answer), { ...WORKING, final: true, text: "This case is closed." });
+  }
+  // PriceIQ's own why, or none stored: it may price on the next ask — still working it out.
+  for (const reason of ["No refurbished market price yet — PriceIQ didn't answer within 6 s.", "No market price yet.", ""])
+    assert.deepEqual(customerAnswer(buildOffer(priced({ quote: unpriced(reason) })).answer), WORKING, reason);
+  // A card active that doesn't list the phone while PriceIQ, connected, couldn't answer (down, slow, no
+  // listing this week): the card's reason is the one stored, PriceIQ's rides beside it — not final.
+  for (const why of ["No refurbished market price yet — PriceIQ didn't answer within 6 s.", "No refurbished market price yet — PriceIQ answered HTTP 503."]) {
+    const o = buildOffer(priced({ quote: { ...unpriced("This phone isn't on the rate card yet."), priceiqWhy: why } }));
+    assert.deepEqual(customerAnswer(o.answer), WORKING, why);
+    assert.deepEqual(o.asks.find((a) => a.kind === "no_price")?.text, "This phone isn't on the rate card yet.", "staff still read the card's why");
+  }
+  // The storage not chosen yet: final only when every size is off the card.
+  const chips = (r: (string | null)[]) => r.map((reason, k) => ({ variant: ["256GB", "512GB"][k], amount: reason ? null : 18_800, reason }));
+  assert.deepEqual(customerAnswer(buildOffer(storageUnknown({ storageQuotes: chips(["This phone isn't on the rate card yet.", "This phone isn't on the rate card yet."]) })).answer), CANT);
+  assert.deepEqual(customerAnswer(buildOffer(storageUnknown({ storageQuotes: chips(["This phone isn't on the rate card yet.", null]) })).answer), WORKING);
+  assert.deepEqual(customerAnswer(buildOffer(storageUnknown({ storageQuotes: null })).answer), WORKING);
+  // Every size off the card, but PriceIQ couldn't answer for one of them: not final either.
+  const offCard = chips(["This phone isn't on the rate card yet.", "This phone isn't on the rate card yet."]);
+  offCard[1] = { ...offCard[1], priceiqWhy: "No refurbished market price yet — PriceIQ couldn't be reached." } as (typeof offCard)[number];
+  assert.deepEqual(customerAnswer(buildOffer(storageUnknown({ storageQuotes: offCard })).answer), WORKING);
 });
 
 test("offer 7c: no price because of the condition — its first problem, never a partner ask", () => {

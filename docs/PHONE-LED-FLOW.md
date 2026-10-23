@@ -75,8 +75,9 @@ the full contract; where it says more is asked, this paragraph wins.
    After Apply the result screen shows the answer, written by the server (`GET /api/device/status` →
    `answer`, MOBILE-API §4): Current grade · Market price for grade X · We pay you · + bonus if you
    exchange · or repair it — the same lines on the native app and in the browser, and the same as the
-   advisor's. Before it is priced: "The advisor is working out your price." No partner name, no store
-   margin. The clear-your-phone guide shows once it is traded in.
+   advisor's. Before it is priced: "The advisor is working out your price." — or, when nothing can price
+   it here (not on the active rate card, or no card active, and PriceIQ not able to answer either):
+   "This phone can't be priced for trade-in here yet — the advisor will explain." No partner name, no store margin. The clear-your-phone guide shows once it is traded in.
    **The test colours (≥ 0.8.0)**: while `GET /api/device/status` says `colours: true` (the camera's sweep
    didn't check the screen and the advisor hasn't certified it), the result screen shows white → black →
    red → green → blue → stripes full-screen, about 2.5 s each, looping, brightness up, "The advisor is

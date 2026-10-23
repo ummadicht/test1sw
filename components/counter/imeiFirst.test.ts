@@ -5,7 +5,6 @@ import {
   BAD_CHECK_DIGIT,
   BAD_CHECK_START,
   NOT_LOOKED_UP,
-  STOP_BLACKLISTED,
   STOP_GSMA,
   imeiEntry,
   imeiFound,
@@ -105,8 +104,14 @@ test("what the server found: the model and GSMA's word, its warnings, and the st
   assert.equal(imeiFound({ ...VIEW, imeiLookup: { ...lookup("unknown", null), brand: null } }).line, "Blacklist not checked", "never said as clean");
   const bad = imeiFound({ ...VIEW, imeiLookup: lookup("blacklisted") });
   assert.deepEqual([bad.line, bad.tone, bad.stop], ["Galaxy S23 Ultra · reported lost or stolen (GSMA)", "bad", STOP_GSMA]);
-  assert.equal(imeiFound({ ...VIEW, imeiLookup: lookup("clean"), kymEarly: { status: "duplicate", reference: null } }).stop, STOP_BLACKLISTED);
-  assert.equal(imeiFound({ ...VIEW, imeiLookup: lookup("clean"), kymEarly: { status: "clear", reference: null } }).stop, null);
+  // An early KYM answer that isn't clear: the register's own words, never "lost or stolen" for a duplicate (SUP-17).
+  const kym = (status: "clear" | "blacklisted" | "duplicate" | "in_use") => imeiFound({ ...VIEW, imeiLookup: lookup("clean"), kymEarly: { status, reference: null } }).stop;
+  assert.equal(kym("clear"), null);
+  assert.equal(kym("duplicate"), 'IMEI register says "Duplicate IMEI" — check it before testing.');
+  assert.equal(kym("in_use"), 'IMEI register says "Already in use" — check it before testing.');
+  assert.equal(kym("blacklisted"), 'IMEI register says "Black-listed (reported lost/stolen)" — check it before testing.');
+  // GSMA's word wins and keeps its sentence.
+  assert.equal(imeiFound({ ...VIEW, imeiLookup: lookup("blacklisted"), kymEarly: { status: "duplicate", reference: null } }).stop, STOP_GSMA);
   // A check digit that fails: kept, never looked up (never paid for).
   assert.deepEqual(imeiFound({ ...VIEW, imei: BAD, imeiCheck: "invalid" }).line, NOT_LOOKED_UP);
   assert.equal(imeiFound({ ...VIEW, imei: null, imeiCheck: null }).line, null);

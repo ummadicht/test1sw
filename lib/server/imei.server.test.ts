@@ -327,6 +327,29 @@ test("kymEarly: recorded with the advisor's name, needs an IMEI, refuses an unkn
   assert.equal(cleared.kymEarly, null);
 });
 
+test("SUP-17: an early KYM answer — clear starts the tests; blacklisted, duplicate and in use each refuse in the register's own words; GSMA's sentence is unchanged", async () => {
+  const said: Record<string, string> = {
+    blacklisted: 'IMEI register says "Black-listed (reported lost/stolen)" — check it before testing.',
+    duplicate: 'IMEI register says "Duplicate IMEI" — check it before testing.',
+    in_use: 'IMEI register says "Already in use" — check it before testing.',
+  };
+  const ok = fresh();
+  await cases.updateCase(adv, ok.id, { imei: imeiOn(S23U), kymEarly: { status: "clear", reference: "SS-17" } });
+  assert.equal(sessions.createTestSession(adv, { caseId: ok.id }).session.caseId, ok.id, "clear: the tests start");
+  for (const status of ["blacklisted", "duplicate", "in_use"] as const) {
+    const c = fresh();
+    await cases.updateCase(adv, c.id, { imei: imeiOn(S23U), kymEarly: { status, reference: null } });
+    assert.throws(
+      () => sessions.createTestSession(adv, { caseId: c.id }),
+      (e: Error & { status?: number; extra?: Record<string, string> }) => e.status === 409 && e.message === said[status] && e.extra?.reason === "blacklisted",
+      status
+    );
+    assert.equal((db().prepare(`SELECT COUNT(*) AS n FROM test_sessions WHERE case_id = ?`).get(c.id) as { n: number }).n, 0, `${status}: no session made`);
+    if (status !== "blacklisted") assert.doesNotMatch(said[status], /lost or stolen/, status);
+  }
+  assert.equal(BLACKLISTED, "This phone is reported lost or stolen. It can't be traded in.", "GSMA's sentence, word for word");
+});
+
 test("at the lock, the advisor's KYM answer (it must be clear) supersedes a non-clear early one and is stored back; GSMA's blacklisted still refuses", async () => {
   const c = fresh();
   await cases.updateCase(adv, c.id, { modelId: "galaxy-s23-ultra", variant: "256GB", imei: imeiOn(S23U), faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256 });

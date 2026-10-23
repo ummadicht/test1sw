@@ -32,7 +32,7 @@
  */
 import { inr, fmtBp, type BasisPoints, type Rupees } from "./money.ts";
 import { MARKET_GRADE_LETTER, isDefectState, tradeInGrade, type MarketGrade, type MarketGradeLetter } from "./marketSell.ts";
-import { BODY_WORD, ISSUE_LABEL, SCREEN_WORD, type ConditionAnswers } from "./condition.ts";
+import { BODY_WORD, ISSUE_LABEL, SCREEN_WORD, lowerFirst, type ConditionAnswers } from "./condition.ts";
 import { premiumOn, PREMIUM_RULE_VERSION } from "./premium.ts";
 import type { PriceSourceKind } from "./ratecard.ts";
 import type { Coverage } from "./repair.ts";
@@ -47,7 +47,7 @@ export type AnswerLine = { key: AnswerLineKey; text: string; note: string | null
 export type Answer = {
   /** The customer may see the figures. Staff screens print `lines` whatever this says. */
   ready: boolean;
-  /** One customer sentence when !ready ("The advisor is working out your price."); null when ready. */
+  /** One customer sentence when !ready ("The advisor is working out your price.", CANT_PRICE…); null when ready. */
   text: string | null;
   /** The case has left the counter: the figures are the ones locked (or last shown). */
   final: boolean;
@@ -123,16 +123,26 @@ export type AnswerInput = {
   /** Closed traded cases: the figures frozen at lock win over the quote and bonus JSON. */
   locked: { trade: Rupees | null; premium: Rupees | null; premiumBp: BasisPoints | null; bonus: Rupees | null; payable: Rupees | null } | null;
   testProgramme: boolean;
+  /**
+   * Nothing can price the phone here — the active rate card doesn't list it, or no card is active
+   * (offer.ts, ratecard.ts finalNoPrice): an open case tells the customer CANT_PRICE instead of
+   * WORKING_OUT. Default false.
+   */
+  cantPrice?: boolean;
 };
 
 /* ─────────────────────────── the words ─────────────────────────── */
 
 export const WORKING_OUT = "The advisor is working out your price.";
+/** An open case nothing can price here (AnswerInput.cantPrice) — SUP-32, wording for the owner to confirm. */
+export const CANT_PRICE = "This phone can't be priced for trade-in here yet — the advisor will explain.";
 export const CONFIRMING = "The advisor is confirming your price.";
 export const CANCELLED_TEXT = "This trade-in was cancelled.";
 const CLOSED_TEXT = "This case is closed.";
 /** Staff: a PriceIQ trade-in is SwapUp's estimate, never shown to the customer as the market price (owner, R1). */
 export const ESTIMATE_NOTE = "Estimate from the refurbished market — not shown to the customer.";
+/** Staff: a quote of kind partner_manual (history only) — typed in, so nothing about a grade or a card (SUP-9). */
+export const TYPED_PRICE_NOTE = "A price typed in by an older build.";
 
 /** The sources whose figure IS what the buyback partner pays — the only ones the customer is shown (partner_manual: history only, nothing writes it now). */
 const PARTNER_SOURCES: readonly string[] = ["partner_manual", "partner_ratecard"];
@@ -149,7 +159,6 @@ const HEADLINE: Record<Recommendation, string> = {
 
 const COVER_WORD: Record<Coverage, string> = { none: "", warranty: "warranty", care_plus: "Care+" };
 
-const lowerFirst = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s);
 /** At most two, then "+N more". */
 const atMostTwo = (all: string[]) => (all.length <= 2 ? all.join(", ") : `${all.slice(0, 2).join(", ")}, +${all.length - 2} more`);
 
@@ -166,6 +175,16 @@ export function defectNote(c: AnswerInput["condition"]): string | null {
   if (isDefectState.body(c.body)) all.push(BODY_WORD[c.body]);
   for (const i of c.issues) all.push(lowerFirst(ISSUE_LABEL[i]));
   return all.length ? atMostTwo(all) : null;
+}
+
+/**
+ * A defect in the condition that no recorded fault says — no power, a dead display, liquid, calls,
+ * Wi-Fi… (SUP-96). There IS something to repair, only nothing says what: never "Nothing to repair".
+ * The customer reads "or repair it — the advisor will quote the price"; staff read "No fault recorded
+ * (…)". The defects in defectNote's words; null when a fault is recorded or the condition has none.
+ */
+export function unrecordedDefect(faultCount: number, c: AnswerInput["condition"]): string | null {
+  return faultCount === 0 ? defectNote(c) : null;
 }
 
 function repairText(r: AnswerInput["repair"], chosen: boolean): string {
@@ -238,7 +257,7 @@ export function buildAnswer(i: AnswerInput): Answer {
   let text: string | null = null;
   if (open) {
     ready = wePay !== null && !i.quoteExpired && !i.quoteBlocked && partnerPrice;
-    if (!ready) text = wePay !== null && !i.quoteExpired && !i.quoteBlocked ? CONFIRMING : WORKING_OUT;
+    if (!ready) text = i.cantPrice ? CANT_PRICE : wePay !== null && !i.quoteExpired && !i.quoteBlocked ? CONFIRMING : WORKING_OUT;
   } else if (traded || chosen) ready = true;
   else if (cancelled) {
     ready = false;
@@ -289,7 +308,8 @@ export function buildAnswer(i: AnswerInput): Answer {
     lower && pricedAt && word
       ? `Priced at grade ${MARKET_GRADE_LETTER[pricedAt]}${gradePrice !== null ? ` (${inr(gradePrice)}${takenOff ? ` less ${inr(takenOff)}` : ""})` : ""} — none listed at grade ${MARKET_GRADE_LETTER[word]}.`
       : null;
-  const marketNotes = [open && i.market?.source === "priceiq" ? ESTIMATE_NOTE : null, pricedNote].filter((x): x is string => !!x);
+  const typed = i.market?.source === "partner_manual";
+  const marketNotes = [open && i.market?.source === "priceiq" ? ESTIMATE_NOTE : null, typed ? TYPED_PRICE_NOTE : pricedNote].filter((x): x is string => !!x);
   const pct = premium && premium.bp ? ` (${fmtBp(premium.bp)}${premiumEdge !== null ? `, lifted to what ${inr(premiumEdge)} earns` : ""})` : "";
   const staffNotes = {
     market: market && marketNotes.length ? marketNotes.join(" ") : null,

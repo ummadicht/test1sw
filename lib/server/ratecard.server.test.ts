@@ -27,7 +27,7 @@ const { ensureSeeded } = await import("./seed.ts");
 await ensureSeeded();
 const { db } = await import("./db.ts");
 const { uploadRateCard } = await import("./catalog.ts");
-const { activeRateCard } = await import("./buyback.ts");
+const { activeRateCard, partnerMode } = await import("./buyback.ts");
 const { rateCardTemplateCsv } = await import("./ratecard-extra.ts");
 const { DEFECT_DEDUCTIONS } = await import("../domain/ratecard.ts");
 
@@ -126,5 +126,20 @@ test("scripts/activate-rate-card.ts: the page's upload from the shell — active
     assert.match(bad.stderr, /"999GB" is not a variant of galaxy-s23-ultra/);
   } finally {
     other.close();
+  }
+});
+
+test("SUP-48: the rate-card line staff read names the partner's role, never the partner org's own name", () => {
+  const was = (db().prepare(`SELECT name FROM orgs WHERE id = ?`).get(partner.orgId) as { name: string }).name;
+  db().prepare(`UPDATE orgs SET name = ? WHERE id = ?`).run("Zephyrine Buyback Pvt Ltd", partner.orgId);
+  try {
+    upload("model_id,variant,max_price\ngalaxy-s23-ultra,256GB,40000\n", "SUP-48 card");
+    const mode = partnerMode(partner.orgId);
+    assert.equal(mode.kind, "partner_ratecard");
+    assert.equal(mode.why, "The buyback partner's rate card from 2026-10-12.");
+    assert.doesNotMatch(mode.why, /Zephyrine/);
+    assert.equal(mode.partnerName, "Zephyrine Buyback Pvt Ltd", "the org's own pages still know its name");
+  } finally {
+    db().prepare(`UPDATE orgs SET name = ? WHERE id = ?`).run(was, partner.orgId);
   }
 });

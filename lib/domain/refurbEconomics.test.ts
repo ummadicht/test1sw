@@ -309,10 +309,13 @@ test("the trace line: a card row without grade columns starts from its best-cond
 });
 
 test("a defect with no fault recorded (no power, liquid, a dead display): never 'Nothing to repair', no repaired price, no decision", () => {
-  for (const over of [{ powersOn: false }, { issues: ["liquid" as const] }, { screen: "not_working" as const }]) {
-    const { e } = run({ condition: cond(over), faults: [] });
+  for (const over of [{ powersOn: false }, { issues: ["liquid" as const] }, { screen: "not_working" as const }, { calls: false }, { issues: ["wifi_bt" as const] }]) {
+    const { e, offer } = run({ condition: cond(over), faults: [] });
+    // The answer says the same (SUP-96): the repair's why is the panel's, and it is not "Nothing to repair".
+    assert.equal(offer.repair.why, e.repairCost.why, JSON.stringify(over));
+    assert.equal(offer.repair.nothingToRepair, false, JSON.stringify(over));
     assert.equal(e.repairCost.amount, null, JSON.stringify(over));
-    assert.match(e.repairCost.why ?? "", /^No fault recorded \(.+\) — record it to price the repair\.$/, JSON.stringify(over));
+    assert.match(e.repairCost.why ?? "", /^No fault recorded \(.+\) — enter the service centre's quote\.$/, JSON.stringify(over));
     assert.equal(e.postRepair.amount, null, JSON.stringify(over));
     assert.match(e.postRepair.why ?? "", /^No fault recorded \(.+\) — record it to work out the repaired price\.$/, JSON.stringify(over));
     assert.deepEqual([e.uplift.amount, e.uplift.verdict], [null, null], JSON.stringify(over));

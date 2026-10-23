@@ -300,18 +300,41 @@ test("storage unknown: each size's chip is priced the way the trade-in will be, 
   assert.equal(picked.quote?.amount, by["256GB"], "the chip and the answer agree");
 });
 
-test("PriceIQ not connected (no key): no price — never a guess — and the trace says why", async () => {
+test("PriceIQ not connected (no key): no price — never a guess — and the reason says why", async () => {
   const keep = process.env.PRICEIQ_API_KEY;
   delete process.env.PRICEIQ_API_KEY;
   try {
     const v = await caseFor("galaxy-s23-ultra", "512GB", [], []);
     assert.equal(v.quote?.status, "unpriced");
     assert.equal(v.quote?.reason, "No rate card is active yet.", "PriceIQ wasn't asked, and no card is active");
-    assert.equal(v.quote?.priceiqWhy, "No refurbished market price yet — PriceIQ isn't connected.");
+    assert.equal(v.quote?.priceiqWhy, undefined, "PriceIQ off: no 'not from PriceIQ' note (SUP-22)");
     assert.equal(v.marketSell.amount, null);
     assert.equal(v.marketSell.why, "No refurbished market price yet — PriceIQ isn't connected.");
   } finally {
     process.env.PRICEIQ_API_KEY = keep;
+  }
+});
+
+test("SUP-22: PriceIQ off — a case priced from the card carries no 'Not from PriceIQ' note, a quote saved before included; once connected its real why is kept", async () => {
+  const keep = process.env.PRICEIQ_API_KEY;
+  delete process.env.PRICEIQ_API_KEY;
+  const partner = userNamed("partner");
+  uploadRateCard(partner, { label: "Partner sheet SUP-22", effectiveFrom: "2026-10-12", quoteValidityDays: 3, csv: "model_id,variant,max_price\ngalaxy-s23-ultra,512GB,50000\n", deductions: DEFECT_DEDUCTIONS, activate: true });
+  try {
+    const v = await caseFor("galaxy-s23-ultra", "512GB", [], []);
+    assert.equal(v.quote?.source.kind, "partner_ratecard");
+    assert.equal(v.quote?.priceiqWhy, undefined);
+    assert.equal(v.offer!.swap.tradeInDetail?.note, null, "the answer's details say nothing about PriceIQ");
+    const stored = JSON.parse((db().prepare(`SELECT quote FROM cases WHERE id = ?`).get(v.id) as { quote: string }).quote);
+    assert.equal(stored.priceiqWhy, undefined, "not written either");
+    // A quote saved before this (every card-priced case on 0.9.2): read without it.
+    db().prepare(`UPDATE cases SET quote = ? WHERE id = ?`).run(JSON.stringify({ ...stored, priceiqWhy: "No refurbished market price yet — PriceIQ isn't connected." }), v.id);
+    const old = cases.getCase(advisor, v.id);
+    assert.equal(old.quote?.priceiqWhy, undefined);
+    assert.equal(old.offer!.swap.tradeInDetail?.note, null);
+  } finally {
+    process.env.PRICEIQ_API_KEY = keep;
+    db().prepare(`UPDATE rate_cards SET active = 0`).run();
   }
 });
 
@@ -387,7 +410,9 @@ test("SUP-29: a cracked screen set on the condition alone ticks its fault — th
   // The trade-in is what the condition alone priced before: the same condition with no fault, re-priced.
   db().prepare(`UPDATE cases SET faults = '[]', fault_sources = '{}' WHERE id = ?`).run(c.id);
   const old = await cases.reprice(advisor, c.id, { requote: true });
-  assert.equal(old.offer!.repair.nothingToRepair, true, "the old way: no fault, nothing to repair");
+  // With no fault the crack is still something to repair (SUP-96): the advisor quotes it — never "Nothing to repair".
+  assert.equal(old.offer!.repair.nothingToRepair, false, "no fault recorded, yet the condition says cracked");
+  assert.equal(old.offer!.repair.why, "No fault recorded (screen cracked) — enter the service centre's quote.");
   assert.equal(v.quote?.status, "priced");
   assert.equal(v.quote?.amount, old.quote?.amount);
   assert.deepEqual(v.quote?.lines, old.quote?.lines);

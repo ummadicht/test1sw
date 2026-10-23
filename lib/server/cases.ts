@@ -2,7 +2,7 @@ import { db, tx, nowIso, todayIso, newId, nextSeq, parseJson, audit } from "./db
 import { HttpError, orgSettings, type SessionUser } from "./auth";
 import { getOrg, getStore, ownStore, storeInScope, canSeeStore, orgPartnerId, type StoreRow } from "./scope";
 import { partnerQuote, partnerMode, rateCardById, type PartnerQuote, type PartnerMode } from "./buyback";
-import { tradeInQuote, priceiqRepaired } from "./tradeIn";
+import { tradeInQuote, priceiqRepaired, withoutOffNote } from "./tradeIn";
 import { storeEvents, storePolicy, postEvents } from "./credit";
 import { activeCampaigns, newDevices } from "./catalog";
 import { caseMarketSell, type CaseMarketSell } from "./marketPrices";
@@ -24,15 +24,15 @@ import { estimateRepair, type Coverage, type ManualQuote, type RepairEstimate, t
 import { bestCampaign, type BonusResult, type Campaign } from "../domain/bonus";
 import { decide, type Decision } from "../domain/decision";
 import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
-import { buildOffer, EXPIRED_BLOCKER, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
-import { customerAnswer, type CustomerAnswer } from "../domain/answer";
+import { buildOffer, currentDecision, nothingToRepairOn, EXPIRED_BLOCKER, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
+import { customerAnswer, TYPED_PRICE_NOTE, type CustomerAnswer } from "../domain/answer";
 import { refurbDecisionShown, refurbEconomics, type RefurbEconomics } from "../domain/refurbEconomics";
 import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } from "../domain/premium";
 import { RuleError } from "../domain/errors";
 import { retiredSource } from "../domain/ratecard";
 import { coloursApp, storageOnSave } from "../domain/phoneLed";
 import { canHold } from "../domain/credit";
-import { readImei } from "../domain/imei";
+import { readImei, KYM_LABEL, type KymStatus } from "../domain/imei";
 import { indianMobile } from "../domain/phone";
 import { type CaseStatus, assertTransition, OPEN_TRADE_STATUSES, cancelEvents } from "../domain/lifecycle";
 import { DATA_CLEAR_LABEL, DATA_CLEAR_STATUSES, DATA_CLEAR_STEPS, dataClearState, missingDataClearSteps, type DataClearRecord, type DataClearState } from "../domain/dataClear";
@@ -58,14 +58,8 @@ import { BLACKLISTED, blacklistWarning, caseLookupView, gsmaBlacklisted, lookupF
 
 export type Customer = { name: string; phone: string; idType: string | null; idLast4: string | null };
 
-/** Result of the government IMEI register check (Sanchar Saathi / CEIR "Know Your Mobile"). */
-export type KymStatus = "clear" | "blacklisted" | "duplicate" | "in_use";
-export const KYM_LABEL: Record<KymStatus, string> = {
-  clear: "No block — OK to buy",
-  blacklisted: "Black-listed (reported lost/stolen)",
-  duplicate: "Duplicate IMEI",
-  in_use: "Already in use",
-};
+// The government IMEI register's statuses and words live with the IMEI (lib/domain/imei.ts).
+export { KYM_LABEL, type KymStatus };
 
 /**
  * Where the case's model came from (migration 17): the IMEI (its type code, or the model number
@@ -475,6 +469,12 @@ function repairNotServicedFor(tm: TradeModel | null, org: ReturnType<typeof getO
   return tm && org?.target_brand && tm.brand !== org.target_brand ? `This centre repairs ${org.target_brand} only — enter the customer's outside quote.` : null;
 }
 
+/** The case's stored quote as the screens read it: no "PriceIQ isn't connected" note (tradeIn.ts withoutOffNote). */
+function storedQuote(raw: string | null): PartnerQuote | null {
+  const q = parseJson<PartnerQuote | null>(raw, null);
+  return q && withoutOffNote(q);
+}
+
 /**
  * THE ANSWER for a case (lib/domain/offer.ts) from its stored rows ONLY — no re-price, no partner,
  * PriceIQ or GradeIQ call, no grading report, no write: a few indexed SELECTs, so the customer's
@@ -485,7 +485,7 @@ function offerFor(c: CaseRow, store: StoreRow): Offer {
   const org = getOrg(c.org_id);
   const faults = parseJson<FaultId[]>(c.faults, []);
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
-  const quote = parseJson<PartnerQuote | null>(c.quote, null);
+  const quote = storedQuote(c.quote);
   const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   const upgrade = parseJson<UpgradeChoice | null>(c.upgrade, null);
   const manualRepair = parseJson<ManualQuote | null>(c.manual_repair, null);
@@ -528,11 +528,14 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
   const advisor = db().prepare(`SELECT name FROM users WHERE id = ?`).get(c.advisor_id) as { name: string } | undefined;
   const faults = parseJson<FaultId[]>(c.faults, []);
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
-  const quote = parseJson<PartnerQuote | null>(c.quote, null);
+  const quote = storedQuote(c.quote);
   const quoteExpired = quoteLapsed(c, quote);
   const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   const org = getOrg(c.org_id);
-  const partner = org?.partner_id ? partnerMode(org.partner_id) : null;
+  const mode = org?.partner_id ? partnerMode(org.partner_id) : null;
+  // A price typed in by an older build (partner_manual, history only) came from no rate card: its
+  // line says what it is, never the card's (SUP-9).
+  const partner = mode && quote?.source.kind === "partner_manual" ? { ...mode, why: TYPED_PRICE_NOTE } : mode;
   const view: CaseView = {
     id: c.id,
     ref: c.ref,
@@ -585,7 +588,8 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     repairedQuote: parseJson<PartnerQuote | null>(c.repaired_quote, null),
     upgrade: parseJson<UpgradeChoice | null>(c.upgrade, null),
     bonus: parseJson<BonusApplied | null>(c.bonus, null),
-    decision: parseJson<Decision | null>(c.decision, null),
+    // The answer's own decision: a stored "Nothing to repair" from before SUP-96 for a phone with a defect is not used.
+    decision: currentDecision(parseJson<Decision | null>(c.decision, null), nothingToRepairOn(faults.length, parseJson<ManualQuote | null>(c.manual_repair, null), condition)),
     checks: parseJson<Checks | null>(c.checks, null),
     tradeValue: c.trade_value,
     premiumValue: c.premium_value,
@@ -851,7 +855,11 @@ export function listCases(
   return rows.map((r) => {
     const cust = parseJson<Customer | null>(r.customer, null);
     const up = parseJson<UpgradeChoice | null>(r.upgrade, null);
-    const dec = parseJson<Decision | null>(r.decision, null);
+    // The answer's decision, as the case page reads it (offer.ts currentDecision): never a stale "Straight trade-in".
+    const dec = currentDecision(
+      parseJson<Decision | null>(r.decision, null),
+      nothingToRepairOn(parseJson<FaultId[]>(r.faults, []).length, parseJson<ManualQuote | null>(r.manual_repair, null), parseJson<ConditionAnswers | null>(r.condition, null))
+    );
     return {
       id: r.id,
       ref: r.ref,
@@ -1506,7 +1514,7 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
 
   // 2. The trade-in quote and the repaired value — only with a complete, consistent description of
   //    the phone. Always the system's: tradeIn.ts asks, best first.
-  let quote = parseJson<PartnerQuote | null>(c.quote, null);
+  let quote = storedQuote(c.quote);
   let repairedQuote = parseJson<PartnerQuote | null>(c.repaired_quote, null);
   const consistent = !!condition && conditionFloor(condition, faults).length === 0;
   // A quote from a source that no longer exists (an older build's) is re-asked like a lapsed one.
@@ -1565,7 +1573,14 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
         sizes.map(async (v) => {
           const w = await tradeInQuote({ partnerId, modelId: tm.id, variant: v, brand: tm.brand, model: tm.model, answers: condition, whatIf: true });
           const priced = w.status === "priced" && w.amount !== null;
-          return { variant: v, amount: priced ? w.amount : null, reason: priced ? null : (w.reason ?? null), ...(priced && w.priceiq?.note ? { note: w.priceiq.note } : {}) };
+          return {
+            variant: v,
+            amount: priced ? w.amount : null,
+            reason: priced ? null : (w.reason ?? null),
+            ...(priced && w.priceiq?.note ? { note: w.priceiq.note } : {}),
+            // Why PriceIQ had no price for this size, while it is connected: then no chip's "no price" is final (SUP-32).
+            ...(!priced && w.priceiqWhy ? { priceiqWhy: w.priceiqWhy } : {}),
+          };
         })
       );
       storageQuotes = out.length ? out : null;
@@ -1622,7 +1637,8 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
     upgrade: upgrade ? { label: upgrade.label, newPrice: upgrade.price, bonus: bonusAmount, supportEndYear: upgrade.supportEndYear } : null,
     old: { ageYears: tm?.release_year ? Math.max(0, thisYear() - tm.release_year) : null, supportEndYear: tm?.support_end_year ?? null },
     thisYear: thisYear(),
-    nothingToRepair: faults.length === 0 && !manual,
+    // A defect in the condition with no fault recorded is something to repair (offer.ts nothingToRepairOn).
+    nothingToRepair: nothingToRepairOn(faults.length, manual, condition),
     faultCount: faults.length,
     systemicFault: faults.some((f) => ["water_damage", "no_power", "no_network", "frame_damage"].includes(f)),
     swollenBattery: faults.includes("battery_swollen"),
