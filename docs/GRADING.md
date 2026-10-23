@@ -324,6 +324,14 @@ liquid. A defect does not lower the grade as well: a cracked screen on an otherw
 is Superb less the cracked-screen %. Accessories and age are not defects (the market price is
 already this model's, at its age).
 
+**One grade** (owner, 2026-10-22: "grade match"). The grade the trade-in is priced at
+(`marketSell.ts tradeInGrade`) is the grade every answer shows and the grade the phone comes out at
+after refurb (`gradeAfterRefurb` is the same function): the refurb replaces exactly what the grade
+leaves out — a screen with lines, cracked or dead, a cracked back glass — and touches nothing the
+grade sees. So a cracked back on a flawless frame is grade A everywhere: shown A, priced off grade A
+less the back-glass %, after repair A. The answer's market line names that grade and works the
+deduction out: "Market price for grade A ₹34,000 · ₹40,000 less ₹6,000 for back glass cracked".
+
 **The repaired value** (for the repair-vs-swap comparison, beside a PriceIQ trade-in) is priced the
 way the trade-in is, so the two compare like with like: PriceIQ at the grade the phone comes out at
 after refurb (`gradeAfterRefurb`), less the same markdown, less a % for every defect the repaired

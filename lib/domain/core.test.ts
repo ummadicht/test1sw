@@ -53,7 +53,8 @@ test("condition: healing undoes only what repaired faults implied", () => {
   const a: ConditionAnswers = { ...conditionFromFaults(["screen_cracked", "back_cracked"], ACC), issues: ["battery", "speaker"] };
   const h = healedCondition(a, ["screen_cracked", "back_cracked"]);
   assert.equal(h.screen, "flawless");
-  assert.equal(h.body, "scuffed"); // never better than scuffed
+  assert.equal(h.body, "flawless"); // a new back glass is the look the grade priced (one grade)
+  assert.equal(healedCondition({ ...a, body: "bent" }, ["frame_damage"]).body, "scuffed"); // a frame: never better than scuffed
   assert.deepEqual(h.issues, ["battery", "speaker"]); // not repaired, not healed
 });
 

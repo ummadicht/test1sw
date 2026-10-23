@@ -6,6 +6,7 @@ import { matchModel, type DeviceReport, type Declared, type TestResults, type Tr
 import { coloursApp, scanFirstApp, scanFirstLock, scanFirstMessage, readPhase } from "../domain/phoneLed";
 import {
   finality,
+  cameraGradeLine,
   mapCamera,
   assessmentView,
   disagreements,
@@ -789,14 +790,8 @@ export function gradingView(r: GiqRow): GradingView {
   // the single pass takes the photos with the phone already in the app.
   const photosOpen = !scanFirst && state === "ready" && !!r.gradeiq_id && ["waiting", "opened", ...SYNC_STATUSES].includes(r.status);
 
-  // What the grade itself says, once it says anything.
-  const gradeLine = fin.final
-    ? `Camera grade ${snap?.cosmeticGrade} (final).`
-    : fin.provisional
-      ? `Camera grade ${snap?.cosmeticGrade || ""} provisional${fin.reasons[0] ? ` — ${fin.reasons[0].charAt(0).toLowerCase()}${fin.reasons[0].slice(1)}` : "."}`
-      : fin.status === "failed"
-        ? fin.reasons[0]
-        : null;
+  // What the grade itself says, once it says anything — a final grade in SwapUp's letter (gradeiqMap.ts cameraGradeLine).
+  const gradeLine = cameraGradeLine(fin, snap?.cosmeticGrade, mapping.floor);
   // Photos in, screen check still to come: tell the advisor what happens next,
   // or the grade alone would read as if the camera were finished.
   let next: string | null = null;

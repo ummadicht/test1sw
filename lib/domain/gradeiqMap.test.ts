@@ -23,6 +23,7 @@ import {
   pullWindowClosed,
   PULL_WINDOW_MS,
   type GradeiqSnapshot,
+  cameraGradeLine,
 } from "./gradeiqMap.ts";
 import { mergeCondition, unionFaults, type TestResults, type Declared } from "./diagnostics.ts";
 import type { ConditionAnswers } from "./condition.ts";
@@ -654,4 +655,18 @@ test("identityBlock: one fixed sentence with the make and model only — never G
   assert.equal(identityBlock(mismatch(["imei_mismatch: the phone's IMEI is not the one on record"])), "Camera doubts this is the phone — a manager must confirm it.");
   assert.equal(identityBlock(mismatch(["The camera says this is a different phone: something"])), "Camera doubts this is the phone — a manager must confirm it.");
   assert.equal(identityBlock({ identity: { verdict: "match", reasons: [] }, identityOverride: null }), null);
+});
+
+test("the camera's final grade is said in SwapUp's letter — the grade the answer and the price use; GradeIQ's own letter only when it differs", () => {
+  const final = { status: "final" as const, final: true, provisional: false, reasons: [] };
+  assert.equal(cameraGradeLine(final, "B", { screen: "flawless", body: "scuffed" }), "Camera grade B (final).");
+  assert.equal(cameraGradeLine(final, "B", { screen: "flawless", body: "flawless" }), "Camera grade A (final) — GradeIQ said B.");
+  assert.equal(cameraGradeLine(final, "Premium", { screen: "flawless", body: "flawless" }), "Camera grade A (final) — GradeIQ said Premium.");
+  // A cracked back is a repair, not a look: the grade is the look's (A), as the answer says it.
+  assert.equal(cameraGradeLine(final, "D", { screen: "flawless", body: "back_cracked" }), "Camera grade A (final) — GradeIQ said D.");
+  assert.equal(cameraGradeLine(final, "C", { screen: "scratched", body: "dented" }), "Camera grade C (final).");
+  // Provisional: never applied, so GradeIQ's letter, said as provisional; failed: its reason; nothing yet: null.
+  assert.equal(cameraGradeLine({ status: "provisional", final: false, provisional: true, reasons: ["Grade still refining."] }, "B", { screen: "flawless", body: "flawless" }), "Camera grade B provisional — grade still refining.");
+  assert.equal(cameraGradeLine({ status: "failed", final: false, provisional: false, reasons: ["No camera grade — check by eye."] }, "", { screen: "flawless", body: "flawless" }), "No camera grade — check by eye.");
+  assert.equal(cameraGradeLine({ status: "grading", final: false, provisional: false, reasons: ["Waiting for the camera grade."] }, "", { screen: "flawless", body: "flawless" }), null);
 });

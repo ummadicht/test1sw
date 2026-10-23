@@ -39,7 +39,8 @@ test("grade after refurb: what the refurb repairs comes out like new; what it do
   assert.equal(gradeAfterRefurb({ screen: "cracked", body: "flawless" }), "Superb");
   assert.equal(gradeAfterRefurb({ screen: "scratched", body: "flawless" }), "Good");
   assert.equal(gradeAfterRefurb({ screen: "flawless", body: "scuffed" }), "Good");
-  assert.equal(gradeAfterRefurb({ screen: "flawless", body: "back_cracked" }), "Good");
+  assert.equal(gradeAfterRefurb({ screen: "flawless", body: "back_cracked" }), "Superb", "the back glass is replaced");
+  assert.equal(gradeAfterRefurb({ screen: "scratched", body: "back_cracked" }), "Good", "the scratched screen stays");
   assert.equal(gradeAfterRefurb({ screen: "scratched", body: "dented" }), "Fair");
   assert.equal(gradeAfterRefurb({ screen: "not_working", body: "bent" }), "Best Value");
   assert.equal(gradeAfterRefurb(null), null);

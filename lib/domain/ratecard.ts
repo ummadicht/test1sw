@@ -18,7 +18,7 @@
 
 import { type Rupees, type BasisPoints, pctOf, roundDown, clamp } from "./money.ts";
 import type { ConditionAnswers, ScreenState, BodyState, IssueId, AgeBand } from "./condition.ts";
-import { SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LABEL } from "./condition.ts";
+import { SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LABEL, SCREEN_WORD, BODY_WORD } from "./condition.ts";
 // The look the card's grade columns price — rule G1 beside the grade's words, never the grading engine (G49).
 import { MARKET_GRADES, MARKET_GRADE_LETTER, isDefectState, tradeInGrade, type MarketGrade } from "./marketSell.ts";
 
@@ -156,7 +156,11 @@ export const DEFECT_DEDUCTIONS: RateCard["deductions"] = {
 /** SwapUp's cap on the deductions together, its minimum (as bp of the base) and its cash step. */
 export const DEFECT_RULES: Pick<RateCard, "maxDeductionBp" | "floorBp" | "roundTo"> = { maxDeductionBp: 8500, floorBp: 600, roundTo: 10 };
 
-export type QuoteLine = { label: string; bp?: BasisPoints; amount: Rupees };
+/**
+ * One line of a quote's trace. `word`: on a deduction only — what the customer reads it as
+ * ("back glass cracked", "no charger"), so the answer can say what the price took off.
+ */
+export type QuoteLine = { label: string; bp?: BasisPoints; amount: Rupees; word?: string };
 
 export type RateQuote =
   | {
@@ -189,10 +193,10 @@ export function priceFromCard(card: RateCard, modelId: string, variant: string, 
   const at = look ? priceAtGrade(entry, look) : null;
   const ceiling = at ? at.price : entry.maxPrice;
   const parts = at ? conditionDeductions(d, a, isDefectState) : conditionDeductions(d, a);
-  if (!a.accessories.charger && d.noChargerBp) parts.push({ label: "No original charger", bp: d.noChargerBp });
-  if (!a.accessories.box && d.noBoxBp) parts.push({ label: "No original box", bp: d.noBoxBp });
-  if (!a.accessories.bill && d.noBillBp) parts.push({ label: "No purchase bill", bp: d.noBillBp });
-  if (d.age[a.age]) parts.push({ label: `Age: ${AGE_LABEL[a.age]}`, bp: d.age[a.age] });
+  if (!a.accessories.charger && d.noChargerBp) parts.push({ label: "No original charger", bp: d.noChargerBp, word: "no charger" });
+  if (!a.accessories.box && d.noBoxBp) parts.push({ label: "No original box", bp: d.noBoxBp, word: "no box" });
+  if (!a.accessories.bill && d.noBillBp) parts.push({ label: "No purchase bill", bp: d.noBillBp, word: "no bill" });
+  if (d.age[a.age]) parts.push({ label: `Age: ${AGE_LABEL[a.age]}`, bp: d.age[a.age], word: `age ${AGE_LABEL[a.age].toLowerCase()}` });
   const base: QuoteLine = at
     ? { label: `Market price grade ${MARKET_GRADE_LETTER[at.grade]} · ${card.source.label}`, amount: ceiling }
     : { label: "Best-condition price on the rate card", amount: ceiling };
@@ -203,8 +207,10 @@ export function priceFromCard(card: RateCard, modelId: string, variant: string, 
   return { status: "priced", ceiling, ...out, ...(at ? { grade: at.grade } : {}) };
 }
 
-/** One percentage the card takes off, with the words the trace shows. */
-export type DeductionPart = { label: string; bp: BasisPoints };
+const lowerFirst = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s);
+
+/** One percentage the card takes off, with the words the trace shows and the few the customer reads. */
+export type DeductionPart = { label: string; bp: BasisPoints; word: string };
 
 /**
  * What is wrong with the phone, as the card's percentage lines — switches on, calls, screen,
@@ -222,13 +228,13 @@ export function conditionDeductions(
 ): DeductionPart[] {
   const parts: DeductionPart[] = [];
   if (!a.powersOn) {
-    parts.push({ label: "Does not switch on (priced as non-working)", bp: d.deadBp });
+    parts.push({ label: "Does not switch on (priced as non-working)", bp: d.deadBp, word: "doesn't switch on" });
     return parts;
   }
-  if (!a.calls) parts.push({ label: "Calls / network not working", bp: d.callsBp });
-  if (d.screen[a.screen] && deduct.screen(a.screen)) parts.push({ label: `Screen: ${SCREEN_LABEL[a.screen]}`, bp: d.screen[a.screen] });
-  if (d.body[a.body] && deduct.body(a.body)) parts.push({ label: `Body: ${BODY_LABEL[a.body]}`, bp: d.body[a.body] });
-  for (const i of a.issues) if (d.issues[i]) parts.push({ label: ISSUE_LABEL[i], bp: d.issues[i] });
+  if (!a.calls) parts.push({ label: "Calls / network not working", bp: d.callsBp, word: "calls don't work" });
+  if (d.screen[a.screen] && deduct.screen(a.screen)) parts.push({ label: `Screen: ${SCREEN_LABEL[a.screen]}`, bp: d.screen[a.screen], word: SCREEN_WORD[a.screen] });
+  if (d.body[a.body] && deduct.body(a.body)) parts.push({ label: `Body: ${BODY_LABEL[a.body]}`, bp: d.body[a.body], word: BODY_WORD[a.body] });
+  for (const i of a.issues) if (d.issues[i]) parts.push({ label: ISSUE_LABEL[i], bp: d.issues[i], word: lowerFirst(ISSUE_LABEL[i]) });
   return parts;
 }
 
@@ -258,7 +264,7 @@ export function combineDeductions(input: {
   for (const p of parts) {
     const amt = pctOf(ceiling, p.bp);
     deduction += amt;
-    lines.push({ label: p.label, bp: p.bp, amount: -amt });
+    lines.push({ label: p.label, bp: p.bp, amount: -amt, word: p.word });
   }
   let capped = false;
   const capAmount = pctOf(ceiling, rules.maxDeductionBp);

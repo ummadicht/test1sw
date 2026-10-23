@@ -82,6 +82,24 @@ export const BODY_LABEL: Record<BodyState, string> = {
   back_cracked: "Back glass cracked",
   bent: "Bent or broken frame",
 };
+/**
+ * The few words a customer reads for each screen and body state (the answer's grade note and the
+ * market line's "₹34,960 less ₹5,250 for back glass cracked"). "" = nothing to say.
+ */
+export const SCREEN_WORD: Record<ScreenState, string> = {
+  flawless: "",
+  scratched: "screen scratched",
+  lines_or_spots: "screen lines or spots",
+  cracked: "screen cracked",
+  not_working: "screen not working",
+};
+export const BODY_WORD: Record<BodyState, string> = {
+  flawless: "",
+  scuffed: "light scuffs",
+  dented: "dented frame",
+  back_cracked: "back glass cracked",
+  bent: "bent frame",
+};
 export const ISSUE_LABEL: Record<IssueId, string> = {
   touch: "Touch not responding",
   battery: "Battery drains / swollen",
@@ -283,8 +301,12 @@ export function withConditionFaults(faults: FaultId[], answers: ConditionAnswers
  * what each repaired fault implied is undone; everything else the advisor
  * recorded (scuffs no fault explains, age, a missing charger) stays.
  *
- * Body damage heals only as far as "scuffed": a new back cover or frame sits on
- * an otherwise original phone and we do not know the rest of it is flawless.
+ * A cracked back glass heals to "flawless": the SwapUp grade never saw a look
+ * under it (marketSell.ts tradeInGrade prices it as flawless less the back-glass
+ * %), and the new glass is exactly what the grade left out — so the repaired
+ * phone is the grade it was shown and priced at (owner, 2026-10-22: one grade).
+ * A bent or broken frame heals only as far as "scuffed": a new frame sits on an
+ * otherwise original phone and we do not know the rest of it is flawless.
  */
 export function healedCondition(answers: ConditionAnswers, repairedFaults: FaultId[]): ConditionAnswers {
   const out: ConditionAnswers = { ...answers, accessories: { ...answers.accessories } };
@@ -296,7 +318,7 @@ export function healedCondition(answers: ConditionAnswers, repairedFaults: Fault
     if (imp.screen) out.screen = "flawless";
     if (imp.body && BODY_ORDER.indexOf(out.body) >= BODY_ORDER.indexOf(imp.body)) {
       // only heal damage this fault explains; a worse state came from somewhere else
-      if (out.body === imp.body) out.body = "scuffed";
+      if (out.body === imp.body) out.body = imp.body === "back_cracked" ? "flawless" : "scuffed";
     }
     for (const i of imp.issues ?? []) issues.delete(i);
   }

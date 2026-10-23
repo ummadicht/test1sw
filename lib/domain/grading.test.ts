@@ -165,11 +165,11 @@ test("G8: cracked screen → needs repair, after repair Superb", () => {
   assert.ok(g.reasons.some((r) => r.code === "NR4" && /^Screen: .+ — repair before grading\.$/.test(r.text)));
 });
 
-test("G9: cracked back → needs repair, after repair Good", () => {
+test("G9: cracked back → needs repair, after repair its own grade (the back glass is replaced: Superb)", () => {
   const g = grade(input({ faults: ["back_cracked"], condition: cond({ body: "back_cracked" }) }));
   assert.equal(g.status, "needs_repair");
   has(g, "NR4");
-  assert.equal(g.afterRepair, "Good");
+  assert.equal(g.afterRepair, "Superb");
 });
 
 test("G10: battery health 79 + battery_drain → needs repair, part battery", () => {

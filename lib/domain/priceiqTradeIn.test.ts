@@ -271,11 +271,11 @@ test("accessories and age are not defects — nothing taken off for them", () =>
 test("SwapUp's own % table is the default; another table, when given, is used exactly as given", () => {
   const p = piq({ condition: cond({ body: "scuffed", issues: ["rear_camera"] }) });
   assert.ok(p.status === "priced");
-  if (p.status === "priced") assert.deepEqual(p.lines[2], { label: "Rear camera faulty", bp: 1_800, amount: -9_251 }); // SwapUp's 18%
+  if (p.status === "priced") assert.deepEqual(p.lines[2], { label: "Rear camera faulty", bp: 1_800, amount: -9_251, word: "rear camera faulty" }); // SwapUp's 18%
   const card: DeductionTable = { deductions: CARD.deductions, maxDeductionBp: CARD.maxDeductionBp, floorBp: CARD.floorBp, roundTo: CARD.roundTo };
   const c = piq({ condition: cond({ body: "scuffed", issues: ["rear_camera"] }), table: card });
   assert.ok(c.status === "priced");
-  if (c.status === "priced") assert.deepEqual(c.lines[2], { label: "Rear camera faulty", bp: 1_500, amount: -7_709 }); // the test card's 15%
+  if (c.status === "priced") assert.deepEqual(c.lines[2], { label: "Rear camera faulty", bp: 1_500, amount: -7_709, word: "rear camera faulty" }); // the test card's 15%
 });
 
 test("every condition: whole rupees, a multiple of the cash step, never above the marked-down listing, lines add up", () => {

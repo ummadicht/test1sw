@@ -53,7 +53,6 @@ const { exposure, position } = await import("../domain/credit.ts");
 const { DEFAULT_PLAN } = await import("../domain/diagnostics.ts");
 const { luhnCheckDigit } = await import("../domain/imei.ts");
 const { DEFECT_DEDUCTIONS } = await import("../domain/ratecard.ts");
-const { MARKET_GRADES } = await import("../domain/marketSell.ts");
 const { NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } = await import("../domain/premium.ts");
 const { RULESET_VERSION } = await import("../domain/decision.ts");
 
@@ -369,10 +368,9 @@ test("parity: the same phone through the browser (the customer's 'no' on beeps, 
 
 /* ─────────────────────────── the grade line (§C3 #5, R5) ─────────────────────────── */
 
-test("grade: on a graded phone the answer's grade is the grading engine's; on one that needs repair it is never better than the report's after-repair grade", async () => {
+test("grade: on a graded phone the answer's grade is the grading engine's; on one that needs repair it IS the report's after-repair grade — one grade", async () => {
   const t = await testedCase();
   const base = cases.getCase(adv, t.caseId).condition!;
-  const rank = (g: string | null | undefined) => MARKET_GRADES.indexOf(g as (typeof MARKET_GRADES)[number]);
   let graded = 0;
   let needsRepair = 0;
   for (const [screen, body] of [["flawless", "flawless"], ["scratched", "flawless"], ["flawless", "scuffed"], ["flawless", "dented"], ["flawless", "bent"]] as const) {
@@ -387,11 +385,11 @@ test("grade: on a graded phone the answer's grade is the grading engine's; on on
     const after = gr.gradingReportFor(adv, t.caseId).issued?.body.grade.afterRepair ?? null;
     if (!after) continue;
     needsRepair += 1;
-    assert.ok(rank(v.offer!.answer.grade?.word) >= rank(after), `${faults.join("+")}: ${v.offer!.answer.grade?.word} vs after-repair ${after}`);
+    assert.equal(v.offer!.answer.grade?.word, after, `${faults.join("+")}: shown ${v.offer!.answer.grade?.word}, after repair ${after}`);
   }
   assert.ok(needsRepair >= 2, `the report gave an after-repair grade (${needsRepair})`);
   const back = cases.getCase(adv, t.caseId);
-  assert.equal(back.offer!.answer.lines[0].text, "Current grade B", "a cracked back reads as its after-repair grade");
+  assert.equal(back.offer!.answer.lines[0].text, "Current grade A", "a cracked back reads as its look — the grade it is priced at and comes out at");
 });
 
 /* ─────────────────────────── the per-grade rate card (R13) ─────────────────────────── */
@@ -418,19 +416,23 @@ test("rate card by grade: the market price is the card's price at the phone's gr
     const named = v.offer!.answer.lines.find((l) => l.key === "market")!;
     assert.deepEqual([named.text, named.note], ["Market price for grade C ₹32,255", null]);
     assert.equal(v.offer!.answer.ready, true, "the partner's own card is the market price the customer sees");
-    // The same phone over 11 months old: the card takes age off, so the figure is no longer grade C's
-    // price — the line names no grade and says what it is after (never "for grade C ₹29,670").
+    // The same phone over 11 months old: the card takes age off grade C's price — the line still
+    // names grade C, and its note works the figure out from grade C's price.
     const old = await cases.updateCase(adv, c.id, { condition: { ...COND, screen: "flawless", body: "dented", accessories: { charger: true, box: true, bill: true }, age: "gt11m" } });
     const m = old.offer!.answer.lines.find((l) => l.key === "market")!;
-    assert.ok(old.quote!.amount! < 32_255);
-    assert.deepEqual([m.text, m.note], [`Market price ₹${old.quote!.amount!.toLocaleString("en-IN")}`, "after accessories and age"]);
-    assert.equal(old.offer!.answer.staffNotes.market, "Priced at grade C (₹32,255) less accessories and age.");
+    const M = old.quote!.amount!;
+    assert.ok(M < 32_255);
+    assert.deepEqual(
+      [m.text, m.note],
+      [`Market price for grade C ₹${M.toLocaleString("en-IN")}`, `₹32,255 less ₹${(32_255 - M).toLocaleString("en-IN")} for age over 11 months`],
+    );
+    assert.equal(old.offer!.answer.staffNotes.market, null);
   } finally {
     connectPriceiq();
   }
 });
 
-test("rate card by grade: a cracked back is priced off grade A less the back glass but shows grade B — the customer's market line names no grade", async () => {
+test("rate card by grade: a cracked back is grade A, priced off grade A less the back glass — the customer's lines say both, and add up", async () => {
   disconnectPriceiq();
   resetPriceiqState();
   try {
@@ -452,17 +454,17 @@ test("rate card by grade: a cracked back is priced off grade A less the back gla
     assert.equal(v.quote?.source.kind, "partner_ratecard");
     assert.deepEqual([v.quote?.amount, v.quote?.grade, v.quote?.lines[0].label], [34_000, "Superb", "Market price grade A · Week 43"]);
     const staff = v.offer!.answer;
-    assert.equal(staff.staffNotes.market, "Priced at grade A (₹40,000) less back glass cracked.");
+    assert.equal(staff.staffNotes.market, null);
     const s = sessions.deviceStatus(t.ticket).answer;
     assert.ok(s?.ready, JSON.stringify(s));
     if (!s?.ready) return;
     assert.deepEqual(s.lines, staff.lines, "the phone prints the desk's lines");
     const [grade, market, wePay] = s.lines;
-    assert.deepEqual([grade.text, grade.note], ["Current grade B", "back glass cracked"]);
-    assert.equal(market.text, "Market price ₹34,000", "never 'for grade B': the card's grade B is ₹30,000");
-    assert.equal(market.note, "after back glass cracked");
+    assert.deepEqual([grade.text, grade.note], ["Current grade A", "back glass cracked"]);
+    assert.equal(market.text, "Market price for grade A ₹34,000");
+    assert.equal(market.note, "₹40,000 less ₹6,000 for back glass cracked");
     assert.equal(wePay.text, "We pay you ₹35,020");
-    assert.deepEqual(s.market, { amount: 34_000, letter: null, word: null });
+    assert.deepEqual(s.market, { amount: 34_000, letter: "A", word: "Superb" });
   } finally {
     connectPriceiq();
   }
