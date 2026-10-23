@@ -148,9 +148,17 @@ test("the other asks keep their jump to the step that answers them", () => {
 
 /* ─────────────────────────── the quiet re-quote ─────────────────────────── */
 
-function caseWith(q: { kind: PriceSourceKind; quotedAt?: string } | null, over: Partial<Pick<CaseView, "quoteExpired" | "offer">> = {}): Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer"> {
+// The condition "What's wrong" recorded — the case a re-price can price (cases.ts reprice).
+const RECORDED: CaseView["condition"] = { powersOn: true, calls: true, screen: "flawless", body: "scuffed", issues: [], accessories: { charger: true, box: true, bill: true }, age: "gt11m" };
+
+type RequoteCase = Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer" | "condition" | "conditionProblems" | "quoteBlocked">;
+
+function caseWith(q: { kind: PriceSourceKind; quotedAt?: string } | null, over: Partial<Omit<RequoteCase, "id" | "quote">> = {}): RequoteCase {
   return {
     id: "case_1",
+    condition: RECORDED,
+    conditionProblems: [],
+    quoteBlocked: null,
     quoteExpired: true,
     quote: q
       ? {
@@ -186,7 +194,7 @@ test("an older build's typed quote that ran out is re-quoted by the system too",
 });
 
 test("an unpriced quote on an open case is asked again once on open, expired or not (a rate card uploaded since prices it)", () => {
-  const unpriced = (over: Partial<Pick<CaseView, "quoteExpired" | "offer">> = {}) => {
+  const unpriced = (over: Partial<Omit<RequoteCase, "id" | "quote">> = {}) => {
     const v = caseWith({ kind: "none" }, { quoteExpired: false, ...over });
     return { ...v, quote: { ...v.quote!, status: "unpriced" as const, amount: null, validUntil: null, reason: "No rate card is active yet." } };
   };
@@ -213,6 +221,20 @@ test("storage not known and no chip priced (a rate card uploaded since prices th
   // The phone measured a size not on file: no chips at all, never a guessed one — nothing to ask.
   assert.equal(autoRequoteKey(chips(null, { measuredStorage: "1TB" })), null);
   assert.equal(autoRequoteKey(chips(bare, { status: "walked_away" })), null);
+});
+
+test("no condition recorded yet (a new case before \"What's wrong\"): the chips can't be priced, so no quiet re-quote — and no Re-quote link", () => {
+  // The case as it opens: model known, storage not, nothing recorded — every chip unpriced, nothing a re-price could change.
+  const fresh = (over: Partial<Omit<RequoteCase, "id" | "quote">> = {}) =>
+    caseWith(null, { quoteExpired: false, offer: buildOffer(input({ ...NO_STORAGE, hasCondition: false })), condition: null, ...over });
+  assert.equal(autoRequoteKey(fresh()), null);
+  assert.equal(requotable(fresh()), false);
+  // Nor while what's recorded can't be priced either (cases.ts reprice asks for chips only then): better than the
+  // faults allow, or the camera's identity block.
+  assert.equal(autoRequoteKey(fresh({ condition: RECORDED, conditionProblems: ['Screen "Flawless" — the faults mean at least "Cracked glass".'] })), null);
+  assert.equal(autoRequoteKey(fresh({ condition: RECORDED, quoteBlocked: "The camera says this may not be the phone on the case (IMEI differs)." })), null);
+  // Recorded: the same unpriced chips are asked again once (a rate card uploaded since prices them).
+  assert.equal(autoRequoteKey(fresh({ condition: RECORDED })), "case_1 chips");
 });
 
 test("nothing to re-quote: a fresh priced quote, no quote, a closed case", () => {

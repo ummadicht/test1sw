@@ -49,21 +49,27 @@ export function askControl(a: OfferAsk, v: Pick<CaseView, "measuredStorage">, is
   return go ? { kind: "step", ...go } : { kind: "none" };
 }
 
+/** What the quiet re-quote reads off the case. */
+type RequoteView = Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer" | "condition" | "conditionProblems" | "quoteBlocked">;
+
 /**
  * The card's one quiet re-quote, as the store app's answer screen does: an open case whose
  * quote has run out — then "Quote expired — re-quoting." is true — or that nothing priced last
  * time (a rate card uploaded since prices it, with nobody touching the case); or, with the
- * storage not known yet, whose storage chips none has a price (the same card prices them). A
- * plain reprice is enough (reprice re-asks all three). Non-null = there is something to
- * re-quote; AnswerCard runs it at most ONCE per page open (a ref), so a quote that comes back
- * already out of date, or still unpriced, is never asked for in a loop.
+ * storage not known yet, whose storage chips none has a price (the same card prices them) — only
+ * where reprice can price chips at all: a condition recorded, consistent with the faults, and no
+ * identity block (cases.ts reprice; a new case before "What's wrong" has no condition, so asking
+ * would change nothing). A plain reprice is enough (reprice re-asks all three). Non-null = there
+ * is something to re-quote; AnswerCard runs it at most ONCE per page open (a ref), so a quote that
+ * comes back already out of date, or still unpriced, is never asked for in a loop.
  */
-export function autoRequoteKey(v: Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer">): string | null {
+export function autoRequoteKey(v: RequoteView): string | null {
   if (!v.offer?.open) return null;
   const q = v.quote;
   if (q && (v.quoteExpired || q.status !== "priced")) return `${v.id} ${q.quotedAt} ${q.validUntil ?? ""}`;
+  const priceable = !!v.condition && !v.conditionProblems.length && !v.quoteBlocked;
   const chips = v.offer.asks.find((a) => a.kind === "storage");
-  if (chips?.kind === "storage" && chips.options.length > 0 && chips.options.every((o) => o.tradeIn === null)) return `${v.id} chips`;
+  if (priceable && chips?.kind === "storage" && chips.options.length > 0 && chips.options.every((o) => o.tradeIn === null)) return `${v.id} chips`;
   return null;
 }
 
@@ -90,7 +96,7 @@ export function requoteSpot(v: Pick<CaseView, "quote" | "quoteExpired">, editabl
 }
 
 /** The tile's "Re-quote": wherever the quiet one applies, in case it failed. */
-export const requotable = (v: Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer">): boolean => autoRequoteKey(v) !== null;
+export const requotable = (v: RequoteView): boolean => autoRequoteKey(v) !== null;
 
 /**
  * The size the phone measured when it isn't on the model's list (a 1TB Ultra on file as
