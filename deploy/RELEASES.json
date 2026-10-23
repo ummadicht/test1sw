@@ -7,12 +7,68 @@
       "swapup": "4c3ed44",
       "mobile": "cabb067",
       "apks": [
-        { "app": "store", "version": "0.9.0", "versionCode": 12, "commit": "cabb067", "sha256": null },
-        { "app": "check", "version": "0.9.0", "versionCode": 12, "commit": "cabb067", "sha256": null }
+        {
+          "app": "store",
+          "version": "0.9.0",
+          "versionCode": 12,
+          "commit": "cabb067",
+          "sha256": null
+        },
+        {
+          "app": "check",
+          "version": "0.9.0",
+          "versionCode": 12,
+          "commit": "cabb067",
+          "sha256": null
+        }
       ],
       "dbBackup": "/home/ammar/swapup-backups/swapup-pre-0.9.0-20261019T025440Z.db",
       "verify": "passed",
       "note": "Added by hand from the 0.9.0 release log (released by a session script before deploy/release.sh existed). Its full APK sha256s were not kept on this Mac; the live ones are in /var/www/swapup-downloads/swapup-*.json on the VM."
+    },
+    {
+      "version": "0.9.2",
+      "releasedAt": "2026-10-23T02:42:21.011Z",
+      "swapup": "6712f2e",
+      "mobile": "cba3eae",
+      "apks": [
+        {
+          "app": "store",
+          "version": "0.9.2",
+          "versionCode": 14,
+          "commit": "cba3eae",
+          "sha256": "acbbc6cc662cae31fc94f08dafc5011f7e7a08794c6f3562326476c4e13797a6",
+          "bytes": 41882173,
+          "builtAt": "2026-10-23T01:58:44Z"
+        },
+        {
+          "app": "check",
+          "version": "0.9.2",
+          "versionCode": 14,
+          "commit": "cba3eae",
+          "sha256": "ef7aa2266033574fd96c6deaddb0f3725fb4dc05e989d9579a09cc2636c994fa",
+          "bytes": 41885161,
+          "builtAt": "2026-10-23T01:52:42Z"
+        }
+      ],
+      "web": [
+        {
+          "app": "store",
+          "version": "0.9.2",
+          "commit": "cba3eae",
+          "bundle": "/app/store/_expo/static/js/web/index-efbd81ffc26b84b396e89ea3d86ed3a1.js",
+          "builtAt": "2026-10-23T01:47:09Z"
+        },
+        {
+          "app": "check",
+          "version": "0.9.2",
+          "commit": "cba3eae",
+          "bundle": "/app/check/_expo/static/js/web/index-d83467ab1a05e10f6c4996101680f13a.js",
+          "builtAt": "2026-10-23T01:47:20Z"
+        }
+      ],
+      "dbBackup": "/home/ammar/swapup-backups/swapup-pre-0.9.2-20261023T023941Z.db",
+      "verify": "passed"
     }
   ]
 }
