@@ -24,7 +24,7 @@ import { estimateRepair, type Coverage, type ManualQuote, type RepairEstimate, t
 import { bestCampaign, type BonusResult, type Campaign } from "../domain/bonus";
 import { decide, type Decision } from "../domain/decision";
 import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
-import { buildOffer, EXPIRED_BLOCKER, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
+import { buildOffer, EXPIRED_BLOCKER, noPriceWhy, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
 import { customerAnswer, type CustomerAnswer } from "../domain/answer";
 import { refurbDecisionShown, refurbEconomics, type RefurbEconomics } from "../domain/refurbEconomics";
 import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } from "../domain/premium";
@@ -695,7 +695,9 @@ function lockBlockers(v: CaseView): string[] {
   if (!v.imei) out.push("Record the IMEI (dial *#06#).");
   if (!v.condition) out.push("Record the condition.");
   if (v.conditionProblems.length) out.push("Condition is better than the faults allow.");
-  if (!v.quote || v.quote.status !== "priced" || !v.quote.amount) out.push("No trade-in price yet.");
+  // Nothing priced it: the quote's own why when it has one ("This phone isn't on the rate card yet.",
+  // PriceIQ's) — the answer's words (offer.ts noPriceWhy) — else the plain sentence.
+  if (!v.quote || v.quote.status !== "priced" || !v.quote.amount) out.push(noPriceWhy(v.quote?.reason) ?? "No trade-in price yet.");
   // Re-quote fixes it: every quote is the system's (PriceIQ, the rate card).
   else if (v.quoteExpired) out.push(EXPIRED_BLOCKER);
   if (!v.upgrade) out.push("Choose the new phone.");
