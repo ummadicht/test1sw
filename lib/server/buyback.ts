@@ -74,7 +74,8 @@ export function partnerMode(partnerId: string): PartnerMode {
   const partnerName = p?.name ?? "Buyback partner";
   const card = activeRateCard(partnerId);
   if (!card) return { partnerId, partnerName, kind: "none", label: "No rate card", why: "No rate card loaded — a phone PriceIQ can't price gets no trade-in price.", rateCardId: null };
-  return { partnerId, partnerName, kind: "partner_ratecard", label: card.source.label, why: `${partnerName}'s rate card from ${card.source.effectiveFrom}.`, rateCardId: card.id };
+  // The role, never the partner org's name (SUP-48): staff read this line on the desk's trade-in step.
+  return { partnerId, partnerName, kind: "partner_ratecard", label: card.source.label, why: `The buyback partner's rate card from ${card.source.effectiveFrom}.`, rateCardId: card.id };
 }
 
 function addDays(iso: string, days: number): string {
