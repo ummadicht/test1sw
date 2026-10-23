@@ -41,7 +41,7 @@ import type { MarketGrade } from "./marketSell.ts";
 import { fmtBp } from "./money.ts";
 import { tradeInLine, type PriceiqMeta } from "./priceiqTradeIn.ts";
 import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP } from "./premium.ts";
-import { buildAnswer, TRADED_STATUSES, type Answer } from "./answer.ts";
+import { buildAnswer, unrecordedDefect, TRADED_STATUSES, type Answer } from "./answer.ts";
 
 /* ─────────────────────────── the contract (docs/MOBILE-API.md §3c) ─────────────────────────── */
 
@@ -245,6 +245,8 @@ const NOTHING_RECORDED = "No faults on the case.";
 const CHOOSE_NEW_PHONE = "Choose the new phone.";
 const CUSTOMER_STORAGE_NOTE = "Customer typed this — check Settings › About phone.";
 const NOTHING_TO_REPAIR = "Nothing to repair.";
+/** A defect in the condition with no fault recorded for it (answer.ts unrecordedDefect) — the staff refurb panel's words too. */
+export const noFaultRecorded = (defects: string) => `No fault recorded (${defects}) — record it to price the repair.`;
 const CHOOSE_PHONE = "Choose the phone first.";
 const TAP_STORAGE = "Tap the storage to see the trade-in.";
 const EXPIRED_NOTE = "Quote expired — re-quoting.";
@@ -295,8 +297,12 @@ export function buildOffer(i: OfferInput): Offer {
   const open = i.status === "draft" || i.status === "quoted";
   const device = i.device;
   const variant = device?.variant ?? null;
-  const nothingToRepair = i.faultCount === 0 && !i.manualRepair;
-  const decision = i.decision;
+  // No fault recorded, but the condition has a defect (no power, a dead display, liquid…): something
+  // to repair that nothing prices yet — never "Nothing to repair" (SUP-96). The trade-in doesn't move.
+  const unrecorded = unrecordedDefect(i.faultCount, i.condition ?? null);
+  const nothingToRepair = i.faultCount === 0 && !i.manualRepair && !unrecorded;
+  // A decision stored before that rule said "Nothing to repair" for such a phone: not used.
+  const decision = i.decision?.recommendation === "no_repair" && !nothingToRepair ? null : i.decision;
 
   // ── The refurb quote ──
   const r = i.repair;
@@ -317,7 +323,8 @@ export function buildOffer(i: OfferInput): Offer {
       detail = parts.length ? parts.join(" + ") : null;
     }
   }
-  const repairWhy = repairAmount !== null ? null : nothingToRepair ? NOTHING_TO_REPAIR : !device ? CHOOSE_PHONE : (repairNote ?? NO_REPAIR_PRICE);
+  const repairWhy =
+    repairAmount !== null ? null : nothingToRepair ? NOTHING_TO_REPAIR : !device ? CHOOSE_PHONE : unrecorded ? noFaultRecorded(unrecorded) : (repairNote ?? NO_REPAIR_PRICE);
 
   // ── Trade-in + bonus ──
   const q = i.quote;

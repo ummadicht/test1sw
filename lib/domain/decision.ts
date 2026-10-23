@@ -76,7 +76,11 @@ export type DecisionInput = {
   upgrade: { label: string; newPrice: Rupees; bonus: Rupees; supportEndYear: number | null } | null;
   old: { ageYears: number | null; supportEndYear: number | null };
   thisYear: number;
-  /** No faults recorded: there is no repair to weigh — it is a straight trade-in. */
+  /**
+   * No fault recorded and no outside quote, and the condition has no defect either (answer.ts
+   * unrecordedDefect — a phone that won't switch on with no fault ticked still has a repair to
+   * quote): there is no repair to weigh — it is a straight trade-in.
+   */
   nothingToRepair?: boolean;
   /** How many separate faults, and whether any is systemic (liquid, board, network, no power). */
   faultCount?: number;

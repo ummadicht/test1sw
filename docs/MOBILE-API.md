@@ -706,8 +706,9 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
   `Quote: ${reason}`; a book estimate → every line label joined with " + ", then "+ labour" if
   labour > 0, "+ GST" if GST > 0, "+ Care+ fee" if that fee > 0 (e.g. "Display assembly + labour + GST").
 - **`repair.why`** (only when `amount` is null): "Nothing to repair."; "Choose the phone first.";
-  otherwise the repair note, or `repairNotServiced`, else "No book price — enter the
-  service centre's quote."
+  no fault recorded but the condition has a defect → "No fault recorded (doesn't switch on) — record
+  it to price the repair." (the staff refurb panel's words); otherwise the repair note, or
+  `repairNotServiced`, else "No book price — enter the service centre's quote."
 - **`swap.tradeIn`** is null whenever the trade-in can't be trusted — the camera blocks it, there is
   no model, or no storage — even if an older priced quote is still stored.
 - **`swap.tradeInDetail`:** show `line` (when there is one) under the trade-in, then a closed "Show
@@ -776,6 +777,11 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
   the answer prices the repair (or asks for the centre's quote) instead of "Nothing to repair". The
   trade-in reads the condition only: its price doesn't move. Looks (scratches, scuffs, dents), a bent
   frame, no power, no calls and liquid add nothing; a patch that sends `faults` is taken as sent.
+  A defect that adds no fault (no power, no calls, liquid, a dead display, Wi-Fi / Bluetooth,
+  fingerprint, vibration) is still something to repair (SUP-96): with no fault recorded,
+  `repair.nothingToRepair` is false, `repair.why` is "No fault recorded (…) — record it to price the
+  repair.", decide() gets no "Nothing to repair" (so `cannot_say` until the repair is quoted) and the
+  customer reads "or repair it — the advisor will quote the price". The trade-in doesn't move.
   A fault whose only source is `condition` is the condition's to take back: a later `{condition}`
   patch that no longer names it removes it (cracked tapped by mistake, then `flawless` → no fault;
   `cracked` then `lines_or_spots` → `display_lines`), and it doesn't hold the condition editor's

@@ -293,6 +293,41 @@ test("device status: applied but no partner price — one sentence ('confirming'
   }
 });
 
+test("device status: a defect with no fault recorded (no power, liquid, Wi-Fi) — never 'Nothing to repair'; the advisor quotes the repair; the price doesn't move (SUP-96)", async () => {
+  const t = await testedCase();
+  await withF1Card(async () => {
+    const defects: [Record<string, unknown>, string | null][] = [
+      [{ powersOn: false }, "no_power"],
+      [{ issues: ["liquid"] }, "water_damage"],
+      [{ calls: false }, "no_network"],
+      [{ issues: ["wifi_bt"] }, null],
+    ];
+    for (const [over, fault] of defects) {
+      const condition = { ...COND, screen: "flawless", body: "flawless", accessories: { charger: true, box: true, bill: true }, age: "lt3m", ...over };
+      const v = await cases.updateCase(adv, t.caseId, { modelId: "galaxy-s23-ultra", variant: "256GB", faults: [], condition, upgradeDeviceId: S26U_256 });
+      const at = JSON.stringify(over);
+      assert.deepEqual(v.faults, [], at);
+      assert.equal(v.quote?.status, "priced", at);
+      // decide() was told there is a repair to weigh: no quote for it yet, so no verdict.
+      assert.equal(v.decision!.recommendation, "cannot_say", at);
+      assert.equal(v.offer!.repair.nothingToRepair, false, at);
+      assert.equal(v.offer!.repair.why, v.refurbEconomics!.repairCost.why, "the answer and the staff refurb panel say the same");
+      assert.match(v.offer!.repair.why ?? "", /^No fault recorded \(.+\) — record it to price the repair\.$/, at);
+      const a = sessions.deviceStatus(t.ticket).answer!;
+      assert.ok(a.ready, at);
+      if (!a.ready) continue;
+      assert.equal(a.headline, "Your offer", at);
+      assert.equal(a.lines.find((l) => l.key === "repair")?.text, "or repair it — the advisor will quote the price", at);
+      assert.ok(!JSON.stringify(a).includes("Nothing to repair"), at);
+      // The trade-in reads the condition only: recording the fault changes the repair side, never the price.
+      if (!fault) continue;
+      const recorded = await cases.updateCase(adv, t.caseId, { faults: [fault], condition });
+      assert.equal(recorded.quote?.amount, v.quote?.amount, at);
+      assert.equal(recorded.offer!.answer.wePay, v.offer!.answer.wePay, at);
+    }
+  });
+});
+
 test("device status: priced, then locked — the same lines as the desk, read only (no PriceIQ call, no write), and nothing leaks", async () => {
   const t = await testedCase();
   const imei = nextImei();

@@ -18,7 +18,7 @@
 
 import { type Rupees, type BasisPoints, pctOf, roundDown, clamp } from "./money.ts";
 import type { ConditionAnswers, ScreenState, BodyState, IssueId, AgeBand } from "./condition.ts";
-import { SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LABEL, SCREEN_WORD, BODY_WORD } from "./condition.ts";
+import { SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LABEL, SCREEN_WORD, BODY_WORD, lowerFirst } from "./condition.ts";
 // The look the card's grade columns price — rule G1 beside the grade's words, never the grading engine (G49).
 import { MARKET_GRADES, MARKET_GRADE_LETTER, isDefectState, tradeInGrade, type MarketGrade } from "./marketSell.ts";
 
@@ -206,8 +206,6 @@ export function priceFromCard(card: RateCard, modelId: string, variant: string, 
   const out = combineDeductions({ ceiling, start: ceiling, lines: [base], parts, rules });
   return { status: "priced", ceiling, ...out, ...(at ? { grade: at.grade } : {}) };
 }
-
-const lowerFirst = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s);
 
 /** One percentage the card takes off, with the words the trace shows and the few the customer reads. */
 export type DeductionPart = { label: string; bp: BasisPoints; word: string };

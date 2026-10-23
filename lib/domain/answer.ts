@@ -32,7 +32,7 @@
  */
 import { inr, fmtBp, type BasisPoints, type Rupees } from "./money.ts";
 import { MARKET_GRADE_LETTER, isDefectState, tradeInGrade, type MarketGrade, type MarketGradeLetter } from "./marketSell.ts";
-import { BODY_WORD, ISSUE_LABEL, SCREEN_WORD, type ConditionAnswers } from "./condition.ts";
+import { BODY_WORD, ISSUE_LABEL, SCREEN_WORD, lowerFirst, type ConditionAnswers } from "./condition.ts";
 import { premiumOn, PREMIUM_RULE_VERSION } from "./premium.ts";
 import type { PriceSourceKind } from "./ratecard.ts";
 import type { Coverage } from "./repair.ts";
@@ -149,7 +149,6 @@ const HEADLINE: Record<Recommendation, string> = {
 
 const COVER_WORD: Record<Coverage, string> = { none: "", warranty: "warranty", care_plus: "Care+" };
 
-const lowerFirst = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s);
 /** At most two, then "+N more". */
 const atMostTwo = (all: string[]) => (all.length <= 2 ? all.join(", ") : `${all.slice(0, 2).join(", ")}, +${all.length - 2} more`);
 
@@ -166,6 +165,16 @@ export function defectNote(c: AnswerInput["condition"]): string | null {
   if (isDefectState.body(c.body)) all.push(BODY_WORD[c.body]);
   for (const i of c.issues) all.push(lowerFirst(ISSUE_LABEL[i]));
   return all.length ? atMostTwo(all) : null;
+}
+
+/**
+ * A defect in the condition that no recorded fault says — no power, a dead display, liquid, calls,
+ * Wi-Fi… (SUP-96). There IS something to repair, only nothing says what: never "Nothing to repair".
+ * The customer reads "or repair it — the advisor will quote the price"; staff read "No fault recorded
+ * (…)". The defects in defectNote's words; null when a fault is recorded or the condition has none.
+ */
+export function unrecordedDefect(faultCount: number, c: AnswerInput["condition"]): string | null {
+  return faultCount === 0 ? defectNote(c) : null;
 }
 
 function repairText(r: AnswerInput["repair"], chosen: boolean): string {

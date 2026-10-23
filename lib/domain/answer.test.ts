@@ -307,6 +307,15 @@ test("grade note: a dead phone says only that; at most two defects, then '+N mor
   for (const c of [cond({ screen: "scratched" }), cond({ body: "scuffed" }), cond({ body: "dented" }), cond({ body: "bent" })]) assert.equal(defectNote(c), null);
 });
 
+test("grade note: a name keeps its capitals mid-sentence — 'Wi-Fi / Bluetooth faulty', never 'wi-Fi' (SUP-96)", () => {
+  assert.equal(defectNote(cond({ issues: ["wifi_bt"] })), "Wi-Fi / Bluetooth faulty");
+  assert.equal(defectNote(cond({ issues: ["wifi_bt", "fingerprint", "vibration"] })), "Wi-Fi / Bluetooth faulty, fingerprint sensor faulty, +1 more");
+  // The market line's working-out reads the rate card's own words: the same.
+  const q = priceFromCard(CARD, "galaxy-s22", "8/128", cond({ issues: ["wifi_bt"] }));
+  if (q.status !== "priced") return assert.fail("priced");
+  assert.equal(q.lines.find((l) => /bluetooth/i.test(l.word ?? ""))?.word, "Wi-Fi / Bluetooth faulty");
+});
+
 test("market line: priced from a LOWER grade than the phone's — 'Market price ₹X' with no grade; the detail is staff-only", () => {
   // The phone looks Good (scuffs); the only listing was at Fair.
   const a = buildAnswer(f1({ condition: cond({ body: "scuffed" }), market: { amount: 25_000, source: "partner_ratecard", priceGrade: "Fair" } }));

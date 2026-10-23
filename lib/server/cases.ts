@@ -25,7 +25,7 @@ import { bestCampaign, type BonusResult, type Campaign } from "../domain/bonus";
 import { decide, type Decision } from "../domain/decision";
 import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
 import { buildOffer, EXPIRED_BLOCKER, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
-import { customerAnswer, type CustomerAnswer } from "../domain/answer";
+import { customerAnswer, unrecordedDefect, type CustomerAnswer } from "../domain/answer";
 import { refurbDecisionShown, refurbEconomics, type RefurbEconomics } from "../domain/refurbEconomics";
 import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } from "../domain/premium";
 import { RuleError } from "../domain/errors";
@@ -1622,7 +1622,8 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
     upgrade: upgrade ? { label: upgrade.label, newPrice: upgrade.price, bonus: bonusAmount, supportEndYear: upgrade.supportEndYear } : null,
     old: { ageYears: tm?.release_year ? Math.max(0, thisYear() - tm.release_year) : null, supportEndYear: tm?.support_end_year ?? null },
     thisYear: thisYear(),
-    nothingToRepair: faults.length === 0 && !manual,
+    // A defect in the condition with no fault recorded is something to repair (answer.ts unrecordedDefect).
+    nothingToRepair: faults.length === 0 && !manual && !unrecordedDefect(faults.length, condition),
     faultCount: faults.length,
     systemicFault: faults.some((f) => ["water_damage", "no_power", "no_network", "frame_damage"].includes(f)),
     swollenBattery: faults.includes("battery_swollen"),

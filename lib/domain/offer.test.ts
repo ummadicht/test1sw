@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { buildOffer, EXPIRED_BLOCKER, NO_MARKET_PRICE, noPriceWhy, type Offer, type OfferInput } from "./offer.ts";
 import { decide, type DecisionInput } from "./decision.ts";
 import { premiumOn } from "./premium.ts";
-import { customerAnswer } from "./answer.ts";
+import { customerAnswer, unrecordedDefect } from "./answer.ts";
 import { estimateRepair, type Coverage, type RepairBookEntry } from "./repair.ts";
-import { HEALTHY, type FaultId } from "./condition.ts";
+import { HEALTHY, type ConditionAnswers, type FaultId } from "./condition.ts";
 
 /* ─────────────────────────── fixtures: the spec's worked example (§3.4) ─────────────────────────── */
 // org_samsung_svc, the partner's rate card, the seeded campaign and the S23 Ultra price book;
@@ -27,7 +27,7 @@ const BONUS = { amount: 6199, bp: 400, override: null };
 const REPAIRED_VALUE = 34800;
 
 /** decide() exactly as reprice() calls it: the as-is value is what we pay — the market price + the SwapUp premium. */
-function decisionFor(o: Pick<OfferInput, "repair" | "quote" | "upgrade" | "bonus" | "faultCount" | "manualRepair">, repairedValue: number | null = REPAIRED_VALUE) {
+function decisionFor(o: Pick<OfferInput, "repair" | "quote" | "upgrade" | "bonus" | "faultCount" | "manualRepair" | "condition">, repairedValue: number | null = REPAIRED_VALUE) {
   const repairPays = o.repair?.status === "quoted" ? o.repair.customerPays : null;
   const market = o.quote?.status === "priced" ? o.quote.amount : null;
   const premium = premiumOn(market)?.amount ?? 0;
@@ -43,7 +43,7 @@ function decisionFor(o: Pick<OfferInput, "repair" | "quote" | "upgrade" | "bonus
     upgrade: o.upgrade ? { label: o.upgrade.label, newPrice: o.upgrade.price, bonus, supportEndYear: 2033 } : null,
     old: { ageYears: 3, supportEndYear: 2028 },
     thisYear: 2026,
-    nothingToRepair: o.faultCount === 0 && !o.manualRepair,
+    nothingToRepair: o.faultCount === 0 && !o.manualRepair && !unrecordedDefect(o.faultCount, o.condition ?? null),
     faultCount: o.faultCount,
   };
   return decide(input);
@@ -251,6 +251,58 @@ test("offer 3: no faults — nothing to repair, a straight trade-in", () => {
   const old = priced({ faultCount: 0, repair: null });
   const signalled = buildOffer({ ...old, decision: { ...old.decision!, signals: [{ code: "support_ended", points: "upgrade", strength: "soft", text: "Security updates for this model ended in 2024." }] } });
   assert.equal(signalled.reason, "Security updates for this model ended in 2024.");
+});
+
+test("offer 3c: a defect in the condition with no fault recorded is never 'Nothing to repair' — the advisor quotes the repair (SUP-96)", () => {
+  const cond = (over: Partial<ConditionAnswers>): ConditionAnswers => ({ ...HEALTHY, issues: [], accessories: { charger: true, box: true, bill: true }, age: "lt3m", ...over });
+  const cases: [Partial<ConditionAnswers>, string][] = [
+    [{ powersOn: false }, "doesn't switch on"],
+    [{ screen: "not_working" }, "screen not working"],
+    [{ issues: ["liquid"] }, "signs of liquid damage"],
+    [{ calls: false }, "calls don't work"],
+    [{ issues: ["wifi_bt"] }, "Wi-Fi / Bluetooth faulty"],
+    [{ issues: ["fingerprint"] }, "fingerprint sensor faulty"],
+    [{ issues: ["vibration"] }, "vibration faulty"],
+  ];
+  for (const [over, said] of cases) {
+    const o = buildOffer(priced({ faultCount: 0, repair: null, condition: cond(over) }));
+    const why = `No fault recorded (${said}) — record it to price the repair.`;
+    assert.equal(o.repair.nothingToRepair, false, said);
+    assert.equal(o.repair.amount, null, said);
+    assert.equal(o.repair.why, why, "the staff refurb panel's words");
+    assert.equal(o.actions.repair, why, said);
+    // decide() is told there is a repair to weigh: no quote yet, so no verdict — never "a straight trade-in".
+    assert.equal(o.recommendation, "cannot_say", said);
+    assert.notEqual(o.headline, "Nothing to repair — a straight trade-in", said);
+    const c = customerAnswer(o.answer);
+    assert.ok(c.ready, said);
+    if (!c.ready) continue;
+    assert.equal(c.headline, "Your offer", said);
+    assert.equal(c.repair.nothingToRepair, false, said);
+    assert.deepEqual(c.lines.find((l) => l.key === "repair"), { key: "repair", text: "or repair it — the advisor will quote the price", note: null, amount: null }, said);
+    assert.equal(c.grade?.note, said, "the grade line names the defect");
+    // The trade-in doesn't move: the same market price and we pay as the phone with nothing wrong.
+    assert.equal(o.swap.tradeIn, CARD_QUOTE.amount, said);
+    assert.equal(o.swap.wePay, buildOffer(priced({ faultCount: 0, repair: null })).swap.wePay, said);
+  }
+  // Looks only (scratches, scuffs, dents, a bent frame) are the grade's: still nothing to repair.
+  for (const over of [{ screen: "scratched" }, { body: "scuffed" }, { body: "dented" }, { body: "bent" }] as Partial<ConditionAnswers>[]) {
+    const o = buildOffer(priced({ faultCount: 0, repair: null, condition: cond(over) }));
+    assert.equal(o.repair.nothingToRepair, true, JSON.stringify(over));
+    assert.equal(o.headline, "Nothing to repair — a straight trade-in", JSON.stringify(over));
+  }
+  // An outside quote on file prices it as before.
+  const quoted = buildOffer(priced({ faultCount: 0, condition: cond({ powersOn: false }), manualRepair: { amount: 9_000, reason: "Board repair" }, repair: repairFor([], "none", { amount: 9_000, reason: "Board repair" }) }));
+  assert.equal(quoted.repair.amount, 9_000);
+  assert.equal(quoted.repair.why, null);
+  // A decision stored before this rule ("Nothing to repair") is not used for such a phone.
+  const stale = priced({ faultCount: 0, repair: null });
+  const o = buildOffer({ ...stale, condition: cond({ powersOn: false }) });
+  assert.equal(stale.decision!.recommendation, "no_repair");
+  assert.equal(o.recommendation, null);
+  assert.equal(o.headline, "Not enough to compare yet");
+  const c = customerAnswer(o.answer);
+  assert.ok(c.ready && c.headline === "Your offer" && c.lines.some((l) => l.key === "repair"));
 });
 
 test("offer 3b: a desk-only case (no test applied) never says a test found or measured anything", () => {

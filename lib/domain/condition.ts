@@ -114,6 +114,11 @@ export const ISSUE_LABEL: Record<IssueId, string> = {
   vibration: "Vibration faulty",
   liquid: "Signs of liquid damage",
 };
+/**
+ * A label read mid-sentence: "Touch not responding" → "touch not responding". A first word with
+ * more capitals is a name and stays as written: "Wi-Fi / Bluetooth faulty", never "wi-Fi".
+ */
+export const lowerFirst = (s: string): string => (s && !/[A-Z]/.test(s.split(" ")[0].slice(1)) ? s[0].toLowerCase() + s.slice(1) : s);
 export const AGE_LABEL: Record<AgeBand, string> = {
   lt3m: "Under 3 months",
   "3to11m": "3 – 11 months",
