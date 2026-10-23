@@ -12,12 +12,12 @@ const cond = (over: Partial<ConditionAnswers> = {}): ConditionAnswers => ({ ...H
 /** The S23 Ultra 256GB with a cracked screen on a dented body. */
 const CRACKED_DENTED = cond({ screen: "cracked", body: "dented" });
 
-/** F1's case, as buildOffer maps it: partner quote ₹25,000, the S26 Ultra suggested at 4% bonus, repair ₹34,096. */
+/** F1's case, as buildOffer maps it: the partner's card at grade C, ₹25,000 with nothing taken off (answer.server.test.ts withF1Card), the S26 Ultra suggested at 4% bonus, repair ₹34,096. */
 function f1(over: Partial<AnswerInput> = {}): AnswerInput {
   return {
     status: "quoted",
     condition: CRACKED_DENTED,
-    market: { amount: 25_000, source: "partner_manual", priceGrade: null },
+    market: { amount: 25_000, source: "partner_ratecard", priceGrade: "Fair", gradePrice: 25_000 },
     quoteExpired: false,
     quoteBlocked: false,
     repair: { amount: 34_096, covered: false, coverage: "none", nothingToRepair: false },
@@ -107,7 +107,7 @@ const F5 = {
 const F6 = {
   ...F1,
   text: null,
-  market: { ...F1.market, source: "partner_manual" },
+  market: { ...F1.market, source: "partner_ratecard" },
   premium: { amount: 1000, bp: 400, rule: "2026-10-18.1" },
   bonus: { amount: 6199, bp: 400 },
   newPhone: { label: "Galaxy S26 Ultra 256GB", price: 154999 },
@@ -166,7 +166,7 @@ test("answer F2: no price yet — one sentence for the customer, never half an o
 
 test("answer F3 + F10: traded in — the locked figures, 'We paid you', the bonus with the phone, no repair line, and final", () => {
   // The quote JSON has moved on since; the locked figures win.
-  const a = buildAnswer(f1({ status: "locked", market: { amount: 99_999, source: "partner_manual", priceGrade: null }, locked: LOCKED }));
+  const a = buildAnswer(f1({ status: "locked", market: { amount: 99_999, source: "partner_ratecard", priceGrade: "Fair", gradePrice: 25_000 }, locked: LOCKED }));
   assert.deepEqual(customerAnswer(a), F3);
   assert.deepEqual(a.staffNotes, F10_STAFF_NOTES);
   assert.equal(a.final, true);
@@ -189,7 +189,8 @@ test("answer: a case locked before premiums (premium_value NULL) — we paid the
 test("answer F4: a covered repair — 'or repair it free — covered by warranty' (or Care+) at ₹0, and the headline says so", () => {
   const input = f1({
     condition: cond({ screen: "lines_or_spots" }),
-    market: { amount: 30_000, source: "partner_ratecard", priceGrade: null },
+    // A card row with only its top price: offer.ts passes it as grade A's (priceGrade "Superb").
+    market: { amount: 30_000, source: "partner_ratecard", priceGrade: "Superb" },
     repair: { amount: 0, covered: true, coverage: "warranty", nothingToRepair: false },
     newPhone: null,
     bonus: null,
@@ -202,7 +203,16 @@ test("answer F4: a covered repair — 'or repair it free — covered by warranty
 });
 
 test("answer F5: nothing to repair, no campaign — grade, market and we pay only", () => {
-  const a = buildAnswer(f1({ condition: cond(), repair: { amount: null, covered: false, coverage: "none", nothingToRepair: true }, bonus: null, bonusWhy: "No bonus campaign today.", recommendation: "no_repair" }));
+  const a = buildAnswer(
+    f1({
+      condition: cond(),
+      market: { amount: 25_000, source: "partner_ratecard", priceGrade: "Superb", gradePrice: 25_000 },
+      repair: { amount: null, covered: false, coverage: "none", nothingToRepair: true },
+      bonus: null,
+      bonusWhy: "No bonus campaign today.",
+      recommendation: "no_repair",
+    }),
+  );
   assert.deepEqual(customerAnswer(a), F5);
   assert.equal(a.staffNotes.bonus, "No bonus campaign today.", "no bonus: the staff note is Offer.swap.bonusWhy");
 });
@@ -523,4 +533,21 @@ test("the market note's words read as a sum for a dead phone and dead calls", ()
   const c = priceFromCard(PER_GRADE, "galaxy-s23-ultra", "256GB", calls);
   if (c.status !== "priced") return assert.fail("priced");
   assert.match(buildAnswer(f1({ condition: calls, market: fromQuote(c) })).lines.find((l) => l.key === "market")!.note ?? "", / for calls not working$/);
+});
+
+test("a typed price (an older build's partner_manual) names no grade on a damaged phone — SU-AND-00020's shape", () => {
+  const locked = buildAnswer(
+    f1({
+      status: "locked",
+      condition: cond({ screen: "cracked", body: "back_cracked" }),
+      market: { amount: 18_888, source: "partner_manual", priceGrade: null },
+      locked: { trade: 18_888, premium: 755, premiumBp: 400, bonus: 3_449, payable: 91_907 },
+    }),
+  );
+  const m = locked.lines.find((l) => l.key === "market")!;
+  assert.deepEqual([locked.lines[0].text, m.text, m.note], ["Current grade A", "Market price ₹18,888", null]);
+  assert.equal(locked.market!.letter, null);
+  // Nothing to take off: the typed price IS the phone's grade price.
+  const clean = buildAnswer(f1({ condition: cond({ body: "scuffed" }), market: { amount: 30_000, source: "partner_manual", priceGrade: null } }));
+  assert.equal(clean.lines.find((l) => l.key === "market")!.text, "Market price for grade B ₹30,000");
 });

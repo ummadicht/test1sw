@@ -653,7 +653,8 @@ test("the answer through buildOffer: the owner's lines for the case on the count
   const o = buildOffer(
     priced({
       condition: { ...HEALTHY, issues: [], screen: "cracked", body: "dented", accessories: { charger: true, box: false, bill: false }, age: "gt11m" },
-      quote: { status: "priced", amount: 25_000, source: { kind: "partner_manual" }, partnerRef: "QX-1" },
+      // The partner's card at grade C, ₹25,000 with nothing taken off (answer.server.test.ts withF1Card).
+      quote: { status: "priced", amount: 25_000, source: { kind: "partner_ratecard" }, partnerRef: null, grade: "Fair", lines: [{ label: "Market price grade C · Week 41 (test)", amount: 25_000 }] },
     })
   );
   assert.deepEqual(
@@ -668,6 +669,9 @@ test("the answer through buildOffer: the owner's lines for the case on the count
   );
   assert.equal(o.answer.ready, true);
   assert.deepEqual(o.answer.staffNotes, { market: null, we_pay: "Includes ₹1,000 SwapUp premium (4%).", bonus: "Upgrade bonus · 4%" });
+  // A price typed on an older build for the same damaged phone names no grade: nobody knows its grade price.
+  const typed = buildOffer(priced({ condition: { ...HEALTHY, issues: [], screen: "cracked", body: "dented", accessories: { charger: true, box: false, bill: false }, age: "gt11m" }, quote: { status: "priced", amount: 25_000, source: { kind: "partner_manual" }, partnerRef: "QX-1" } }));
+  assert.equal(typed.answer.lines.find((l) => l.key === "market")!.text, "Market price ₹25,000");
   // F6's swap block.
   assert.deepEqual([o.swap.tradeIn, o.swap.premium, o.swap.wePay, o.swap.total, o.swap.customerPays], [25_000, { amount: 1_000, bp: 400 }, 26_000, 32_199, 1_22_800]);
 });

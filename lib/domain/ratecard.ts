@@ -202,7 +202,7 @@ export function priceFromCard(card: RateCard, modelId: string, variant: string, 
     : { label: "Best-condition price on the rate card", amount: ceiling };
   // A grade's own price is what the partner pays, used exactly (W42: grade B ₹33,574, not ₹33,570);
   // the card's cash step rounds only a price the card worked out — one with something taken off.
-  const rules = at && !parts.length ? { ...card, roundTo: 1 } : card;
+  const rules = !parts.length ? { ...card, roundTo: 1 } : card;
   const out = combineDeductions({ ceiling, start: ceiling, lines: [base], parts, rules });
   return { status: "priced", ceiling, ...out, ...(at ? { grade: at.grade } : {}) };
 }

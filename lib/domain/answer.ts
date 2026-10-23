@@ -218,7 +218,11 @@ export function buildAnswer(i: AnswerInput): Answer {
   // one priced it: then the line names no grade, and staff read which it was.
   const lower = !!i.market?.priceGrade && !!word && i.market.priceGrade !== word;
   const pricedAt = i.market?.priceGrade ?? word;
-  const named = word && pricedAt === word ? word : null;
+  // A price with no grade of its own (a quote typed before 0.9.1) is for the phone as it is: it names
+  // the grade only when the phone has nothing to take off — never "for grade A" on a damaged phone whose
+  // grade-A price nobody knows (SU-AND-00020: a typed ₹18,888 against the card's grade A ₹61,390).
+  const graded = !!i.market?.priceGrade || !note;
+  const named = word && pricedAt === word && graded ? word : null;
   // Something taken off the grade's own price (a defect, no charger, age): the note is the sum —
   // "₹34,960 less ₹5,250 for back glass cracked" — so the grade, its price and M always add up.
   const gradePrice = i.market?.gradePrice ?? null;

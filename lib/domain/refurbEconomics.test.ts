@@ -54,6 +54,8 @@ type Case = {
   upgrade?: boolean;
   refurbCost?: { amount: number; by: string } | null;
   quote?: OfferQuote | null;
+  /** The customer's outside repair quote on file (the desk's Repair step). */
+  manual?: { amount: number; reason: string; by: string } | null;
 };
 
 /** One case at the counter, through the answer, then the refurb decision. */
@@ -70,7 +72,8 @@ function run(c: Case): { e: RefurbEconomics; offer: ReturnType<typeof buildOffer
           : { status: "unpriced", amount: null, source: { kind: "none" }, partnerRef: null, reason: r.reason };
     }
   }
-  const repair = c.faults.length ? estimateRepair({ book: BOOK, modelId: S23U, faults: c.faults, coverage: c.coverage ?? "none", policy: POLICY }) : null;
+  const repair =
+    c.faults.length || c.manual ? estimateRepair({ book: BOOK, modelId: S23U, faults: c.faults, coverage: c.coverage ?? "none", policy: POLICY, manual: c.manual ?? null }) : null;
   const up = c.upgrade === false ? null : S26U;
   const input: OfferInput = {
     status: "quoted",
@@ -309,12 +312,20 @@ test("a defect with no fault recorded (no power, liquid, a dead display): never 
   for (const over of [{ powersOn: false }, { issues: ["liquid" as const] }, { screen: "not_working" as const }]) {
     const { e } = run({ condition: cond(over), faults: [] });
     assert.equal(e.repairCost.amount, null, JSON.stringify(over));
-    assert.match(e.repairCost.why ?? "", /^Bench check needed \(.+\) — enter the store's repair cost\.$/, JSON.stringify(over));
+    assert.match(e.repairCost.why ?? "", /^No fault recorded \(.+\) — record it to price the repair\.$/, JSON.stringify(over));
     assert.equal(e.postRepair.amount, null, JSON.stringify(over));
-    assert.match(e.postRepair.why ?? "", /^No fault recorded for .+ — the repaired price can't be worked out\.$/, JSON.stringify(over));
+    assert.match(e.postRepair.why ?? "", /^No fault recorded \(.+\) — record it to work out the repaired price\.$/, JSON.stringify(over));
     assert.deepEqual([e.uplift.amount, e.uplift.verdict], [null, null], JSON.stringify(over));
     assert.ok(e.preRefurb.amount !== null, "the trade-in itself is still priced");
   }
   // No defect and no fault is still nothing to repair.
   assert.equal(run({ condition: cond({ screen: "scratched", body: "scuffed" }), faults: [] }).e.uplift.verdict, "nothing_to_repair");
+});
+
+test("an outside repair quote on file still counts when no fault is ticked — the panel just has no repaired price", () => {
+  const { e } = run({ condition: cond({ powersOn: false }), faults: [], manual: { amount: 6_000, reason: "Service centre quote, by Ravi", by: "Ravi" } });
+  assert.equal(e.repairCost.amount, 6_000);
+  assert.equal(e.repairCost.basis, "estimate");
+  assert.equal(e.postRepair.amount, null);
+  assert.equal(e.uplift.verdict, null);
 });
