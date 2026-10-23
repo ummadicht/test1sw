@@ -18,7 +18,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -102,7 +102,14 @@ after(() => {
 });
 
 type Kind = "ok" | "crash" | "api-fails" | "install-fails";
-/** A build as deploy.sh ships it: package.json, .next/BUILD_ID, deploy/start.sh — and a server that behaves as `kind`. */
+let builds = 0;
+/**
+ * A build as deploy.sh ships it: package.json, .next/BUILD_ID, deploy/start.sh — and a server that behaves as `kind`.
+ * Each build has its own build time, a minute after the one before, as real builds made at different times do.
+ * deploy.sh ships with rsync, whose quick check skips a file with the same size and the same whole-second mtime as
+ * the one already there; these builds differ only in same-size text ("v1"/"v2", "1.0.0"/"2.0.0"), so two written
+ * within the same second (a fast test before) shipped nothing new and the build before kept answering (SUP-98).
+ */
 function build(id: string, version: string, kind: Kind): string {
   const dir = join(T, "builds", id);
   mkdirSync(join(dir, ".next"), { recursive: true });
@@ -125,6 +132,8 @@ createServer((req, res) => {
 }).listen(Number(process.env.PORT), "127.0.0.1");
 `
   );
+  const at = new Date(Date.UTC(2026, 0, 1) + ++builds * 60_000);
+  for (const f of readdirSync(dir, { recursive: true, encoding: "utf8" })) utimesSync(join(dir, f), at, at);
   return dir;
 }
 
