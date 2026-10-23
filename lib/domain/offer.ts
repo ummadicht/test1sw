@@ -137,8 +137,9 @@ export type Offer = {
 /**
  * A what-if trade-in price for one storage size, kept on the case only while its storage is
  * unknown. `note`: the PriceIQ quote's age / unreachable note (PriceiqMeta.note), else absent.
+ * `priceiqWhy`: unpriced, why PriceIQ had no price while it is connected (the quote's own), else absent.
  */
-export type StorageQuote = { variant: string; amount: number | null; reason: string | null; note?: string | null };
+export type StorageQuote = { variant: string; amount: number | null; reason: string | null; note?: string | null; priceiqWhy?: string | null };
 
 /** The partner quote, as much of it as the answer reads (lib/server/buyback.ts PartnerQuote fits). */
 export type OfferQuote = {
@@ -245,8 +246,13 @@ const NOTHING_RECORDED = "No faults on the case.";
 const CHOOSE_NEW_PHONE = "Choose the new phone.";
 const CUSTOMER_STORAGE_NOTE = "Customer typed this — check Settings › About phone.";
 const NOTHING_TO_REPAIR = "Nothing to repair.";
-/** A defect in the condition with no fault recorded for it (answer.ts unrecordedDefect) — the staff refurb panel's words too. */
-export const noFaultRecorded = (defects: string) => `No fault recorded (${defects}) — record it to price the repair.`;
+/**
+ * A defect in the condition with no fault recorded for it (answer.ts unrecordedDefect) — the staff
+ * refurb panel's words too. The service centre's quote is the one way that is true for every defect:
+ * Wi-Fi, fingerprint, vibration and a dead display have no fault to record, and the faults no power,
+ * liquid and calls add are priced on the bench, never by the book (SUP-96).
+ */
+export const noFaultRecorded = (defects: string) => `No fault recorded (${defects}) — enter the service centre's quote.`;
 const CHOOSE_PHONE = "Choose the phone first.";
 const TAP_STORAGE = "Tap the storage to see the trade-in.";
 const EXPIRED_NOTE = "Quote expired — re-quoting.";
@@ -293,16 +299,33 @@ function tradeInDetail(q: OfferQuote): NonNullable<Offer["swap"]["tradeInDetail"
 
 /* ─────────────────────────── the answer ─────────────────────────── */
 
+/**
+ * Nothing to repair: no fault recorded, no outside quote, and no defect in the condition either. No
+ * fault but a defect (no power, a dead display, liquid, Wi-Fi…) is something to repair that nothing
+ * prices yet — never "Nothing to repair" (SUP-96). reprice() tells decide() the same.
+ */
+export function nothingToRepairOn(faultCount: number, manualRepair: unknown, condition: ConditionAnswers | null): boolean {
+  return faultCount === 0 && !manualRepair && !unrecordedDefect(faultCount, condition);
+}
+
+/**
+ * The case's stored decision as every screen reads it (the answer, the case view, the case lists):
+ * one saved before SUP-96 that called a phone with a defect but no fault "Nothing to repair — a
+ * straight trade-in" is not used. The next re-price decides again.
+ */
+export function currentDecision<D extends Pick<Decision, "recommendation">>(decision: D | null, nothingToRepair: boolean): D | null {
+  return decision?.recommendation === "no_repair" && !nothingToRepair ? null : decision;
+}
+
 export function buildOffer(i: OfferInput): Offer {
   const open = i.status === "draft" || i.status === "quoted";
   const device = i.device;
   const variant = device?.variant ?? null;
-  // No fault recorded, but the condition has a defect (no power, a dead display, liquid…): something
-  // to repair that nothing prices yet — never "Nothing to repair" (SUP-96). The trade-in doesn't move.
+  // No fault recorded, but the condition has a defect: the trade-in doesn't move; the repair needs the
+  // service centre's quote, asked for like any other repair nothing prices.
   const unrecorded = unrecordedDefect(i.faultCount, i.condition ?? null);
-  const nothingToRepair = i.faultCount === 0 && !i.manualRepair && !unrecorded;
-  // A decision stored before that rule said "Nothing to repair" for such a phone: not used.
-  const decision = i.decision?.recommendation === "no_repair" && !nothingToRepair ? null : i.decision;
+  const nothingToRepair = nothingToRepairOn(i.faultCount, i.manualRepair, i.condition ?? null);
+  const decision = currentDecision(i.decision, nothingToRepair);
 
   // ── The refurb quote ──
   const r = i.repair;
@@ -323,8 +346,11 @@ export function buildOffer(i: OfferInput): Offer {
       detail = parts.length ? parts.join(" + ") : null;
     }
   }
-  const repairWhy =
-    repairAmount !== null ? null : nothingToRepair ? NOTHING_TO_REPAIR : !device ? CHOOSE_PHONE : unrecorded ? noFaultRecorded(unrecorded) : (repairNote ?? NO_REPAIR_PRICE);
+  // Why nothing prices the repair, said once (the tile, the ask, the refusal): another brand's outside
+  // quote first — recording a fault never prices a brand this centre doesn't repair — then the defect
+  // no fault says, then the estimate's note.
+  const unpricedWhy = unrecorded ? (i.repairNotServiced ?? noFaultRecorded(unrecorded)) : (repairNote ?? NO_REPAIR_PRICE);
+  const repairWhy = repairAmount !== null ? null : nothingToRepair ? NOTHING_TO_REPAIR : !device ? CHOOSE_PHONE : unpricedWhy;
 
   // ── Trade-in + bonus ──
   const q = i.quote;
@@ -353,13 +379,14 @@ export function buildOffer(i: OfferInput): Offer {
               : (i.conditionProblems[0] ?? (!i.hasCondition ? NO_CONDITION : NO_TRADE_IN))));
   // Nothing at the counter will price it (SUP-32): the quote's reason is final — or, the storage not
   // chosen yet, every size's — so the customer is told so, not "working out your price" all visit.
+  // A PriceIQ why beside the card's is never final (ratecard.ts finalNoPrice): it may answer next time.
   const cantPrice =
     open &&
     !!device &&
     !i.quoteBlocked &&
     (variant
-      ? !!q && q.status !== "priced" && !i.quoteExpired && finalNoPrice(q.reason)
-      : !unlisted && !!i.storageQuotes?.length && i.storageQuotes.every((s) => s.amount === null && finalNoPrice(s.reason)));
+      ? !!q && q.status !== "priced" && !i.quoteExpired && finalNoPrice(q)
+      : !unlisted && !!i.storageQuotes?.length && i.storageQuotes.every((s) => s.amount === null && finalNoPrice(s)));
   const up = i.upgrade;
   const b = up ? i.bonus : null;
   const bonus = b ? (b.override?.amount ?? b.amount) : null;
@@ -408,8 +435,9 @@ export function buildOffer(i: OfferInput): Offer {
     // Nothing priced it: the reason, said once under the title — no form, no button.
     if (device && variant && !i.quoteBlocked && q && q.status !== "priced")
       asks.push({ kind: "no_price", title: ASK_TITLE.no_price, text: noPriceWhy(q.reason) ?? REQUOTE_FOR_WHY });
-    if (device && !nothingToRepair && repairAmount === null && (r?.status === "needs_inspection" || r?.status === "unpriced" || (!r && i.repairNotServiced)))
-      asks.push({ kind: "repair_quote", title: ASK_TITLE.repair_quote, text: repairNote ?? NO_REPAIR_PRICE });
+    // A defect no fault records is quoted the same way: the desk's and the app's quote form, one tap away.
+    if (device && !nothingToRepair && repairAmount === null && (unrecorded || r?.status === "needs_inspection" || r?.status === "unpriced" || (!r && i.repairNotServiced)))
+      asks.push({ kind: "repair_quote", title: ASK_TITLE.repair_quote, text: unpricedWhy });
     if (device && !up) asks.push({ kind: "new_phone", title: ASK_TITLE.new_phone, text: i.newPhoneMatch ? NO_NEW_PHONE : NEW_PHONE_TEXT });
   }
 

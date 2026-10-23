@@ -329,7 +329,8 @@ test("device status: a defect with no fault recorded (no power, liquid, Wi-Fi) �
       assert.equal(v.decision!.recommendation, "cannot_say", at);
       assert.equal(v.offer!.repair.nothingToRepair, false, at);
       assert.equal(v.offer!.repair.why, v.refurbEconomics!.repairCost.why, "the answer and the staff refurb panel say the same");
-      assert.match(v.offer!.repair.why ?? "", /^No fault recorded \(.+\) — record it to price the repair\.$/, at);
+      assert.match(v.offer!.repair.why ?? "", /^No fault recorded \(.+\) — enter the service centre's quote\.$/, at);
+      assert.ok(v.offer!.asks.some((a) => a.kind === "repair_quote"), "the quote the customer is promised is asked for");
       const a = sessions.deviceStatus(t.ticket).answer!;
       assert.ok(a.ready, at);
       if (!a.ready) continue;
@@ -343,6 +344,104 @@ test("device status: a defect with no fault recorded (no power, liquid, Wi-Fi) �
       assert.equal(recorded.offer!.answer.wePay, v.offer!.answer.wePay, at);
     }
   });
+});
+
+test("SUP-96 review: a Bluetooth fail alone (no SwapUp fault exists for it) — the desk asks for the service centre's quote, its Repair step opens the form, and the quote prices the repair", async () => {
+  const { repairStep, stepDone } = await import("../../components/counter/caseSteps.ts");
+  await withF1Card(async () => {
+    // The customer's own Check test fails Bluetooth: Apply puts "Wi-Fi / Bluetooth faulty" on the condition, no fault.
+    const t = await testedCase({ results: { bluetooth: "fail" } });
+    const healthy = { ...COND, screen: "flawless", body: "flawless", issues: ["wifi_bt"], accessories: { charger: true, box: true, bill: true }, age: "lt3m" };
+    const v = await cases.updateCase(adv, t.caseId, { modelId: "galaxy-s23-ultra", variant: "256GB", condition: healthy, upgradeDeviceId: S26U_256 });
+    assert.deepEqual(v.faults, []);
+    assert.deepEqual(v.condition?.issues, ["wifi_bt"]);
+    assert.equal(v.quote?.status, "priced");
+    const why = "No fault recorded (Wi-Fi / Bluetooth faulty) — enter the service centre's quote.";
+    // The answer card: the one ask, its button goes to the Repair quote page — no "record it" with nothing to record.
+    assert.deepEqual(v.offer!.asks.filter((a) => a.kind === "repair_quote"), [{ kind: "repair_quote", title: "The repair needs a quote", text: why }]);
+    assert.equal(v.offer!.repair.why, why);
+    assert.equal(v.offer!.actions.repair, why);
+    // The same page's Repair step: the quote form, never "Nothing to repair", and not ticked.
+    const step = repairStep(v);
+    assert.deepEqual({ headline: step.headline, form: step.form }, { headline: "Needs the service centre's quote", form: "needed" });
+    assert.equal(stepDone(v, "repair"), false);
+    assert.ok(!JSON.stringify(v.offer).includes("Nothing to repair"));
+    const before = sessions.deviceStatus(t.ticket).answer!;
+    assert.ok(before.ready);
+    if (before.ready) assert.equal(before.lines.find((l) => l.key === "repair")?.text, "or repair it — the advisor will quote the price");
+    // The advisor enters the centre's quote (the desk's and the app's form send this PATCH): the repair is priced.
+    const q = await cases.updateCase(adv, t.caseId, { manualRepair: { amount: 2_000, reason: "Bench diagnosis at the service centre" } });
+    assert.equal(q.offer!.repair.amount, 2_000);
+    assert.equal(q.offer!.repair.why, null);
+    assert.ok(!q.offer!.asks.some((a) => a.kind === "repair_quote"));
+    assert.equal(repairStep(q).amount, 2_000);
+    assert.equal(stepDone(q, "repair"), true);
+    assert.notEqual(q.decision?.recommendation, "no_repair");
+    assert.equal(q.quote?.amount, v.quote?.amount, "the trade-in doesn't move");
+    const a = sessions.deviceStatus(t.ticket).answer!;
+    assert.ok(a.ready);
+    if (a.ready) assert.equal(a.lines.find((l) => l.key === "repair")?.text, "or repair it for ₹2,000");
+  });
+});
+
+test("SUP-96 review: a case saved before the rule ('Nothing to repair' for a phone with a defect) — the case view and the case list never say 'Straight trade-in'", async () => {
+  const t = await testedCase();
+  await withF1Card(async () => {
+    const v = await cases.updateCase(adv, t.caseId, { modelId: "galaxy-s23-ultra", variant: "256GB", faults: [], condition: { ...COND, screen: "flawless", body: "flawless", powersOn: false }, upgradeDeviceId: S26U_256 });
+    assert.equal(v.decision?.recommendation, "cannot_say");
+    // What 0.9.2 stored for it: decide() was told nothing to repair.
+    const stored = { ...v.decision!, recommendation: "no_repair", headline: "Nothing to repair — a straight trade-in", missing: [] };
+    db().prepare(`UPDATE cases SET decision = ? WHERE id = ?`).run(JSON.stringify(stored), v.id);
+    const g = cases.getCase(adv, v.id);
+    assert.equal(g.decision, null, "the view's decision is the answer's: the stale one is not used");
+    assert.equal(g.offer!.recommendation, null);
+    const row = cases.listCases(adv, { q: g.ref }).find((r) => r.id === v.id)!;
+    assert.equal(row.recommendation, null, "the list doesn't label it 'Straight trade-in'");
+    // A phone with nothing wrong keeps its stored decision.
+    db().prepare(`UPDATE cases SET condition = ? WHERE id = ?`).run(JSON.stringify({ ...COND, screen: "flawless", body: "flawless" }), v.id);
+    assert.equal(cases.listCases(adv, { q: g.ref }).find((r) => r.id === v.id)!.recommendation, "no_repair");
+    assert.equal(cases.getCase(adv, v.id).decision?.recommendation, "no_repair");
+  });
+});
+
+test("SUP-32 review: a card active that doesn't list the phone while PriceIQ is down — 'working out', never 'can't be priced'; PriceIQ back prices it", async () => {
+  const t = await testedCase();
+  uploadRateCard(partner, {
+    label: "Week 42 (test, 256GB only)",
+    effectiveFrom: "2026-10-12",
+    quoteValidityDays: 3,
+    csv: "model_id,variant,max_price\ngalaxy-s23-ultra,256GB,40000\n",
+    deductions: ZERO,
+    activate: true,
+  });
+  connectPriceiq();
+  resetPriceiqState();
+  fake.mode = "down";
+  try {
+    const off = await cases.updateCase(adv, t.caseId, { modelId: "galaxy-s23-ultra", variant: "512GB", faults: ["screen_cracked"], condition: COND });
+    assert.equal(off.quote?.status, "unpriced");
+    assert.equal(off.quote?.reason, "This phone isn't on the rate card yet.");
+    assert.match(off.quote?.priceiqWhy ?? "", /HTTP 503/);
+    assert.deepEqual(sessions.deviceStatus(t.ticket).answer, { ready: false, final: false, text: "The advisor is working out your price.", test: true });
+    // The storage not chosen, on a phone the card lists at no size: every chip unpriced, PriceIQ down for each — still not final.
+    const chips = await cases.updateCase(adv, t.caseId, { modelId: "galaxy-z-fold6", variant: null });
+    const ask = chips.offer!.asks.find((a) => a.kind === "storage");
+    assert.ok(ask && ask.kind === "storage" && ask.options.length > 1 && ask.options.every((o) => o.tradeIn === null), JSON.stringify(ask));
+    assert.deepEqual(sessions.deviceStatus(t.ticket).answer, { ready: false, final: false, text: "The advisor is working out your price.", test: true });
+    await cases.updateCase(adv, t.caseId, { modelId: "galaxy-s23-ultra", variant: "512GB" });
+    // PriceIQ back: the same phone is priced.
+    fake.mode = "ok";
+    fake.phones.set("Galaxy S23 Ultra|512", S23U_256);
+    resetPriceiqState();
+    const back = await cases.updateCase(adv, t.caseId, { variant: "512GB" });
+    assert.equal(back.quote?.status, "priced");
+    assert.equal(back.quote?.source.kind, "priceiq");
+  } finally {
+    fake.mode = "ok";
+    fake.phones.delete("Galaxy S23 Ultra|512");
+    resetPriceiqState();
+    db().prepare(`UPDATE rate_cards SET active = 0`).run();
+  }
 });
 
 test("device status: priced, then locked — the same lines as the desk, read only (no PriceIQ call, no write), and nothing leaks", async () => {

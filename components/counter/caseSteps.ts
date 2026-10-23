@@ -24,6 +24,7 @@
  * everything from lib/server is a type only.
  */
 import { AGE_LABEL, BODY_LABEL, FAULT_BY_ID, SCREEN_LABEL, type ConditionAnswers, type PartId } from "../../lib/domain/condition.ts";
+import { unrecordedDefect } from "../../lib/domain/answer.ts";
 import { inr } from "../../lib/domain/money.ts";
 import type { RepairEstimate } from "../../lib/domain/repair.ts";
 import type { CaseView } from "../../lib/server/cases.ts";
@@ -142,7 +143,8 @@ export function stepDone(v: DoneView, id: StepId): boolean {
       // A fault ticked (or "nothing wrong") fills the trade-in condition; it is done once that is consistent.
       return v.condition !== null && v.conditionProblems.length === 0;
     case "repair":
-      return v.repair?.status === "quoted" || (v.faults.length === 0 && !v.manualRepair && v.condition !== null);
+      // No fault and a defect in the condition (no power, Wi-Fi…) is a repair still to quote, not "nothing to repair".
+      return v.repair?.status === "quoted" || (v.faults.length === 0 && !v.manualRepair && v.condition !== null && !unrecordedDefect(0, v.condition));
     case "tradein":
       return v.quote?.status === "priced" && v.quote.amount !== null && !v.quoteExpired && !!v.upgrade;
     default:
@@ -294,6 +296,10 @@ export function repairStep(v: RepairInput): RepairStep {
   }
   if (v.repairNotServiced)
     return { amount: null, headline: "Needs the customer's outside quote", line: v.repairNotServiced, form: "needed", sources: ["outside"] };
+  // A defect in the condition with no fault recorded (no power, liquid, a dead display, Wi-Fi…): the
+  // answer asks for the service centre's quote (offer.ts, SUP-96), so this is where it is entered.
+  const unrecorded = unrecordedDefect(v.faults.length, v.condition);
+  if (unrecorded) return { amount: null, headline: "Needs the service centre's quote", line: `No fault recorded (${unrecorded}).`, form: "needed", sources: ["bench", "job_sheet"] };
   if ((v.faults.length === 0 && !v.manualRepair) || r?.status === "nothing_to_repair")
     return {
       amount: null,

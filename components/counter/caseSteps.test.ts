@@ -36,6 +36,8 @@ const COND: ConditionAnswers = {
   accessories: { charger: true, box: false, bill: false },
   age: "gt11m",
 };
+/** Nothing wrong but the looks (scuffs are the grade's, never a repair). */
+const LOOKS_ONLY: ConditionAnswers = { ...COND, screen: "flawless", issues: [] };
 const DEVICE = { modelId: "m_s23u", brand: "Samsung", model: "Galaxy S23 Ultra", series: "S", variant: "256GB", releaseYear: 2023, supportEndYear: 2030, ageYears: 3 };
 const SOURCE = { kind: "oem_public" as const, label: "Samsung India list price, excl. GST & labour (premium colour / max storage)", url: "https://example.invalid/price" };
 
@@ -207,7 +209,10 @@ test("done: storage chosen; condition consistent; repair priced or nothing to re
   assert.equal(stepDone(view(), "phone"), true);
   assert.equal(stepDone(view({ conditionProblems: ["Screen is recorded better than the faults allow."] }), "faults"), false);
   assert.equal(stepDone(view({ condition: null, faults: [] }), "faults"), false);
-  assert.equal(stepDone(view({ faults: [], repair: null }), "repair"), true, "nothing wrong — just trading in");
+  assert.equal(stepDone(view({ faults: [], repair: null, condition: LOOKS_ONLY }), "repair"), true, "nothing wrong — just trading in");
+  // No fault ticked, but the condition has a defect (cracked, battery; Wi-Fi alone): a repair still to quote (SUP-96).
+  assert.equal(stepDone(view({ faults: [], repair: null }), "repair"), false);
+  assert.equal(stepDone(view({ faults: [], repair: null, condition: { ...LOOKS_ONLY, issues: ["wifi_bt"] } }), "repair"), false);
   assert.equal(stepDone(view({ repair: OWNERS_SCREEN }), "repair"), false);
   assert.equal(stepDone(view({ quoteExpired: true }), "tradein"), false);
   assert.equal(stepDone(view(), "answer"), false, "the answer is a choice, never ticked");
@@ -287,7 +292,7 @@ test("a quote typed in, a centre that doesn't repair the brand, nothing to repai
   const elsewhere = repairStep(view({ repairNotServiced: "This centre repairs Samsung phones only. Enter the customer's own repair quote to compare.", repair: null }));
   assert.equal(elsewhere.headline, "Needs the customer's outside quote");
   assert.deepEqual(elsewhere.sources, ["outside"]);
-  assert.equal(repairStep(view({ faults: [], repair: null })).headline, "Nothing to repair");
+  assert.deepEqual(repairStep(view({ faults: [], repair: null, condition: LOOKS_ONLY })), { amount: null, headline: "Nothing to repair", line: "A straight trade-in.", form: null, sources: [] });
   assert.equal(repairStep(view({ device: null })).headline, "Choose the phone first");
 });
 
@@ -299,6 +304,26 @@ test("one amount field and a source: the server gets whole rupees and a reason i
   assert.equal(repairQuoteProblem("600000"), "Whole rupees only.");
   assert.equal(repairQuoteProblem("12000"), null);
   for (const s of ["bench", "job_sheet", "outside"] as const) assert.ok(repairQuotePatch("1", s)!.manualRepair.reason.length >= 8);
+});
+
+test("a defect with no fault recorded (Wi-Fi, fingerprint, a dead display, no power): never 'Nothing to repair' — the service centre's quote form, as the answer asks (SUP-96)", () => {
+  const cases: [Partial<ConditionAnswers>, string][] = [
+    [{ issues: ["wifi_bt"] }, "No fault recorded (Wi-Fi / Bluetooth faulty)."],
+    [{ issues: ["fingerprint"] }, "No fault recorded (fingerprint sensor faulty)."],
+    [{ screen: "not_working" }, "No fault recorded (screen not working)."],
+    [{ powersOn: false }, "No fault recorded (doesn't switch on)."],
+  ];
+  for (const [over, line] of cases) {
+    const s = repairStep(view({ faults: [], repair: null, condition: { ...LOOKS_ONLY, ...over } }));
+    assert.deepEqual(s, { amount: null, headline: "Needs the service centre's quote", line, form: "needed", sources: ["bench", "job_sheet"] }, line);
+  }
+  // Another brand: the customer's outside quote, as before — never "record a fault".
+  const elsewhere = repairStep(view({ faults: [], repair: null, condition: { ...LOOKS_ONLY, powersOn: false }, repairNotServiced: "This centre repairs Samsung only — enter the customer's outside quote." }));
+  assert.equal(elsewhere.headline, "Needs the customer's outside quote");
+  // The quote entered: its figure, done.
+  const typed = view({ faults: [], repair: estimate({ basis: "manual", lines: [], labour: 0, gst: 0, customerPays: 2000, listTotal: null }), condition: { ...LOOKS_ONLY, issues: ["wifi_bt"] }, manualRepair: { amount: 2000, reason: "Bench diagnosis at the service centre", by: "Rahul Desai" } as never });
+  assert.equal(repairStep(typed).amount, 2000);
+  assert.equal(stepDone(typed, "repair"), true);
 });
 
 /* ─────────────────────────── the page ─────────────────────────── */

@@ -24,8 +24,8 @@ import { estimateRepair, type Coverage, type ManualQuote, type RepairEstimate, t
 import { bestCampaign, type BonusResult, type Campaign } from "../domain/bonus";
 import { decide, type Decision } from "../domain/decision";
 import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
-import { buildOffer, EXPIRED_BLOCKER, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
-import { customerAnswer, unrecordedDefect, TYPED_PRICE_NOTE, type CustomerAnswer } from "../domain/answer";
+import { buildOffer, currentDecision, nothingToRepairOn, EXPIRED_BLOCKER, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
+import { customerAnswer, TYPED_PRICE_NOTE, type CustomerAnswer } from "../domain/answer";
 import { refurbDecisionShown, refurbEconomics, type RefurbEconomics } from "../domain/refurbEconomics";
 import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } from "../domain/premium";
 import { RuleError } from "../domain/errors";
@@ -588,7 +588,8 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     repairedQuote: parseJson<PartnerQuote | null>(c.repaired_quote, null),
     upgrade: parseJson<UpgradeChoice | null>(c.upgrade, null),
     bonus: parseJson<BonusApplied | null>(c.bonus, null),
-    decision: parseJson<Decision | null>(c.decision, null),
+    // The answer's own decision: a stored "Nothing to repair" from before SUP-96 for a phone with a defect is not used.
+    decision: currentDecision(parseJson<Decision | null>(c.decision, null), nothingToRepairOn(faults.length, parseJson<ManualQuote | null>(c.manual_repair, null), condition)),
     checks: parseJson<Checks | null>(c.checks, null),
     tradeValue: c.trade_value,
     premiumValue: c.premium_value,
@@ -854,7 +855,11 @@ export function listCases(
   return rows.map((r) => {
     const cust = parseJson<Customer | null>(r.customer, null);
     const up = parseJson<UpgradeChoice | null>(r.upgrade, null);
-    const dec = parseJson<Decision | null>(r.decision, null);
+    // The answer's decision, as the case page reads it (offer.ts currentDecision): never a stale "Straight trade-in".
+    const dec = currentDecision(
+      parseJson<Decision | null>(r.decision, null),
+      nothingToRepairOn(parseJson<FaultId[]>(r.faults, []).length, parseJson<ManualQuote | null>(r.manual_repair, null), parseJson<ConditionAnswers | null>(r.condition, null))
+    );
     return {
       id: r.id,
       ref: r.ref,
@@ -1568,7 +1573,14 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
         sizes.map(async (v) => {
           const w = await tradeInQuote({ partnerId, modelId: tm.id, variant: v, brand: tm.brand, model: tm.model, answers: condition, whatIf: true });
           const priced = w.status === "priced" && w.amount !== null;
-          return { variant: v, amount: priced ? w.amount : null, reason: priced ? null : (w.reason ?? null), ...(priced && w.priceiq?.note ? { note: w.priceiq.note } : {}) };
+          return {
+            variant: v,
+            amount: priced ? w.amount : null,
+            reason: priced ? null : (w.reason ?? null),
+            ...(priced && w.priceiq?.note ? { note: w.priceiq.note } : {}),
+            // Why PriceIQ had no price for this size, while it is connected: then no chip's "no price" is final (SUP-32).
+            ...(!priced && w.priceiqWhy ? { priceiqWhy: w.priceiqWhy } : {}),
+          };
         })
       );
       storageQuotes = out.length ? out : null;
@@ -1625,8 +1637,8 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
     upgrade: upgrade ? { label: upgrade.label, newPrice: upgrade.price, bonus: bonusAmount, supportEndYear: upgrade.supportEndYear } : null,
     old: { ageYears: tm?.release_year ? Math.max(0, thisYear() - tm.release_year) : null, supportEndYear: tm?.support_end_year ?? null },
     thisYear: thisYear(),
-    // A defect in the condition with no fault recorded is something to repair (answer.ts unrecordedDefect).
-    nothingToRepair: faults.length === 0 && !manual && !unrecordedDefect(faults.length, condition),
+    // A defect in the condition with no fault recorded is something to repair (offer.ts nothingToRepairOn).
+    nothingToRepair: nothingToRepairOn(faults.length, manual, condition),
     faultCount: faults.length,
     systemicFault: faults.some((f) => ["water_damage", "no_power", "no_network", "frame_damage"].includes(f)),
     swollenBattery: faults.includes("battery_swollen"),

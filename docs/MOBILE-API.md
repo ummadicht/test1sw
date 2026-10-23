@@ -661,7 +661,7 @@ a Check the phone tap, the storage) re-grades and re-prices the case before it a
 
 | status | ready | final | lines | customer text when not ready |
 | --- | --- | --- | --- | --- |
-| `draft` / `quoted` | a market price from the **partner** (`partner_manual` or `partner_ratecard`), not lapsed, not blocked | false | grade, market, we_pay, bonus, repair | "The advisor is working out your price." — or, for a PriceIQ estimate, "The advisor is confirming your price." (staff note: "Estimate from the refurbished market — not shown to the customer."); when nothing can price the phone here — the quote's reason is "This phone isn't on the rate card yet." or "No rate card is active yet." (storage not chosen: every size's), not blocked, not lapsed — "This phone can't be priced for trade-in here yet — the advisor will explain." (SUP-32; staff `lines` keep grade and repair) |
+| `draft` / `quoted` | a market price from the **partner** (`partner_manual` or `partner_ratecard`), not lapsed, not blocked | false | grade, market, we_pay, bonus, repair | "The advisor is working out your price." — or, for a PriceIQ estimate, "The advisor is confirming your price." (staff note: "Estimate from the refurbished market — not shown to the customer."); when nothing can price the phone here — the quote's reason is "This phone isn't on the rate card yet." or "No rate card is active yet." with no `priceiqWhy` beside it (storage not chosen: every size's), not blocked, not lapsed — "This phone can't be priced for trade-in here yet — the advisor will explain." (SUP-32; staff `lines` keep grade and repair). A `priceiqWhy` (PriceIQ connected but timed out, down, or without a listing) is never final: "working out" |
 | traded (`locked` … `not_received`) | true | true | grade, market, we_pay, bonus — from `trade_value`, `premium_value`, `bonus_value` | — |
 | `repair_chosen` | true | true | grade, repair | — |
 | `walked_away` | as the partner's price allows | true | as last worked out | "This case is closed." |
@@ -699,7 +699,7 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
 | `model` | "Which phone is it?" | "The test couldn't tell — choose it on the full case." (no test was applied to the case: "Choose it on the full case.") | no model on the case |
 | `storage` | "Which storage is it?" | "The phone couldn't measure it — see Settings › About phone." — only when a test ran and the phone read nothing. No test applied (a desk-only case), or the phone measured a size on the list that is no longer on the case: "See Settings › About phone › Storage." The phone measured a size that ISN'T on the model's list (`measuredStorage`, e.g. a 1TB Ultra on file as 256/512GB): "Phone measures 1TB, not on file — no trade-in price for that size." | a model, no storage. `options`: the what-if trade-in for each size, smallest size first, priced the way the trade-in itself will be (PriceIQ less defects, else the rate card — so the chip and the answer agree) (`tradeIn: null` when nothing prices that size, or none could be asked yet — e.g. the condition is incomplete). `note` is the first priced chip's market-data note (its age over 14 days, or "PriceIQ unreachable, last answer …"), else null — show it under the chips. **`options: []` when the phone measured an off-list size:** every listed size is one the phone has ruled out, so none is offered (and no what-if prices are asked) — show the text only: no button, no entry, never a guessed size. |
 | `no_price` | "No market price yet" | `quote.reason` (the specific why: "This phone isn't on the rate card yet.", PriceIQ's own why, or "No rate card is active yet.") ?? "No market price yet." | model + storage, not blocked, the quote is unpriced or errored. **Text only** — no button, no sheet: nothing is typed in. Swap up stays refused with the same reason; Repair and "Customer walked away" stay choosable. (0.9.0 sent `partner_quote` here; installed apps drop the kind they don't know.) |
-| `repair_quote` | "The repair needs a quote" | the first `repair.notes` entry, or `repairNotServiced` (fallback "No book price — enter the service centre's quote.") | a model, something to repair, and the book can't price it (`needs_inspection` / `unpriced` / brand not serviced) |
+| `repair_quote` | "The repair needs a quote" | the first `repair.notes` entry, or `repairNotServiced` (fallback "No book price — enter the service centre's quote."); no fault recorded but a defect in the condition → `repairNotServiced`, else "No fault recorded (…) — enter the service centre's quote." | a model, something to repair, and the book can't price it (`needs_inspection` / `unpriced` / brand not serviced / a defect no fault records — SUP-96) |
 | `new_phone` | "Choose the new phone" | "No catalogue match — choose one to see the bonus." (the catalogue does have one — staff cleared the suggestion, or none ran on a desk-only case: "Choose the new phone to see the bonus.") | a model and no new phone (the suggestion found none: e.g. an iPhone at a Samsung centre) |
 
 - **`headline`:** the title of the first ask that isn't `new_phone`; else `decision.headline`; else
@@ -713,9 +713,10 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
   `Quote: ${reason}`; a book estimate → every line label joined with " + ", then "+ labour" if
   labour > 0, "+ GST" if GST > 0, "+ Care+ fee" if that fee > 0 (e.g. "Display assembly + labour + GST").
 - **`repair.why`** (only when `amount` is null): "Nothing to repair."; "Choose the phone first.";
-  no fault recorded but the condition has a defect → "No fault recorded (doesn't switch on) — record
-  it to price the repair." (the staff refurb panel's words); otherwise the repair note, or
-  `repairNotServiced`, else "No book price — enter the service centre's quote."
+  no fault recorded but the condition has a defect → `repairNotServiced` when the centre doesn't
+  repair the brand, else "No fault recorded (doesn't switch on) — enter the service centre's quote."
+  (the staff refurb panel's words); otherwise the repair note, or `repairNotServiced`, else "No book
+  price — enter the service centre's quote."
 - **`swap.tradeIn`** is null whenever the trade-in can't be trusted — the camera blocks it, there is
   no model, or no storage — even if an older priced quote is still stored.
 - **`swap.tradeInDetail`:** show `line` (when there is one) under the trade-in, then a closed "Show
@@ -786,9 +787,13 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
   frame, no power, no calls and liquid add nothing; a patch that sends `faults` is taken as sent.
   A defect that adds no fault (no power, no calls, liquid, a dead display, Wi-Fi / Bluetooth,
   fingerprint, vibration) is still something to repair (SUP-96): with no fault recorded,
-  `repair.nothingToRepair` is false, `repair.why` is "No fault recorded (…) — record it to price the
-  repair.", decide() gets no "Nothing to repair" (so `cannot_say` until the repair is quoted) and the
-  customer reads "or repair it — the advisor will quote the price". The trade-in doesn't move.
+  `repair.nothingToRepair` is false, `repair.why` is "No fault recorded (…) — enter the service
+  centre's quote.", the `repair_quote` ask is there (the app's "Enter the repair quote", the desk's
+  Repair quote form — Wi-Fi, fingerprint, vibration and a dead display have no fault to record),
+  decide() gets no "Nothing to repair" (so `cannot_say` until the repair is quoted; a decision stored
+  before as `no_repair` for such a phone is not used — `decision` on the case view and the list's
+  `recommendation` are null until the next re-price) and the customer reads "or repair it — the
+  advisor will quote the price". The trade-in doesn't move.
   A fault whose only source is `condition` is the condition's to take back: a later `{condition}`
   patch that no longer names it removes it (cracked tapped by mistake, then `flawless` → no fault;
   `cracked` then `lines_or_spots` → `display_lines`), and it doesn't hold the condition editor's

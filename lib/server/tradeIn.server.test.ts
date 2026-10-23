@@ -412,7 +412,7 @@ test("SUP-29: a cracked screen set on the condition alone ticks its fault — th
   const old = await cases.reprice(advisor, c.id, { requote: true });
   // With no fault the crack is still something to repair (SUP-96): the advisor quotes it — never "Nothing to repair".
   assert.equal(old.offer!.repair.nothingToRepair, false, "no fault recorded, yet the condition says cracked");
-  assert.equal(old.offer!.repair.why, "No fault recorded (screen cracked) — record it to price the repair.");
+  assert.equal(old.offer!.repair.why, "No fault recorded (screen cracked) — enter the service centre's quote.");
   assert.equal(v.quote?.status, "priced");
   assert.equal(v.quote?.amount, old.quote?.amount);
   assert.deepEqual(v.quote?.lines, old.quote?.lines);

@@ -182,9 +182,13 @@ export const NOT_ON_CARD = "This phone isn't on the rate card yet.";
 export const NO_RATE_CARD = "No rate card is active yet.";
 /**
  * No price, and nothing at the counter will give one: the active card doesn't list the phone, or no
- * card is active (SUP-32). PriceIQ's own reasons are not final — it may answer on the next ask.
+ * card is active (SUP-32) — and PriceIQ can't answer either. PriceIQ's own reasons are not final (it
+ * timed out, was down, had no listing this week: it may answer on the next ask), so a quote that
+ * carries one (`priceiqWhy`, kept only while PriceIQ is connected — lib/server/tradeIn.ts
+ * withoutOffNote) is never final, whatever the card says.
  */
-export const finalNoPrice = (reason: string | null | undefined): boolean => reason === NOT_ON_CARD || reason === NO_RATE_CARD;
+export const finalNoPrice = (q: { reason?: string | null; priceiqWhy?: string | null } | null | undefined): boolean =>
+  !!q && (q.reason === NOT_ON_CARD || q.reason === NO_RATE_CARD) && !q.priceiqWhy;
 
 export function findEntry(card: RateCard, modelId: string, variant: string): RateEntry | null {
   return card.entries.find((e) => e.modelId === modelId && e.variant === variant) ?? null;
