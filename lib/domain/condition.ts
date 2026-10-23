@@ -12,6 +12,10 @@
  * and the CONDITION it implies. The advisor confirms the condition answers, and
  * may make them worse (a scuffed frame no fault mentions) but `conditionFloor`
  * reports any answer that is better than the faults allow, so the UI can refuse.
+ * A worse answer that IS a repairable defect (a cracked screen, a faulty speaker)
+ * brings its fault with it (`faultsNamedByCondition`), so the repair quote and the
+ * trade-in describe the same phone whichever list staff edited — and takes it back
+ * when the answer is changed again (`withConditionFaults`).
  *
  * The condition dimensions follow the shape buyback partners in India price on
  * (switches on / calls / screen / body / functional issues / accessories / age).
@@ -218,6 +222,59 @@ export function conditionFloor(answers: ConditionAnswers, faults: FaultId[]): st
   for (const i of floor.issues)
     if (!answers.issues.includes(i)) problems.push(`"${ISSUE_LABEL[i]}" is a fault but not in the condition.`);
   return problems;
+}
+
+/**
+ * THE CONDITION NAMES ITS FAULT. Staff edit the condition (owner, 2026-10-19: "edit only
+ * conditions"), and a defect recorded there is one a repair fixes: a screen recorded "Cracked
+ * glass" is a cracked screen to the repair side too, never "Nothing to repair". Each answer below
+ * is the one fault whose only implication is that answer (`implies`), so adding the fault moves
+ * nothing on the trade-in: the condition already said it. Looks only (scratches, scuffs, dents), a
+ * bent frame, and what only a bench can price (no power, no calls, liquid) name no fault here.
+ */
+const SCREEN_FAULT: Partial<Record<ScreenState, FaultId>> = { lines_or_spots: "display_lines", cracked: "screen_cracked" };
+const BODY_FAULT: Partial<Record<BodyState, FaultId>> = { back_cracked: "back_cracked" };
+const ISSUE_FAULT: Partial<Record<IssueId, FaultId>> = {
+  touch: "touch_issue",
+  battery: "battery_drain",
+  charging: "charging_issue",
+  rear_camera: "rear_camera",
+  front_camera: "front_camera",
+  speaker: "speaker",
+  mic: "mic",
+  buttons: "buttons",
+};
+
+/**
+ * The faults the condition records that the faults don't: each defect answer worse than the
+ * faults imply, as its fault (SCREEN_FAULT / BODY_FAULT / ISSUE_FAULT), in that order. Empty when
+ * every defect on the condition already comes from a fault.
+ */
+export function faultsNamedByCondition(answers: ConditionAnswers, faults: FaultId[]): FaultId[] {
+  const floor = conditionFromFaults(faults, answers);
+  const out: FaultId[] = [];
+  const add = (f: FaultId | undefined) => {
+    if (f && !faults.includes(f) && !out.includes(f)) out.push(f);
+  };
+  if (SCREEN_ORDER.indexOf(answers.screen) > SCREEN_ORDER.indexOf(floor.screen)) add(SCREEN_FAULT[answers.screen]);
+  if (BODY_ORDER.indexOf(answers.body) > BODY_ORDER.indexOf(floor.body)) add(BODY_FAULT[answers.body]);
+  for (const i of answers.issues) if (!floor.issues.includes(i)) add(ISSUE_FAULT[i]);
+  return out;
+}
+
+/**
+ * The case's faults after a condition edit: what the answers name (faultsNamedByCondition) is added.
+ * `fromCondition` are the faults only an earlier condition edit named (fault source "condition",
+ * gradeiqMap.ts faultsAfterConditionEdit): each stays while the answers still name it and goes when
+ * they don't, so "Cracked glass" tapped by mistake is undone by tapping the right answer. Every other
+ * fault stays — a condition edit never removes what staff, a test or the camera recorded. The same
+ * array back when nothing moves.
+ */
+export function withConditionFaults(faults: FaultId[], answers: ConditionAnswers, fromCondition: readonly FaultId[] = []): FaultId[] {
+  const standing = fromCondition.length ? faults.filter((f) => !fromCondition.includes(f)) : faults;
+  const named = faultsNamedByCondition(answers, standing);
+  const next = [...faults.filter((f) => standing.includes(f) || named.includes(f)), ...named.filter((f) => !faults.includes(f))];
+  return next.length === faults.length && next.every((f, i) => f === faults[i]) ? faults : next;
 }
 
 /**

@@ -560,3 +560,95 @@ test("/api/imei/read: nothing found → 422 not_found; the reader off, no key, s
   assert.equal((await read({})).status, 400);
   assert.equal((await read({ photo: PHOTO }, {}, partner)).status, 403);
 });
+
+/* ─────────────────────────── SUP-35: the IMEI first on the desk ─────────────────────────── */
+
+const casesRoute = await import("../../app/api/cases/route.ts");
+const desk = await import("../../components/counter/imeiFirst.ts");
+
+/** The desk's fetch (lib/client/api.ts), served by the REAL route handlers, as the advisor. */
+const deskCall: import("../../components/counter/imeiFirst.ts").Call = async <T,>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> => {
+  const method = opts.method ?? (opts.body === undefined ? "GET" : "POST");
+  const req = new Request(`http://x${path}`, { method, headers: { "content-type": "application/json" }, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) });
+  const id = /^\/api\/cases\/([^/]+)$/.exec(path)?.[1];
+  const ctx = { params: Promise.resolve({ id: decodeURIComponent(id ?? "") }) };
+  const res = await asUser(adv, () =>
+    path === "/api/cases" && method === "POST"
+      ? casesRoute.POST(req)
+      : path === "/api/imei/read"
+        ? readRoute.POST(req)
+        : id && method === "PATCH"
+          ? caseRoute.PATCH(req, ctx)
+          : id
+            ? caseRoute.GET(req, ctx)
+            : Promise.reject(new Error(`no route for ${method} ${path}`))
+  );
+  const data = (await res.json()) as { error?: string };
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data as T;
+};
+const sessionsFor = (caseId: string) => (db().prepare(`SELECT COUNT(*) AS n FROM test_sessions WHERE case_id = ?`).get(caseId) as { n: number }).n;
+
+test("desk New trade-in: Read the screen → Start (POST /api/cases → the app's PATCH {imei, imei2}) → the case shows the IMEI's model and GSMA's word before any test", async () => {
+  const [imei, imei2] = [imeiOn(S23U), imeiOn(S23U)];
+  fake.infos.set(imei, { imei, brand: "Samsung", model: "Galaxy S23 Ultra", modelNumber: "SM-S918B", blacklist: "clean", source: "gsma" });
+  fake.ocr = { imei, imei2, error: null };
+  const read = desk.readImeiRead(await withGiq(() => deskCall("/api/imei/read", { body: { photo: PHOTO } })));
+  assert.deepEqual(read, { imei, imei2, valid: true });
+  const before = imeiCalls().length;
+  const r = await withGiq(() => desk.startCase(deskCall, { customerName: "Meera Iyer", customerPhone: "9820012345", imei: { imei: read!.imei, imei2: read!.imei2 }, caseId: null }));
+  assert.equal(r.error, null);
+  const v = cases.getCase(adv, r.caseId!);
+  assert.deepEqual([v.customer?.name, v.customer?.phone, v.imei, v.imei2, v.imeiCheck], ["Meera Iyer", "9820012345", imei, imei2, "valid"]);
+  assert.deepEqual([v.device?.modelId, v.modelSource, v.device?.variant], ["galaxy-s23-ultra", "imei", null]);
+  assert.deepEqual(desk.imeiFound(v), { line: "Galaxy S23 Ultra · not blacklisted (GSMA)", tone: "up", modelFromImei: true, warnings: [], stop: null });
+  assert.equal(imeiCalls().length, before + 1, "one paid lookup, for IMEI 1");
+  assert.equal(sessionsFor(r.caseId!), 0, "all of it before any test");
+});
+
+test("desk New trade-in: an IMEI already traded in is warned at once; a blacklisted one opens on the stop; a bad check digit is kept but never looked up (never paid for)", async () => {
+  // Already on a trade-in: said the moment the desk's case opens.
+  const imei = imeiOn(S23U);
+  const a = fresh();
+  await cases.updateCase(adv, a.id, { modelId: "galaxy-s23-ultra", variant: "256GB", imei, faults: ["screen_cracked"], condition: COND, upgradeDeviceId: S26U_256 });
+  const locked = cases.lockTradeIn(adv, a.id, { customer: CUSTOMER, checks: CHECKS });
+  const dup = await desk.startCase(deskCall, { customerName: "", customerPhone: null, imei: { imei, imei2: null }, caseId: null });
+  assert.deepEqual(desk.imeiFound(cases.getCase(adv, dup.caseId!)).warnings, [`This IMEI is already on trade-in ${locked.ref}.`]);
+
+  // GSMA says blacklisted: the case opens on the stop; no test can start.
+  const stolen = imeiOn(S23U);
+  fake.infos.set(stolen, { imei: stolen, brand: "Samsung", model: "Galaxy S23 Ultra", modelNumber: "SM-S918B", blacklist: "blacklisted", source: "gsma" });
+  const s = await withGiq(() => desk.startCase(deskCall, { customerName: "", customerPhone: null, imei: { imei: stolen, imei2: null }, caseId: null }));
+  const sv = cases.getCase(adv, s.caseId!);
+  const found = desk.imeiFound(sv);
+  assert.deepEqual([found.line, found.tone, found.stop], ["Galaxy S23 Ultra · reported lost or stolen (GSMA)", "bad", desk.STOP_GSMA]);
+  assert.equal((await handle(() => sessions.createTestSession(adv, { caseId: s.caseId! }))).status, 409);
+
+  // A check digit that fails: the form warns; recorded anyway it is saved as typed, never looked up.
+  const good = imeiOn(S23U);
+  const bad = good.slice(0, 14) + String((Number(good[14]) + 1) % 10);
+  assert.deepEqual(desk.imeiEntry(bad), { imei: bad, warn: desk.BAD_CHECK_DIGIT, problem: desk.BAD_CHECK_START });
+  const entry = desk.imeiEntry(bad, true);
+  const n = fake.calls.length;
+  const m = await withGiq(() => desk.startCase(deskCall, { customerName: "", customerPhone: null, imei: { imei: entry.imei!, imei2: null }, caseId: null }));
+  const mv = cases.getCase(adv, m.caseId!);
+  assert.deepEqual([mv.imei, mv.imeiCheck, mv.imeiLookup, mv.device], [bad, "invalid", null, null]);
+  assert.equal(desk.imeiFound(mv).line, desk.NOT_LOOKED_UP);
+  assert.equal(fake.calls.length, n, "a check-digit failure is never paid for");
+});
+
+test("desk New trade-in: a failed IMEI save keeps the case it opened; Start again saves the customer and the IMEI on it — never a second case", async () => {
+  const count = () => (db().prepare(`SELECT COUNT(*) AS n FROM cases`).get() as { n: number }).n;
+  const n0 = count();
+  const twin = imeiOn(S23U);
+  // IMEI 1 the same as IMEI 2: the server's 400, said on the form.
+  const r = await desk.startCase(deskCall, { customerName: "Asha", customerPhone: null, imei: { imei: twin, imei2: twin }, caseId: null });
+  assert.equal(r.error, "IMEI 2 can't be the same as IMEI 1.");
+  assert.ok(r.caseId);
+  assert.equal(count(), n0 + 1);
+  const again = await desk.startCase(deskCall, { customerName: "Asha Rao", customerPhone: "9820012345", imei: { imei: twin, imei2: null }, caseId: r.caseId });
+  assert.deepEqual(again, { caseId: r.caseId, error: null });
+  assert.equal(count(), n0 + 1, "never a second case");
+  const v = cases.getCase(adv, r.caseId!);
+  assert.deepEqual([v.customer?.name, v.customer?.phone, v.imei, v.device?.modelId], ["Asha Rao", "9820012345", twin, "galaxy-s23-ultra"]);
+});

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pctOf, inr, roundDown, fmtBp } from "./money.ts";
 import { readImei, luhnValid, maskImei } from "./imei.ts";
-import { conditionFromFaults, conditionFloor, healedCondition, partsForFaults, type ConditionAnswers } from "./condition.ts";
+import { FAULT_BY_ID, conditionFromFaults, conditionFloor, faultsNamedByCondition, healedCondition, partsForFaults, withConditionFaults, type ConditionAnswers, type FaultId } from "./condition.ts";
 import { priceFromCard, linesSum } from "./ratecard.ts";
 import { estimateRepair } from "./repair.ts";
 import { computeBonus, validateCampaign, bestCampaign, type BonusContext } from "./bonus.ts";
@@ -55,6 +55,50 @@ test("condition: healing undoes only what repaired faults implied", () => {
   assert.equal(h.screen, "flawless");
   assert.equal(h.body, "scuffed"); // never better than scuffed
   assert.deepEqual(h.issues, ["battery", "speaker"]); // not repaired, not healed
+});
+
+test("condition names its fault (SUP-29): a crack, lines or a cracked back set on the condition alone is a fault to repair", () => {
+  const healthy: ConditionAnswers = { powersOn: true, calls: true, screen: "flawless", body: "flawless", issues: [], ...ACC };
+  assert.deepEqual(faultsNamedByCondition({ ...healthy, screen: "cracked" }, []), ["screen_cracked"]);
+  assert.deepEqual(faultsNamedByCondition({ ...healthy, screen: "lines_or_spots" }, []), ["display_lines"]);
+  assert.deepEqual(faultsNamedByCondition({ ...healthy, body: "back_cracked" }, []), ["back_cracked"]);
+  assert.deepEqual(faultsNamedByCondition({ ...healthy, screen: "cracked", body: "back_cracked", issues: ["speaker"] }, []), ["screen_cracked", "back_cracked", "speaker"]);
+  // Already a fault (or worse than the condition says): nothing to add, and the same list back.
+  const f = ["screen_cracked"] as const;
+  assert.deepEqual(faultsNamedByCondition({ ...healthy, screen: "cracked" }, [...f]), []);
+  const same = [...f];
+  assert.equal(withConditionFaults(same, { ...healthy, screen: "cracked" }), same);
+  // Lines on file, the condition says cracked: the crack is physical damage the warranty won't cover — added.
+  assert.deepEqual(faultsNamedByCondition({ ...healthy, screen: "cracked" }, ["display_lines"]), ["screen_cracked"]);
+  // A swollen battery already explains "battery": no second battery fault.
+  assert.deepEqual(faultsNamedByCondition({ ...conditionFromFaults(["battery_swollen"], ACC) }, ["battery_swollen"]), []);
+  // Looks, a bent frame, and what only a bench can price name no fault.
+  assert.deepEqual(faultsNamedByCondition({ ...healthy, screen: "scratched", body: "dented" }, []), []);
+  assert.deepEqual(faultsNamedByCondition({ ...healthy, body: "bent", powersOn: false, calls: false, issues: ["liquid", "wifi_bt", "fingerprint", "vibration"] }, []), []);
+  // Each fault named implies exactly the answer that named it: the trade-in condition doesn't move.
+  for (const c of [{ ...healthy, screen: "cracked" as const }, { ...healthy, screen: "lines_or_spots" as const }, { ...healthy, body: "back_cracked" as const }, { ...healthy, issues: ["battery", "buttons", "charging", "front_camera", "mic", "rear_camera", "speaker", "touch"] as ConditionAnswers["issues"] }]) {
+    const faults = withConditionFaults([], c);
+    assert.ok(faults.length > 0);
+    assert.deepEqual(conditionFloor(c, faults), [], "consistent: the condition already says what the faults imply");
+    assert.deepEqual(conditionFromFaults(faults, c), c, "the faults imply exactly this condition");
+    for (const id of faults) assert.ok(FAULT_BY_ID[id].part, `${id} is priced by the book`);
+  }
+});
+
+test("condition takes back its own fault (SUP-29 review): a fault only the condition named goes when the answer changes; nothing else does", () => {
+  const healthy: ConditionAnswers = { powersOn: true, calls: true, screen: "flawless", body: "flawless", issues: [], ...ACC };
+  // "Cracked glass" tapped by mistake, then the right answer: the crack goes with it.
+  assert.deepEqual(withConditionFaults(["screen_cracked"], { ...healthy, screen: "flawless" }, ["screen_cracked"]), []);
+  // Cracked, then "Lines / spots": the one fault swapped for the other.
+  assert.deepEqual(withConditionFaults(["screen_cracked"], { ...healthy, screen: "lines_or_spots" }, ["screen_cracked"]), ["display_lines"]);
+  // Still named: kept, in place, and the same array back.
+  const same: FaultId[] = ["mic", "screen_cracked"];
+  assert.equal(withConditionFaults(same, { ...healthy, screen: "cracked", issues: ["mic"] }, ["screen_cracked"]), same);
+  // An issue chip off takes its fault; another issue's fault stays.
+  assert.deepEqual(withConditionFaults(["speaker", "mic"], { ...healthy, issues: ["mic"] }, ["speaker", "mic"]), ["mic"]);
+  // A fault from anywhere else (the fault list, a test, the camera) is never the condition's to remove.
+  assert.deepEqual(withConditionFaults(["screen_cracked"], { ...healthy, screen: "flawless" }, []), ["screen_cracked"]);
+  assert.deepEqual(withConditionFaults(["screen_cracked", "speaker"], { ...healthy, screen: "cracked" }, ["speaker"]), ["screen_cracked"]);
 });
 
 test("condition: one display fixes crack + lines + touch", () => {

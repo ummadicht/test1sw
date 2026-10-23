@@ -148,6 +148,14 @@ stays as the fallback ("Skip — scan at hand-over").
 `POST /api/test-sessions {customerName, customerPhone}`. Phone-led (counter QR): the same card on the
 Session screen, `PATCH` on the session's existing case.
 
+**The desk** (since SUP-35) takes the same order on `/desk` New trade-in: the IMEI field first (typed,
+with the check-digit warning and "Record it anyway"; or "Read the screen" — a photo through `POST
+/api/imei/read`, confirmed before it is used), then `POST /api/cases` → the same `PATCH {imei, imei2}`.
+The case's Phone step opens with the IMEI on top and what the server found under it before any test:
+the model and GSMA's word ("Galaxy S23 Ultra · not blacklisted (GSMA)", "Blacklist not checked"), the
+`imeiWarnings`, and the stop banner. A failed save keeps the case it opened; Start again saves on it.
+Rules: `components/counter/imeiFirst.ts`.
+
 `POST /api/imei/read` (Bearer, advisor / store manager) — "Read the screen"
 `{ "photo": "data:image/jpeg;base64,…" }` → SwapUp's server sends it to GradeIQ's stateless reader
 (`POST /api/imei/ocr`, ~20 s; never a session's `/ocr`). Nothing is saved: show "Read: 35… — confirm".
@@ -719,6 +727,18 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
   re-quote. A fault or condition change the store camera contradicts is refused 409 with the camera's
   sentence ("Camera confirmed "Cracked screen", photo 2 — removing it needs a reason."); send the same
   patch again with `cameraOverride: {reason}` (8+ characters, kept with the advisor's name) and it saves.
+- **The condition names its fault** (SUP-29) — a `{condition}` patch with no `faults` that records a
+  repairable defect no fault explains adds that fault (source `condition`): screen `cracked` →
+  `screen_cracked`, `lines_or_spots` → `display_lines`, body `back_cracked` → `back_cracked`, and the
+  issues touch / battery / charging / rear or front camera / speaker / mic / buttons → their fault. So
+  the answer prices the repair (or asks for the centre's quote) instead of "Nothing to repair". The
+  trade-in reads the condition only: its price doesn't move. Looks (scratches, scuffs, dents), a bent
+  frame, no power, no calls and liquid add nothing; a patch that sends `faults` is taken as sent.
+  A fault whose only source is `condition` is the condition's to take back: a later `{condition}`
+  patch that no longer names it removes it (cracked tapped by mistake, then `flawless` → no fault;
+  `cracked` then `lines_or_spots` → `display_lines`), and it doesn't hold the condition editor's
+  answers down. Found by a test, Phonecheck or the camera, or ticked on the fault list after it was
+  taken off, a fault has another source and only the fault list removes it.
 - **IMEI** — step 1 (§2d): asked first, on New trade-in (or the Session screen for a counter-QR
   trade-in), resolved once per case; Lock asks for it only when it was skipped.
 
@@ -1201,7 +1221,7 @@ Rules the server enforces:
 - No grade ever comes from anywhere else: no demo grade, no fallback, no switch for one.
   `GRADEIQ_ENABLED=0` is a labelled kill switch (`state: "disabled"`, condition by eye).
 
-Case fields (`GET /api/cases/<id>`): `faultSources` (`{ [faultId]: ("tested"|"declared"|"camera_ai"|"advisor")[] }`),
+Case fields (`GET /api/cases/<id>`): `faultSources` (`{ [faultId]: ("tested"|"phonecheck"|"declared"|"camera_ai"|"advisor"|"condition")[] }`),
 `camera` (what the camera saw, written at Apply: grade, final, floor, faults, suggested, flags, lcd,
 lcdOverride, identity, identityOverride, overrides, devicefax), `certification` (§8b), `quoteBlocked`.
 The DeviceFax JSON (photo URLs on the public GradeIQ origin) is kept on the test session for staff only.

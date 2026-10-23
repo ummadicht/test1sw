@@ -35,6 +35,7 @@ import {
   BODY_ORDER,
   SCREEN_LABEL,
   BODY_LABEL,
+  withConditionFaults,
 } from "./condition.ts";
 import type { Declared, TestOutcome, TestResults } from "./diagnostics.ts";
 
@@ -897,10 +898,13 @@ export function identityBlock(c: Pick<CaseCameraCheck, "identity" | "identityOve
 /**
  * "phonecheck": a fault from a Phonecheck station's test of the phone (cable,
  * desktop app), attached to the case by staff — lib/domain/phonecheck.ts.
+ * "condition": named by a trade-in condition answer alone (a cracked screen set in
+ * the condition editor — condition.ts faultsNamedByCondition). With no other source
+ * it is the condition's to take back: faultsAfterConditionEdit.
  */
-export type FaultSource = "advisor" | "tested" | "phonecheck" | "declared" | "camera_ai";
+export type FaultSource = "advisor" | "tested" | "phonecheck" | "declared" | "camera_ai" | "condition";
 export type FaultSources = Partial<Record<FaultId, FaultSource[]>>;
-const SOURCE_ORDER: FaultSource[] = ["tested", "phonecheck", "declared", "camera_ai", "advisor"];
+const SOURCE_ORDER: FaultSource[] = ["tested", "phonecheck", "declared", "camera_ai", "advisor", "condition"];
 
 /** Add sources; a fault may have several (the phone's test AND the camera). */
 export function addFaultSources(prev: FaultSources, add: { id: FaultId; source: FaultSource }[]): FaultSources {
@@ -919,6 +923,32 @@ export function reconcileFaultSources(prev: FaultSources, faults: FaultId[]): Fa
   const out: FaultSources = {};
   for (const f of faults) out[f] = prev[f]?.length ? [...prev[f]!] : ["advisor"];
   return out;
+}
+
+/**
+ * The faults only the trade-in condition named (source "condition" and nothing else). They don't
+ * hold the condition editor's answers down, and a condition edit that stops naming one removes it.
+ * Ticked on the fault list, found by a test, Phonecheck or the camera, a fault has another source
+ * and stays.
+ */
+export function conditionOnlyFaults(sources: FaultSources, faults: FaultId[]): FaultId[] {
+  return faults.filter((f) => !!sources[f]?.length && sources[f]!.every((s) => s === "condition"));
+}
+
+/**
+ * A condition edit on its own (no fault list sent): the faults it names are added with the source
+ * "condition", the ones only an earlier edit named that it no longer names go
+ * (condition.ts withConditionFaults), and every other fault keeps its sources. The server
+ * (updateCase) and the condition editor's optimistic view both use it. `sources` are the case's
+ * (reconcileFaultSources). The same `faults` array back when nothing moves.
+ */
+export function faultsAfterConditionEdit(faults: FaultId[], sources: FaultSources, answers: ConditionAnswers): { faults: FaultId[]; sources: FaultSources } {
+  const fromCondition = conditionOnlyFaults(sources, faults);
+  const next = withConditionFaults(faults, answers, fromCondition);
+  if (next === faults) return { faults, sources };
+  const out = reconcileFaultSources(sources, next.filter((f) => faults.includes(f) && !fromCondition.includes(f)));
+  for (const f of next) if (!out[f]) out[f] = ["condition"];
+  return { faults: next, sources: out };
 }
 
 /* ─────────────────────────── disagreements (§3.5) ─────────────────────────── */

@@ -112,6 +112,22 @@ test("a fault the phone's own test also found stays when the row changes — and
   assert.equal(b.condition!.screen, "lines_or_spots", "never better than the faults allow");
 });
 
+test("a crack only the condition named, certified Cracked: the advisor's look owns it now — the row's next tap takes it off (SUP-29 review)", () => {
+  const s = state({ faults: ["screen_cracked"], sources: { screen_cracked: ["condition"] }, condition: { ...COND, screen: "cracked" } });
+  const a = ok(certifyRow(s, tap("screen", "cracked")));
+  assert.deepEqual(a.faults, ["screen_cracked"]);
+  assert.deepEqual(a.sources, { screen_cracked: ["advisor"] }, "confirmed by eye: no longer the condition editor's to take back");
+  assert.deepEqual(a.certification.screen?.added, ["screen_cracked"]);
+  assert.deepEqual(a.faultsAdded, [], "it was on the case already");
+  const b = ok(certifyRow(next(s, a), tap("screen", "ok")));
+  assert.deepEqual(b.faults, []);
+  assert.deepEqual(b.faultsRemoved, ["screen_cracked"]);
+  assert.equal(b.condition!.screen, "flawless");
+  // A tap on another row leaves the condition's fault the condition's.
+  const c = ok(certifyRow(s, tap("body", "like_new")));
+  assert.deepEqual(c.sources, { screen_cracked: ["condition"] });
+});
+
 test("the same tap twice changes nothing; the same tap once the colours are showing upgrades it", () => {
   const s0 = state();
   const a = ok(certifyRow(s0, tap("screen", "ok", { withColours: false })));

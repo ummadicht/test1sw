@@ -8,6 +8,8 @@ import { phoneLine } from "./caseSteps";
 import { COVER_LABEL } from "./shared";
 import type { CaseOps, ModelOption } from "./ops";
 import { Imei2Field } from "./Imei2Field";
+import { ImeiResult, ReadTheScreen } from "./ImeiCapture";
+import { imeiPatch } from "./imeiFirst";
 
 const COVER_HINT: Record<keyof typeof COVER_LABEL, string> = {
   none: "Customer pays the full repair.",
@@ -15,7 +17,11 @@ const COVER_HINT: Record<keyof typeof COVER_LABEL, string> = {
   care_plus: "Damage at the claim fee; other faults free.",
 };
 
-/** PHONE — which phone: brand → model → storage, the IMEI, and any cover it has. One line says what is on file. */
+/**
+ * PHONE — which phone: the IMEI first (typed, or "Read the screen"; SUP-35), with what the server
+ * found for it before any test (the model, GSMA's word, an IMEI already traded in), then brand →
+ * model → storage, and any cover it has. One line says what is on file.
+ */
 export function StepPhone({ ops, brands, initialModel }: { ops: CaseOps; brands: string[]; initialModel: ModelOption | null }) {
   const { view, editable, save } = ops;
   const [model, setModel] = useState<ModelOption | null>(initialModel);
@@ -38,6 +44,31 @@ export function StepPhone({ ops, brands, initialModel }: { ops: CaseOps; brands:
       setImei(savedImei);
     }
   }, [savedImei]);
+
+  // The model can arrive from elsewhere — the IMEI names it on save, or a test does: fetch its
+  // sizes so the storage chips show, and close the picker.
+  const deviceId = view.device?.modelId ?? null;
+  const deviceName = view.device ? `${view.device.brand}|${view.device.model}` : null;
+  useEffect(() => {
+    if (!deviceId || !deviceName || model?.id === deviceId) return;
+    let live = true;
+    const [b, m] = deviceName.split("|");
+    api<{ models: ModelOption[] }>(`/api/catalog/models?${new URLSearchParams({ q: m, brand: b })}`)
+      .then((r) => {
+        const found = r.models.find((x) => x.id === deviceId);
+        if (!live || !found) return;
+        setModel(found);
+        setBrand(found.brand);
+        setPicking(false);
+      })
+      .catch(() => {
+        /* the chips come with the next load */
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the case's model changes
+  }, [deviceId, deviceName]);
 
   useEffect(() => {
     if (!picking || !editable) return;
@@ -105,6 +136,13 @@ export function StepPhone({ ops, brands, initialModel }: { ops: CaseOps; brands:
     setImeiErr(e);
   }
 
+  /** A read of the *#06# screen, confirmed: IMEI 1 (and IMEI 2) saved with the store app's PATCH. */
+  async function saveRead(v: { imei: string; imei2: string | null }) {
+    setImei(v.imei);
+    setImeiErr(null);
+    setImeiErr(await save(imeiPatch(v, view.imei)));
+  }
+
   async function pickCover(c: keyof typeof COVER_LABEL) {
     setErr(await save({ coverage: c }, { coverage: c }));
   }
@@ -129,11 +167,62 @@ export function StepPhone({ ops, brands, initialModel }: { ops: CaseOps; brands:
 
   return (
     <StepCard id="step-phone" title="Which phone is it?" line={phoneLine(view)} details={details}>
+      {/* IMEI — first: what the server finds for it shows here, before any test */}
+      <div className="space-y-2">
+        <label className="block" htmlFor="step-phone-imei">
+          <span className="label">IMEI</span>
+        </label>
+        <div className="flex flex-wrap items-start gap-2">
+          <input
+            id="step-phone-imei"
+            className="input num max-w-[260px]"
+            value={imei}
+            onChange={(e) => {
+              const v = e.target.value.replace(/[^\d\s]/g, "");
+              setImei(v);
+              setImeiErr(null);
+            }}
+            onBlur={saveImei}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                saveImei();
+              }
+            }}
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="15 digits"
+            maxLength={18}
+            disabled={!editable}
+            aria-invalid={!!imeiErr || view.imeiCheck === "invalid" || undefined}
+          />
+          {editable ? (
+            <ReadTheScreen
+              onConfirm={saveRead}
+              onMisread={(d) => {
+                setImei(d);
+                setImeiErr(null);
+              }}
+            />
+          ) : null}
+          {view.imeiCheck === "invalid" ? <span className="pill pill-warn self-center">⚠ Re-read the IMEI</span> : null}
+        </div>
+        {imeiErr ? (
+          <span className="hint" style={{ color: "var(--bad)" }}>
+            {imeiErr}
+          </span>
+        ) : null}
+        <ImeiResult view={view} />
+      </div>
+
       {/* Model */}
       {view.device && !picking ? (
         <div className="flex flex-wrap items-center gap-3 justify-between rounded-[12px] border border-line bg-surface-2 px-4 py-3">
-          <div className="min-w-0 text-[18px] font-[720] leading-tight">
-            {view.device.brand} {view.device.model}
+          <div className="min-w-0">
+            <div className="text-[18px] font-[720] leading-tight">
+              {view.device.brand} {view.device.model}
+            </div>
+            {view.modelSource === "imei" ? <div className="text-[13px] text-muted">From the IMEI</div> : null}
           </div>
           {editable ? (
             <button type="button" className="btn btn-sm" onClick={() => setPicking(true)}>
@@ -211,43 +300,6 @@ export function StepPhone({ ops, brands, initialModel }: { ops: CaseOps; brands:
           )}
         </ChipGroup>
       ) : null}
-
-      {/* IMEI */}
-      <div>
-        <label className="block">
-          <span className="label">IMEI</span>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              className="input num max-w-[260px]"
-              value={imei}
-              onChange={(e) => {
-                const v = e.target.value.replace(/[^\d\s]/g, "");
-                setImei(v);
-                setImeiErr(null);
-              }}
-              onBlur={saveImei}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  saveImei();
-                }
-              }}
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="15 digits"
-              maxLength={18}
-              disabled={!editable}
-              aria-invalid={!!imeiErr || view.imeiCheck === "invalid" || undefined}
-            />
-            {view.imeiCheck === "invalid" ? <span className="pill pill-warn">⚠ Re-read the IMEI</span> : null}
-          </div>
-        </label>
-        {imeiErr ? (
-          <span className="hint" style={{ color: "var(--bad)" }}>
-            {imeiErr}
-          </span>
-        ) : null}
-      </div>
 
       {/* Cover */}
       <ChipGroup label="Cover">
