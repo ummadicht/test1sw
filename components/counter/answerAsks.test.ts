@@ -17,6 +17,7 @@ import {
   requotable,
   requoteSpot,
   swapRefusal,
+  swapWhy,
   unlistedSize,
   withCameraReason,
 } from "./answerAsks.ts";
@@ -147,9 +148,17 @@ test("the other asks keep their jump to the step that answers them", () => {
 
 /* ─────────────────────────── the quiet re-quote ─────────────────────────── */
 
-function caseWith(q: { kind: PriceSourceKind; quotedAt?: string } | null, over: Partial<Pick<CaseView, "quoteExpired" | "offer">> = {}): Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer"> {
+// The condition "What's wrong" recorded — the case a re-price can price (cases.ts reprice).
+const RECORDED: CaseView["condition"] = { powersOn: true, calls: true, screen: "flawless", body: "scuffed", issues: [], accessories: { charger: true, box: true, bill: true }, age: "gt11m" };
+
+type RequoteCase = Pick<CaseView, "id" | "quoteExpired" | "quote" | "offer" | "condition" | "conditionProblems" | "quoteBlocked">;
+
+function caseWith(q: { kind: PriceSourceKind; quotedAt?: string } | null, over: Partial<Omit<RequoteCase, "id" | "quote">> = {}): RequoteCase {
   return {
     id: "case_1",
+    condition: RECORDED,
+    conditionProblems: [],
+    quoteBlocked: null,
     quoteExpired: true,
     quote: q
       ? {
@@ -185,7 +194,7 @@ test("an older build's typed quote that ran out is re-quoted by the system too",
 });
 
 test("an unpriced quote on an open case is asked again once on open, expired or not (a rate card uploaded since prices it)", () => {
-  const unpriced = (over: Partial<Pick<CaseView, "quoteExpired" | "offer">> = {}) => {
+  const unpriced = (over: Partial<Omit<RequoteCase, "id" | "quote">> = {}) => {
     const v = caseWith({ kind: "none" }, { quoteExpired: false, ...over });
     return { ...v, quote: { ...v.quote!, status: "unpriced" as const, amount: null, validUntil: null, reason: "No rate card is active yet." } };
   };
@@ -212,6 +221,20 @@ test("storage not known and no chip priced (a rate card uploaded since prices th
   // The phone measured a size not on file: no chips at all, never a guessed one — nothing to ask.
   assert.equal(autoRequoteKey(chips(null, { measuredStorage: "1TB" })), null);
   assert.equal(autoRequoteKey(chips(bare, { status: "walked_away" })), null);
+});
+
+test("no condition recorded yet (a new case before \"What's wrong\"): the chips can't be priced, so no quiet re-quote — and no Re-quote link", () => {
+  // The case as it opens: model known, storage not, nothing recorded — every chip unpriced, nothing a re-price could change.
+  const fresh = (over: Partial<Omit<RequoteCase, "id" | "quote">> = {}) =>
+    caseWith(null, { quoteExpired: false, offer: buildOffer(input({ ...NO_STORAGE, hasCondition: false })), condition: null, ...over });
+  assert.equal(autoRequoteKey(fresh()), null);
+  assert.equal(requotable(fresh()), false);
+  // Nor while what's recorded can't be priced either (cases.ts reprice asks for chips only then): better than the
+  // faults allow, or the camera's identity block.
+  assert.equal(autoRequoteKey(fresh({ condition: RECORDED, conditionProblems: ['Screen "Flawless" — the faults mean at least "Cracked glass".'] })), null);
+  assert.equal(autoRequoteKey(fresh({ condition: RECORDED, quoteBlocked: "The camera says this may not be the phone on the case (IMEI differs)." })), null);
+  // Recorded: the same unpriced chips are asked again once (a rate card uploaded since prices them).
+  assert.equal(autoRequoteKey(fresh({ condition: RECORDED })), "case_1 chips");
 });
 
 test("nothing to re-quote: a fresh priced quote, no quote, a closed case", () => {
@@ -300,6 +323,33 @@ test("no trade-in: the tile's why says it; any other refusal is said once", () =
   assert.equal(swapRefusal(buildOffer(input({ ...NO_STORAGE }))), null);
   assert.equal(swapRefusal(buildOffer(input({ status: "draft" }))), "Not priced yet.");
   assert.equal(swapRefusal(buildOffer(input())), null);
+});
+
+test("a phone not on the rate card (or a measured size not on file): the reason is said ONCE — under the headline, not again in the Swap up tile", async () => {
+  const OFF_CARD = { status: "unpriced" as const, amount: null, source: { kind: "partner_ratecard" as const }, partnerRef: null, reason: "This phone isn't on the rate card yet." };
+  const UNLISTED = "Phone measures 1TB, not on file — no trade-in price for that size.";
+  const shown = [
+    [input({ quote: OFF_CARD }), OFF_CARD.reason],
+    [input({ quote: OFF_CARD, upgrade: null }), OFF_CARD.reason],
+    [input({ ...NO_STORAGE, measuredStorage: "1TB" }), UNLISTED],
+  ] as const;
+  for (const [i, sentence] of shown) {
+    const o = buildOffer(i);
+    assert.equal(o.reason, sentence, "the headline's sentence says it");
+    assert.equal(swapWhy(o), null, "not the tile's why again");
+    assert.equal(swapRefusal(o), null, "nor its refusal");
+    // Everything the card prints in words (AnswerCard): the sentence, the asks (their text dropped when it is the sentence), the tile.
+    const printed = [o.reason, ...o.asks.map((a) => (a.text !== o.reason ? a.text : null)), swapWhy(o), swapRefusal(o)];
+    assert.equal(printed.filter((t) => t === sentence).length, 1, JSON.stringify(printed));
+  }
+  // A why the headline doesn't say is still said, in the tile.
+  assert.equal(swapWhy(buildOffer(input({ ...NO_STORAGE }))), "Tap the storage to see the trade-in.");
+  assert.equal(swapWhy(buildOffer(input({ quote: null, hasCondition: false }))), "Record the condition.");
+  assert.equal(swapWhy(buildOffer(input())), null, "priced: there is a We pay");
+  // The card prints the tile's why only through swapWhy — never o.swap.why straight.
+  const card = (await import("node:fs")).readFileSync(new URL("./AnswerCard.tsx", import.meta.url), "utf8");
+  assert.match(card, /swapWhy\(o\)/);
+  assert.ok(!/\bw\.why\b|o\.swap\.why/.test(card), "no second way to print the tile's why");
 });
 
 /* ─────────────────────────── one name for the partner ─────────────────────────── */

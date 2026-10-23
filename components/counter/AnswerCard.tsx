@@ -6,7 +6,7 @@ import { inr } from "@/lib/domain/money";
 import type { Offer } from "@/lib/domain/offer";
 import type { AnswerLine, AnswerLineKey } from "@/lib/domain/answer";
 import type { CaseOps } from "./ops";
-import { CHOOSE_NEW_PHONE_LINK, askControl, autoRequoteKey, requotable, staleDecisionKey, swapRefusal } from "./answerAsks";
+import { CHOOSE_NEW_PHONE_LINK, askControl, autoRequoteKey, requotable, staleDecisionKey, swapRefusal, swapWhy } from "./answerAsks";
 import { IdentityOverride } from "./AnswerAskForms";
 import { GradeRow } from "./GradeRow";
 
@@ -260,7 +260,8 @@ export function AnswerCard({
   const w = o.swap;
   const phoneLine = newPhoneLine(o);
   const vs = vsRepairLine(w.vsRepair);
-  const swapWhy = w.total === null ? w.why : null;
+  // Said once: not again when the headline's sentence already says it (a phone not on the card).
+  const swapNoPrice = swapWhy(o);
   const swapNo = swapRefusal(o);
 
   return (
@@ -384,7 +385,7 @@ export function AnswerCard({
                 <LineText l={bonusL} />
               </p>
             ) : null}
-            {swapWhy ? <Small>{swapWhy}</Small> : null}
+            {swapNoPrice ? <Small>{swapNoPrice}</Small> : null}
             {notes.we_pay ? <Small>{notes.we_pay}</Small> : null}
             {wePayL && notes.bonus ? <Small>{notes.bonus}</Small> : null}
             {phoneLine ? (

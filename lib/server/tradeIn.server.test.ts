@@ -33,6 +33,7 @@ const cases = await import("./cases.ts");
 const { uploadRateCard } = await import("./catalog.ts");
 const { resetPriceiqState } = await import("./priceiq.ts");
 const { linesSum, DEFECT_DEDUCTIONS } = await import("../domain/ratecard.ts");
+const { luhnCheckDigit } = await import("../domain/imei.ts");
 
 let fake: FakePriceiq;
 before(async () => {
@@ -152,10 +153,10 @@ test("PriceIQ has no price and there is no rate card: no price at all — 'No ma
   assert.equal(v.offer!.swap.why, why);
   assert.deepEqual(v.offer!.asks.find((a) => a.kind === "no_price"), { kind: "no_price", title: "No market price yet", text: why });
   assert.ok(!v.offer!.asks.some((a) => (a.kind as string) === "partner_quote"), "the old kind is gone: an installed app drops what it doesn't know");
-  // Nothing to swap on: the answer refuses with the same words (and a quoted case's lock says "No trade-in price yet.").
+  // Nothing to swap on: the answer refuses with the same words, and so does the lock (never the plain "No trade-in price yet.").
   assert.equal(v.offer!.actions.swap, why);
   assert.equal(v.offer!.actions.walkAway, null, "the customer can still walk away");
-  if (v.status === "quoted") assert.ok(v.lockBlockers.includes("No trade-in price yet."));
+  if (v.status === "quoted") assert.ok(v.lockBlockers.includes(why), v.lockBlockers.join(" | "));
   assert.equal(v.marketSell.amount, null);
 });
 
@@ -168,6 +169,28 @@ test("an active rate card that doesn't list the phone: 'This phone isn't on the 
     assert.equal(v.quote?.reason, "This phone isn't on the rate card yet.");
     assert.equal(v.offer!.reason, "This phone isn't on the rate card yet.");
     assert.equal(v.offer!.headline, "No market price yet");
+    // At the counter (a cracked screen the repair prices, so the case is "quoted", with its IMEI): the
+    // lock refuses with that reason too — its 409, which anything showing the lock's own error prints.
+    const c = cases.createCase(advisor, { customerName: "Off the card" });
+    const body = "35395031234567";
+    const ready = await cases.updateCase(advisor, c.id, {
+      modelId: "galaxy-z-fold6",
+      variant: "256GB",
+      imei: body + String(luhnCheckDigit(body)),
+      faults: ["screen_cracked"],
+      condition: COND({ screen: "cracked" }),
+      ...(s25u ? { upgradeDeviceId: s25u.id } : {}),
+    });
+    assert.equal(ready.status, "quoted");
+    assert.equal(ready.quote?.reason, "This phone isn't on the rate card yet.");
+    assert.equal(ready.lockBlockers[0], "This phone isn't on the rate card yet.", ready.lockBlockers.join(" | "));
+    assert.ok(!ready.lockBlockers.includes("No trade-in price yet."));
+    const CHECKS = { ownership: true, simRemoved: true, imeiMatches: true, noFinanceLock: true, kym: { status: "clear" as const, reference: "SS-1" } };
+    assert.throws(
+      () => cases.lockTradeIn(advisor, c.id, { customer: { name: "Asha Rao", phone: "9820012345", idType: "aadhaar", idLast4: "1234" }, checks: CHECKS }),
+      (e: Error & { status?: number }) => e.status === 409 && e.message === "This phone isn't on the rate card yet."
+    );
+    assert.equal(cases.getCase(advisor, c.id).status, "quoted", "nothing locked");
   } finally {
     db().prepare(`UPDATE rate_cards SET active = 0`).run();
   }

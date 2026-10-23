@@ -27,7 +27,7 @@ import {
 import { GradeiqError, gradeiqConfig, readBatteryHealth } from "./gradeiq";
 import { assertNotBlacklisted } from "./imeiResolve";
 import { readCertification, withCertification } from "../domain/certify";
-import { applyCameraFloor, addFaultSources, blankCameraCheck, resultsWithCameraDisplay, type CaseCameraCheck } from "../domain/gradeiqMap";
+import { applyCameraFloor, addFaultSources, blankCameraCheck, resultsWithCameraDisplay, standingFloor, type CaseCameraCheck } from "../domain/gradeiqMap";
 import {
   DEFAULT_PLAN,
   CODE_ALPHABET,
@@ -601,12 +601,15 @@ export async function applyTestSession(u: SessionUser, id: string, opts: { auto?
   patch.faults = unionFaults(unionFaults(c.faults, testedFaults), cameraFaults);
   // Never better than what the advisor recorded, the faults allow, or the camera confirmed — and what the
   // advisor certified by eye on "Check the phone" (before Apply too) is the screen and body, on that floor.
+  // A screen or body a reason given on the desk overruled ("Why it's better", carried over to a re-test)
+  // isn't floored back: the floor that stands, as a tap is held to it (cases.ts tapFloor).
+  const floor = standingFloor({ floor: cam.mapping.floor, overrides: c.camera?.overrides ?? [] });
   patch.condition = withCertification(
     // A failed Wi-Fi / Bluetooth, fingerprint or vibration test puts its priced issue on the condition.
-    applyCameraFloor(withIssues(mergeCondition(c.condition, patch.faults as typeof c.faults), s.issues), cam.mapping.floor),
+    applyCameraFloor(withIssues(mergeCondition(c.condition, patch.faults as typeof c.faults), s.issues), floor),
     c.certification,
     patch.faults as typeof c.faults,
-    cam.mapping.floor
+    floor
   );
   // The IMEI(s) the customer's phone gave (*#06#). An IMEI the case already has
   // is never replaced by one typed on the customer's phone: when they share no

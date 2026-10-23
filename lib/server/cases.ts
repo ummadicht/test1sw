@@ -24,7 +24,7 @@ import { estimateRepair, type Coverage, type ManualQuote, type RepairEstimate, t
 import { bestCampaign, type BonusResult, type Campaign } from "../domain/bonus";
 import { decide, type Decision } from "../domain/decision";
 import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
-import { buildOffer, currentDecision, nothingToRepairOn, EXPIRED_BLOCKER, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
+import { buildOffer, currentDecision, nothingToRepairOn, EXPIRED_BLOCKER, noPriceWhy, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
 import { customerAnswer, TYPED_PRICE_NOTE, type CustomerAnswer } from "../domain/answer";
 import { refurbDecisionShown, refurbEconomics, type RefurbEconomics } from "../domain/refurbEconomics";
 import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } from "../domain/premium";
@@ -37,6 +37,7 @@ import { indianMobile } from "../domain/phone";
 import { type CaseStatus, assertTransition, OPEN_TRADE_STATUSES, cancelEvents } from "../domain/lifecycle";
 import { DATA_CLEAR_LABEL, DATA_CLEAR_STATUSES, DATA_CLEAR_STEPS, dataClearState, missingDataClearSteps, type DataClearRecord, type DataClearState } from "../domain/dataClear";
 import {
+  type CameraFloor,
   type CaseCameraCheck,
   type FaultSources,
   type RecordedOverride,
@@ -47,8 +48,9 @@ import {
   faultsAfterConditionEdit,
   identityBlock,
   reconcileFaultSources,
+  standingFloor,
 } from "../domain/gradeiqMap";
-import { CERT_ROWS, certChoices, certifyNeeded, certifyRow, certifySignals, isCertRow, readCertification, type Certification, type CertRow, type CertifySignals } from "../domain/certify";
+import { CERT_ROWS, allFineValue, certChoices, certifyAgainstCamera, certifyNeeded, certifyRow, certifySignals, isCertRow, readCertification, type Certification, type CertRow, type CertifySignals } from "../domain/certify";
 import { cameraEvidence, type GiqRow } from "./gradeiqBridge";
 import type { DeviceReport } from "../domain/diagnostics";
 import type { ImeiLookup } from "./gradeiq";
@@ -279,6 +281,19 @@ export function certifyBlock(
     },
     coloursWanted,
   };
+}
+
+/**
+ * The camera floor a "Check the phone" tap stands on — read from the same evidence as the card
+ * (certifyBlock): the case's camera record once Apply wrote it for THIS session; before that (the
+ * usual tap: the card holds the answer until it is tapped, and a re-test's taps), the session's
+ * own camera, the floor its Apply puts on the case. Less what a reason given on the desk
+ * overruled (standingFloor — the reasons carry over to a re-test). null = no camera evidence.
+ */
+export function tapFloor(onCase: CaseCameraCheck | null, s: GiqRow | null): CameraFloor | null {
+  if (onCase && onCase.by !== null && (!s || onCase.testSessionId === s.id)) return standingFloor(onCase);
+  if (!s) return null;
+  return standingFloor({ floor: cameraEvidence(s).mapping.floor, overrides: onCase?.overrides ?? [] });
 }
 
 /**
@@ -699,7 +714,9 @@ function lockBlockers(v: CaseView): string[] {
   if (!v.imei) out.push("Record the IMEI (dial *#06#).");
   if (!v.condition) out.push("Record the condition.");
   if (v.conditionProblems.length) out.push("Condition is better than the faults allow.");
-  if (!v.quote || v.quote.status !== "priced" || !v.quote.amount) out.push("No trade-in price yet.");
+  // Nothing priced it: the quote's own why when it has one ("This phone isn't on the rate card yet.",
+  // PriceIQ's) — the answer's words (offer.ts noPriceWhy) — else the plain sentence.
+  if (!v.quote || v.quote.status !== "priced" || !v.quote.amount) out.push(noPriceWhy(v.quote?.reason) ?? "No trade-in price yet.");
   // Re-quote fixes it: every quote is the system's (PriceIQ, the rate card).
   else if (v.quoteExpired) out.push(EXPIRED_BLOCKER);
   if (!v.upgrade) out.push("Choose the new phone.");
@@ -971,7 +988,8 @@ const COLOURS_FRESH_MS = 10 * 60_000;
 /**
  * "All fine — screen OK, body like new" (owner, 2026-10-19: "Skip and get on advisor app fast"):
  * the three taps of "Check the phone" in one, by the same rules — the liquid indicator "Can't see",
- * because nobody looked at it (honest: not inspected). What it actually taps on a case: allFineTaps.
+ * because nobody looked at it (honest: not inspected). What it actually taps on a case: allFineTaps —
+ * and on a row the store camera confirmed worse, the camera's own chip (certify.ts allFineValue).
  */
 export const ALL_FINE: readonly { row: CertRow; value: string }[] = [
   { row: "screen", value: "ok" },
@@ -1003,7 +1021,11 @@ export function allFineTaps(
  * the phone was showing the colours. The faults, their sources, the condition
  * and the certification move in ONE transaction; then the report follows and
  * the case is re-priced outside it, as an edit is. Tapping the same value again
- * changes nothing. Store staff only, while the case is at the counter.
+ * changes nothing. A tap better than what the store camera confirmed (tapFloor — before
+ * Apply too) is refused 409 with the camera's sentence (certifyAgainstCamera) and nothing
+ * is written — as the desk's condition save is; the reason is given there. "All fine" is
+ * never refused: on a row the camera confirmed worse it taps the camera's own chip
+ * (allFineValue). Store staff only, while the case is at the counter.
  */
 export async function certifyCase(u: SessionUser, id: string, input: { row?: unknown; value?: unknown; testSessionId?: unknown; allFine?: unknown }): Promise<CaseView> {
   if (u.role !== "advisor" && u.role !== "store_manager") throw new HttpError(403, "Only store staff certify a phone.");
@@ -1037,15 +1059,22 @@ export async function certifyCase(u: SessionUser, id: string, input: { row?: unk
     if (!fresh || !EDITABLE.includes(fresh.status)) throw new HttpError(409, "The case is past the counter.");
     const prevFaults = parseJson<FaultId[]>(fresh.faults, []);
     const prevCondition = parseJson<ConditionAnswers | null>(fresh.condition, null);
-    const camera = parseJson<CaseCameraCheck | null>(fresh.camera_check, null);
+    // What the camera confirmed for this session (before Apply too), less what a reason given on the
+    // desk overruled ("Why it's better").
+    const floor = tapFloor(parseJson<CaseCameraCheck | null>(fresh.camera_check, null), full);
     const prevCert = readCertification(parseJson<unknown>(fresh.certification, null));
     // Each tap on what the one before left — exactly as the taps one by one would.
     let r = { faults: prevFaults, sources: reconcileFaultSources(parseJson<FaultSources>(fresh.fault_sources, {}), prevFaults), condition: prevCondition, certification: prevCert as Certification };
     const at = nowIso();
     const done: { row: CertRow; value: string; prev: string | null; faultsAdded: FaultId[]; faultsRemoved: FaultId[] }[] = [];
-    // "All fine" on what is stored now: a row tapped since (SwapUp Store, another desk) keeps its tap.
-    for (const t of allFine ? taps.filter((x) => !prevCert[x.row]) : taps) {
-      const step = certifyRow({ ...r, cameraFloor: camera?.floor ?? null }, { row: t.row, value: t.value, by: u.name, userId: u.id, at, withColours, testSessionId: session?.id ?? null });
+    // "All fine" on what is stored now: a row tapped since (SwapUp Store, another desk) keeps its tap;
+    // a row the camera confirmed worse gets the camera's own chip — nothing beyond what it saw.
+    for (const t of allFine ? taps.filter((x) => !prevCert[x.row]).map((x) => ({ row: x.row, value: allFineValue(x.row, x.value, floor) })) : taps) {
+      // Better than the camera confirmed: refused with the camera's sentence, as the desk's condition
+      // save is (updateCase) — never recorded and quietly floored. Nothing is written.
+      const refused = certifyAgainstCamera(t.row, t.value, floor);
+      if (refused) throw new HttpError(409, refused);
+      const step = certifyRow({ ...r, cameraFloor: floor }, { row: t.row, value: t.value, by: u.name, userId: u.id, at, withColours, testSessionId: session?.id ?? null });
       if ("error" in step) throw new HttpError(400, step.error);
       if (!step.changed) continue;
       done.push({ row: t.row, value: t.value, prev: r.certification[t.row]?.value ?? null, faultsAdded: step.faultsAdded, faultsRemoved: step.faultsRemoved });

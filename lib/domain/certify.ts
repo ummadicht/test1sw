@@ -34,7 +34,7 @@ import {
   conditionFromFaults,
   isFaultId,
 } from "./condition.ts";
-import { addFaultSources, applyCameraFloor, conditionOnlyFaults, type CameraFloor, type FaultSources } from "./gradeiqMap.ts";
+import { addFaultSources, applyCameraFloor, conditionOnlyFaults, floorProblems, type CameraFloor, type FaultSources } from "./gradeiqMap.ts";
 
 export const CERT_ROWS = ["screen", "body", "liquid"] as const;
 export type CertRow = (typeof CERT_ROWS)[number];
@@ -261,6 +261,44 @@ export function withCertification(
     issues: [...new Set([...out.issues, ...floor.issues])].sort() as IssueId[],
   };
   return cameraFloor ? applyCameraFloor(out, cameraFloor) : out;
+}
+
+/**
+ * Where a reason against the camera is given: the desk's "What's wrong", where a condition change the
+ * camera contradicts waits for one ("Why it's better", CaseWorkspace CameraReason). That needs the
+ * camera's finding on the case — the answer open (Apply) — so the sentence says so; a tap has no
+ * reason field.
+ */
+export const REASON_ON_DESK = `needs a reason, given on the desk's What's wrong once the answer is open.`;
+
+/**
+ * A tap that would record the screen or body BETTER than the store camera confirmed (`floor`: what
+ * the camera confirmed, less what a recorded reason overruled — cases.ts tapFloor, gradeiqMap.ts
+ * standingFloor) is not recorded and quietly floored: it is refused with the camera's own words (the
+ * desk's, floorProblems), the chip the advisor tapped by its label on the card, and where the reason
+ * is given — 'Camera confirmed the screen "Visible scratches" — "OK" needs a reason, given on the
+ * desk's What's wrong once the answer is open.' cases.ts certifyCase answers 409 with it.
+ * null = the tap stands: worse than or the same as the camera, the liquid row (no camera sees it),
+ * no camera floor, an unknown value.
+ */
+export function certifyAgainstCamera(row: CertRow, value: string, floor: CameraFloor | null): string | null {
+  const choice = certChoice(row, value);
+  if (!floor || !choice) return null;
+  const tapped = { screen: choice.screen ?? floor.screen, body: choice.body ?? floor.body };
+  const p = floorProblems(tapped, floor)[0];
+  return p ? `${p.camera} — "${choice.label}" ${REASON_ON_DESK}` : null;
+}
+
+/**
+ * "All fine" means nothing beyond what the store camera confirmed: on a row the camera confirmed
+ * worse than "All fine" says (Screen OK on a camera's "Visible scratches"), it taps the camera's own
+ * chip ("Scratches") — the row then says what the phone is priced at, never "OK" floored back, and
+ * "All fine" is never refused. Any other row: "All fine"'s own value.
+ */
+export function allFineValue(row: CertRow, value: string, floor: CameraFloor | null): string {
+  if (!floor || !certifyAgainstCamera(row, value, floor)) return value;
+  const own = CHOICES[row].find((c) => (row === "screen" ? c.screen === floor.screen : row === "body" && c.body === floor.body));
+  return own?.value ?? value;
 }
 
 /** The tap → the case's faults, their sources, its condition and the certification. An unknown value is a 400 the caller words. */
