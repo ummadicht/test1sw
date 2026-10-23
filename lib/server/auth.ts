@@ -177,7 +177,8 @@ export async function getSession(): Promise<SessionUser | null> {
   // fetches also carry whatever desk cookie that browser has — often a
   // different person (the manager signed in on the desk, an advisor in the
   // app). Cookie-first would act as the wrong user; a bad Bearer token is a 401.
-  const h = (await headers()).get("authorization") || "";
+  const hs = await headers();
+  const h = hs.get("authorization") || "";
   // "Authorization: Device …" is the store tablet's device token
   // (docs/STORE-TABLET.md). It is never a session — it can only list the
   // store's staff and unlock one of them (lib/server/storeTablet.ts) — so it is
@@ -195,7 +196,44 @@ export async function getSession(): Promise<SessionUser | null> {
   if (!row || !row.active || row.role !== u.role || row.org_id !== u.orgId || row.store_id !== u.storeId) return null;
   // Unlocked on a store tablet: only while that tablet is still enrolled (docs/STORE-TABLET.md).
   if (u.dev && !db().prepare(`SELECT 1 FROM store_devices WHERE id = ? AND revoked_at IS NULL`).get(u.dev)) return null;
+  // Store staff on a Bearer token = SwapUp Store (the app, or its browser version): an old build is
+  // refused here, before the route does anything. The desk (cookie), SwapUp Check (Ticket) and the
+  // tablet's Device token never reach this line.
+  if (m && (u.role === "advisor" || u.role === "store_manager") && storeAppTooOld(hs.get("x-swapup-app"), process.env.SWAPUP_STORE_MIN_VERSION)) {
+    throw new HttpError(426, UPDATE_STORE);
+  }
   return { ...u, name: row.name };
+}
+
+/**
+ * SwapUp Store's minimum version (SUP-27). The apps are sideloaded with no over-the-air updates, so an
+ * old tablet would keep showing old screens and totals. SwapUp Store sends
+ * "X-SwapUp-App: store/<version>+<versionCode>" (e.g. "store/0.9.3+15") on every call; with
+ * SWAPUP_STORE_MIN_VERSION set (e.g. "0.9.3"), a store-staff Bearer call whose header is missing,
+ * malformed or names an older version gets 426 UPDATE_STORE. Unset or empty = the gate is off, the
+ * default; it is set to the first release that sends the header once that is on /downloads, and from
+ * then on refuses every older tablet (README → Deploy). A value that is not x.y.z leaves it off too,
+ * and says so in the log once — "update" would send staff to /downloads for nothing.
+ */
+export const UPDATE_STORE = "Update SwapUp Store from /downloads.";
+
+const VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})$/;
+const STORE_APP = /^store\/(\d{1,6})\.(\d{1,6})\.(\d{1,6})\+\d{1,9}$/;
+let warnedMin = "";
+
+export function storeAppTooOld(app: string | null, min: string | undefined): boolean {
+  const want = (min ?? "").trim();
+  if (!want) return false;
+  const floor = VERSION.exec(want);
+  if (!floor) {
+    if (warnedMin !== want) console.error(`[swapup] SWAPUP_STORE_MIN_VERSION is not x.y.z — the SwapUp Store version gate is off`);
+    warnedMin = want;
+    return false;
+  }
+  const have = STORE_APP.exec((app ?? "").trim());
+  if (!have) return true;
+  for (let i = 1; i <= 3; i++) if (Number(have[i]) !== Number(floor[i])) return Number(have[i]) < Number(floor[i]);
+  return false;
 }
 
 export class HttpError extends Error {

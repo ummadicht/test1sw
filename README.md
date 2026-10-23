@@ -206,3 +206,30 @@ add, so the build before runs on it, and the backup from before the deploy is in
 A live app that does not answer is never kept over the release kept before it.
 `deploy/deploy.test.ts` runs `deploy.sh` against a folder standing in for the VM (`FAKE_SSH`, with a
 stand-in pm2 running each build's own server), never the VM itself.
+
+**Old SwapUp Store builds (`SWAPUP_STORE_MIN_VERSION`).** The apps have no over-the-air updates, so an
+old tablet keeps its old screens and totals until someone reinstalls it. SwapUp Store sends
+`X-SwapUp-App: store/<version>+<versionCode>` (e.g. `store/0.9.3+15`) on every call; the builds before
+that (0.9.2, 0.8.0) send none. With `SWAPUP_STORE_MIN_VERSION=0.9.3` in `/etc/swapup.env` (then
+`pm2 restart swapup`), a store-staff call on a Bearer token from an older build, or with no header or one
+that doesn't read, gets `426 {"error":"Update SwapUp Store from /downloads."}` before anything is done.
+Unset, the gate is off. That is the default, and neither deploy nor release sets it. A value that is not
+`x.y.z` leaves the gate off and says so in the pm2 log. Never gated: signing in (`/api/auth/token`), the
+desk (its cookie), SwapUp Check (Ticket), the store tablet's Device token (listing staff and unlocking by
+PIN), the partner, and public pages (`lib/server/auth.ts`, `lib/server/storeGate.server.test.ts`).
+
+*When to set it:* to the first release that sends the header, once that release is on /downloads. From
+then on every older tablet, 0.9.2 and 0.8.0 alike, gets the sentence until someone reinstalls it; that is
+the gate's job. Waiting for every tablet to be updated first would leave nothing for it to refuse.
+
+*What staff see.* A build that sends the header shows the sentence where the call was made (a refused
+launch opens the sign-in screen with it). Older builds don't know a 426:
+- with a saved sign-in, the app opens on "Can't reach SwapUp". The sentence is in the "Sign-in not
+  checked" banner, but under it the app says "Still signed in — check the Wi‑Fi." and "Try again" comes
+  back to the same screen. "Sign in again" works, and Home then shows the sentence in its "Couldn't load
+  …" banners;
+- on the store tablet, "Who's serving?" and the PIN work as before, and Home shows the sentence the same
+  way.
+
+So tell the stores before you set it: a tablet that says "check the Wi‑Fi" needs reinstalling from
+/downloads, not a new network.
