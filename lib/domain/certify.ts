@@ -34,7 +34,7 @@ import {
   conditionFromFaults,
   isFaultId,
 } from "./condition.ts";
-import { addFaultSources, applyCameraFloor, conditionOnlyFaults, type CameraFloor, type FaultSources } from "./gradeiqMap.ts";
+import { addFaultSources, applyCameraFloor, conditionOnlyFaults, floorProblems, type CameraFloor, type FaultSources } from "./gradeiqMap.ts";
 
 export const CERT_ROWS = ["screen", "body", "liquid"] as const;
 export type CertRow = (typeof CERT_ROWS)[number];
@@ -261,6 +261,29 @@ export function withCertification(
     issues: [...new Set([...out.issues, ...floor.issues])].sort() as IssueId[],
   };
   return cameraFloor ? applyCameraFloor(out, cameraFloor) : out;
+}
+
+/**
+ * Where a reason against the camera is given: the desk, where a condition change the camera
+ * contradicts waits for one ("Why it's better", CaseWorkspace) — a tap has no reason field.
+ */
+export const REASON_ON_DESK = `needs a reason, given under "Why it's better" on the desk.`;
+
+/**
+ * A tap that would record the screen or body BETTER than the store camera confirmed (`floor`: the
+ * case's camera floor less what a recorded reason overruled — gradeiqMap.ts standingFloor) is not
+ * recorded and quietly floored: it is refused with the camera's own sentence, the desk's
+ * (cameraOverrideProblems), and where the reason is given — 'Camera confirmed the screen "Lines,
+ * spots or dead pixels" — "Flawless" needs a reason, given under "Why it's better" on the desk.'
+ * cases.ts certifyCase answers 409 with it, for one tap or "All fine" (the sentence names the row).
+ * null = the tap stands: worse than or the same as the camera, the liquid row (no camera sees it),
+ * no camera floor (no camera, or before Apply — Apply's floor stands then, DS10), an unknown value.
+ */
+export function certifyAgainstCamera(row: CertRow, value: string, floor: CameraFloor | null): string | null {
+  const choice = certChoice(row, value);
+  if (!floor || !choice) return null;
+  const tapped = { screen: choice.screen ?? floor.screen, body: choice.body ?? floor.body };
+  return floorProblems(tapped, floor, REASON_ON_DESK)[0]?.why ?? null;
 }
 
 /** The tap → the case's faults, their sources, its condition and the certification. An unknown value is a 400 the caller words. */

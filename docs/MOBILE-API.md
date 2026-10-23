@@ -1328,7 +1328,15 @@ SwapUp Check and nobody certified.
 `condition` and re-priced `offer`.
 - Faults it adds carry source `advisor`; changing the row takes off only the faults that row added
   (and only when nothing else found them). The screen and body take the certified value but never
-  better than the case's faults or what the camera confirmed — the camera's finding stands (DS10).
+  better than the case's faults.
+- A tap (or `allFine`) that would record the screen or body **better than the store camera
+  confirmed** (the case's camera floor, after Apply) is refused `409` `{ "error": "<sentence>" }` and
+  nothing is recorded — the camera's own sentence, the desk's, with where the reason goes:
+  `Camera confirmed the screen "Visible scratches" — "Flawless" needs a reason, given under "Why it's better" on the desk.`
+  (it names the row). Show it as it comes. Once a reason is on record (the desk's condition change
+  with "Why it's better"), that screen or body is no longer held to the camera and the tap stands.
+  Before Apply there is no camera floor on the case: Apply folds the camera in, and its finding
+  stands (DS10).
 - `withColours` = the phone's phase was `colours` within the last 10 minutes.
 - Works before and after Apply, until the trade-in is locked. Before Apply the case has no
   condition yet: a tap records the row (and puts on any fault it means) but never invents the rest of
@@ -1337,8 +1345,8 @@ SwapUp Check and nobody certified.
   nothing (no audit row). Every change is audited `case.certify` `{row, value, prev, withColours,
   testSessionId, faultsAdded, faultsRemoved}`; the grade report gets a version (`certified`).
 - Errors: `403` "Only store staff certify a phone." (not advisor / store manager) · `404` the case or
-  that session isn't in scope · `409` past the counter · `400` unknown row, or "Tap one of: OK,
-  Scratches, Lines or spots, Cracked."
+  that session isn't in scope · `409` past the counter, or better than the camera confirmed (above) ·
+  `400` unknown row, or "Tap one of: OK, Scratches, Lines or spots, Cracked."
 - After the last tap the answer opens by itself (the session's `autoApply` goes `ready` → `applied`),
   recorded as whoever tapped last (else whoever released the Scan step, else who started it).
 

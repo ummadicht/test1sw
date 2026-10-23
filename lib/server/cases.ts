@@ -47,8 +47,9 @@ import {
   faultsAfterConditionEdit,
   identityBlock,
   reconcileFaultSources,
+  standingFloor,
 } from "../domain/gradeiqMap";
-import { CERT_ROWS, certChoices, certifyNeeded, certifyRow, certifySignals, isCertRow, readCertification, type Certification, type CertRow, type CertifySignals } from "../domain/certify";
+import { CERT_ROWS, certChoices, certifyAgainstCamera, certifyNeeded, certifyRow, certifySignals, isCertRow, readCertification, type Certification, type CertRow, type CertifySignals } from "../domain/certify";
 import { cameraEvidence, type GiqRow } from "./gradeiqBridge";
 import type { DeviceReport } from "../domain/diagnostics";
 import type { ImeiLookup } from "./gradeiq";
@@ -997,7 +998,10 @@ export function allFineTaps(
  * the phone was showing the colours. The faults, their sources, the condition
  * and the certification move in ONE transaction; then the report follows and
  * the case is re-priced outside it, as an edit is. Tapping the same value again
- * changes nothing. Store staff only, while the case is at the counter.
+ * changes nothing. A tap better than what the store camera confirmed is refused 409
+ * with the camera's sentence (certifyAgainstCamera) and nothing is written — as the
+ * desk's condition save is; the reason is given there. Store staff only, while the
+ * case is at the counter.
  */
 export async function certifyCase(u: SessionUser, id: string, input: { row?: unknown; value?: unknown; testSessionId?: unknown; allFine?: unknown }): Promise<CaseView> {
   if (u.role !== "advisor" && u.role !== "store_manager") throw new HttpError(403, "Only store staff certify a phone.");
@@ -1032,6 +1036,8 @@ export async function certifyCase(u: SessionUser, id: string, input: { row?: unk
     const prevFaults = parseJson<FaultId[]>(fresh.faults, []);
     const prevCondition = parseJson<ConditionAnswers | null>(fresh.condition, null);
     const camera = parseJson<CaseCameraCheck | null>(fresh.camera_check, null);
+    // What the camera confirmed, less what a reason given on the desk overruled ("Why it's better").
+    const floor = camera ? standingFloor(camera) : null;
     const prevCert = readCertification(parseJson<unknown>(fresh.certification, null));
     // Each tap on what the one before left — exactly as the taps one by one would.
     let r = { faults: prevFaults, sources: reconcileFaultSources(parseJson<FaultSources>(fresh.fault_sources, {}), prevFaults), condition: prevCondition, certification: prevCert as Certification };
@@ -1039,7 +1045,11 @@ export async function certifyCase(u: SessionUser, id: string, input: { row?: unk
     const done: { row: CertRow; value: string; prev: string | null; faultsAdded: FaultId[]; faultsRemoved: FaultId[] }[] = [];
     // "All fine" on what is stored now: a row tapped since (SwapUp Store, another desk) keeps its tap.
     for (const t of allFine ? taps.filter((x) => !prevCert[x.row]) : taps) {
-      const step = certifyRow({ ...r, cameraFloor: camera?.floor ?? null }, { row: t.row, value: t.value, by: u.name, userId: u.id, at, withColours, testSessionId: session?.id ?? null });
+      // Better than the camera confirmed: refused with the camera's sentence, as the desk's condition
+      // save is (updateCase) — never recorded and quietly floored. Nothing is written: "All fine" too.
+      const refused = certifyAgainstCamera(t.row, t.value, floor);
+      if (refused) throw new HttpError(409, refused);
+      const step = certifyRow({ ...r, cameraFloor: floor }, { row: t.row, value: t.value, by: u.name, userId: u.id, at, withColours, testSessionId: session?.id ?? null });
       if ("error" in step) throw new HttpError(400, step.error);
       if (!step.changed) continue;
       done.push({ row: t.row, value: t.value, prev: r.certification[t.row]?.value ?? null, faultsAdded: step.faultsAdded, faultsRemoved: step.faultsRemoved });

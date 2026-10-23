@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   CERT_ROWS,
+  REASON_ON_DESK,
   certChoices,
+  certifyAgainstCamera,
   certifyNeeded,
   certifySignals,
   certifyRow,
@@ -17,7 +19,7 @@ import {
 import { grade, type GradingCamera, type GradingInput, type TestEvidence } from "./grading.ts";
 import { DEFAULT_PLAN, batteryHealthResult, mergeCondition, type TestResults } from "./diagnostics.ts";
 import { HEALTHY, conditionFloor, type ConditionAnswers } from "./condition.ts";
-import { NO_FLOOR } from "./gradeiqMap.ts";
+import { NO_FLOOR, standingFloor } from "./gradeiqMap.ts";
 
 /* ─────────────────────────── fixtures ─────────────────────────── */
 
@@ -351,4 +353,26 @@ test("C10: a camera that wasn't conclusive or wants a person to review — clear
   const both = grade(input({ camera: cam, condition: { ...COND, body: "scuffed" }, certification: certified({ screen: ["ok"], body: ["scuffs"] }) }));
   assert.ok(!codes(both).includes("PV2") && !codes(both).includes("PV3"));
   assert.equal(both.grade, "Good");
+});
+
+test("SUP-5: a tap better than the camera confirmed gets the camera's sentence and where the reason goes; the same, worse, liquid or no floor stand", () => {
+  const floor = { screen: "lines_or_spots" as const, body: "dented" as const };
+  assert.equal(certifyAgainstCamera("screen", "ok", floor), `Camera confirmed the screen "Lines, spots or dead pixels" — "Flawless" ${REASON_ON_DESK}`);
+  assert.equal(certifyAgainstCamera("screen", "scratches", floor), `Camera confirmed the screen "Lines, spots or dead pixels" — "Visible scratches" ${REASON_ON_DESK}`);
+  assert.equal(certifyAgainstCamera("body", "scuffs", floor), `Camera confirmed the body "Dents on the frame" — "Light scuffs" ${REASON_ON_DESK}`);
+  assert.equal(REASON_ON_DESK, 'needs a reason, given under "Why it\'s better" on the desk.');
+  for (const [row, value] of [["screen", "lines"], ["screen", "cracked"], ["body", "dents"], ["body", "bent"], ["liquid", "clean"], ["screen", "nonsense"]] as const)
+    assert.equal(certifyAgainstCamera(row, value, floor), null, `${row} ${value}`);
+  assert.equal(certifyAgainstCamera("screen", "ok", null), null, "no camera floor (before Apply): Apply's floor stands");
+  assert.equal(certifyAgainstCamera("screen", "ok", NO_FLOOR), null);
+});
+
+test("SUP-5: the floor a tap stands on is the camera's, less what a recorded reason overruled", () => {
+  const floor = { screen: "scratched" as const, body: "dented" as const };
+  const by = (items: string[]) => ({ by: "Asha K.", userId: "u", reason: "Scratches are on the guard", at: "2026-10-22T10:00:00.000Z", items });
+  assert.deepEqual(standingFloor({ floor, overrides: [] }), floor);
+  assert.deepEqual(standingFloor({ floor, overrides: [by(["screen:scratched"])] }), { screen: "flawless", body: "dented" });
+  assert.deepEqual(standingFloor({ floor, overrides: [by(["fault:screen_cracked", "body:dented"])] }), { screen: "scratched", body: "flawless" });
+  // A reason given for an older, milder finding doesn't cover a worse one.
+  assert.deepEqual(standingFloor({ floor: { ...floor, screen: "cracked" }, overrides: [by(["screen:scratched"])] }), { screen: "cracked", body: "dented" });
 });

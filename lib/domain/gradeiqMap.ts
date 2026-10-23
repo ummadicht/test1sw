@@ -829,13 +829,36 @@ export function cameraOverrideProblems(answers: ConditionAnswers | null, faults:
   for (const f of camera.faults) {
     if (!faults.includes(f.id)) out.push({ key: `fault:${f.id}`, why: `Camera confirmed "${FAULT_BY_ID[f.id].label}"${photoRef(f.photoIndex)} — removing it ${NEEDS_REASON}` });
   }
-  if (answers) {
-    if (SCREEN_ORDER.indexOf(answers.screen) < SCREEN_ORDER.indexOf(camera.floor.screen))
-      out.push({ key: `screen:${camera.floor.screen}`, why: `Camera confirmed the screen "${SCREEN_LABEL[camera.floor.screen]}" — "${SCREEN_LABEL[answers.screen]}" ${NEEDS_REASON}` });
-    if (BODY_ORDER.indexOf(answers.body) < BODY_ORDER.indexOf(camera.floor.body))
-      out.push({ key: `body:${camera.floor.body}`, why: `Camera confirmed the body "${BODY_LABEL[camera.floor.body]}" — "${BODY_LABEL[answers.body]}" ${NEEDS_REASON}` });
-  }
+  if (answers) out.push(...floorProblems(answers, camera.floor));
   return out;
+}
+
+/**
+ * The screen and body part of cameraOverrideProblems — a screen or body BETTER than the camera's
+ * floor, each with its key and the camera's sentence. `needs` ends the sentence: the desk's save
+ * asks for the reason right there (NEEDS_REASON); a tap on "Check the phone" says where it is given
+ * (certify.ts certifyAgainstCamera).
+ */
+export function floorProblems(answers: Pick<ConditionAnswers, "screen" | "body">, floor: CameraFloor, needs: string = NEEDS_REASON): { key: string; why: string }[] {
+  const out: { key: string; why: string }[] = [];
+  if (SCREEN_ORDER.indexOf(answers.screen) < SCREEN_ORDER.indexOf(floor.screen))
+    out.push({ key: `screen:${floor.screen}`, why: `Camera confirmed the screen "${SCREEN_LABEL[floor.screen]}" — "${SCREEN_LABEL[answers.screen]}" ${needs}` });
+  if (BODY_ORDER.indexOf(answers.body) < BODY_ORDER.indexOf(floor.body))
+    out.push({ key: `body:${floor.body}`, why: `Camera confirmed the body "${BODY_LABEL[floor.body]}" — "${BODY_LABEL[answers.body]}" ${needs}` });
+  return out;
+}
+
+/**
+ * What the camera confirmed that no recorded reason has overruled: its floor, less a screen or body
+ * an override covers (the desk's "Why it's better" — cases.ts updateCase records the key
+ * cameraOverrideProblems gives). The floor a tap on "Check the phone" stands on.
+ */
+export function standingFloor(camera: Pick<CaseCameraCheck, "floor" | "overrides">): CameraFloor {
+  const covered = new Set((camera.overrides ?? []).flatMap((o) => o.items));
+  return {
+    screen: covered.has(`screen:${camera.floor.screen}`) ? NO_FLOOR.screen : camera.floor.screen,
+    body: covered.has(`body:${camera.floor.body}`) ? NO_FLOOR.body : camera.floor.body,
+  };
 }
 
 /* ─────────────────────────── what the case keeps ─────────────────────────── */
