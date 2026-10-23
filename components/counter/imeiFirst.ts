@@ -19,7 +19,7 @@
  * Runtime imports are relative with ".ts" so `node --test` can load this file; everything from
  * lib/server is a type only.
  */
-import { digits, luhnValid, readImei } from "../../lib/domain/imei.ts";
+import { digits, kymEarlyStop, luhnValid, readImei } from "../../lib/domain/imei.ts";
 import type { CaseView } from "../../lib/server/cases.ts";
 
 /* ─────────────────────────── typed ─────────────────────────── */
@@ -138,9 +138,12 @@ export const BLACKLIST_TEXT: Record<Lookup["blacklist"], string> = {
   blacklisted: "reported lost or stolen (GSMA)",
 };
 
-/** The owner's sentences when the trade-in stops before the tests: GSMA's register, or the government check. */
+/**
+ * The owner's sentence when GSMA's register stops the trade-in before the tests. The government
+ * check (an early KYM answer that isn't clear) says the register's own words instead — never
+ * "lost or stolen" for a duplicate or in-use IMEI (domain/imei.ts kymEarlyStop, the server's too).
+ */
 export const STOP_GSMA = "This phone is reported lost or stolen (GSMA). It can't be traded in.";
-export const STOP_BLACKLISTED = "This phone is reported lost or stolen. It can't be traded in.";
 /** An IMEI on the case that fails its check digit: kept, never looked up. */
 export const NOT_LOOKED_UP = "Not looked up — the IMEI fails its check digit. Re-read *#06#.";
 
@@ -159,7 +162,7 @@ export type ImeiFound = {
 /** What the case shows under its IMEI, from the server's view of it — before any test. */
 export function imeiFound(v: Pick<CaseView, "imei" | "imeiCheck" | "imeiLookup" | "imeiWarnings" | "kymEarly" | "modelSource">): ImeiFound {
   const l = v.imeiLookup;
-  const stop = l?.blacklist === "blacklisted" ? STOP_GSMA : v.kymEarly && v.kymEarly.status !== "clear" ? STOP_BLACKLISTED : null;
+  const stop = l?.blacklist === "blacklisted" ? STOP_GSMA : v.kymEarly && v.kymEarly.status !== "clear" ? kymEarlyStop(v.kymEarly.status) : null;
   let line: string | null = null;
   let tone: ImeiFound["tone"] = "warn";
   if (l) {

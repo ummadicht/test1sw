@@ -32,7 +32,7 @@ import { RuleError } from "../domain/errors";
 import { retiredSource } from "../domain/ratecard";
 import { coloursApp, storageOnSave } from "../domain/phoneLed";
 import { canHold } from "../domain/credit";
-import { readImei } from "../domain/imei";
+import { readImei, KYM_LABEL, type KymStatus } from "../domain/imei";
 import { indianMobile } from "../domain/phone";
 import { type CaseStatus, assertTransition, OPEN_TRADE_STATUSES, cancelEvents } from "../domain/lifecycle";
 import { DATA_CLEAR_LABEL, DATA_CLEAR_STATUSES, DATA_CLEAR_STEPS, dataClearState, missingDataClearSteps, type DataClearRecord, type DataClearState } from "../domain/dataClear";
@@ -58,14 +58,8 @@ import { BLACKLISTED, blacklistWarning, caseLookupView, gsmaBlacklisted, lookupF
 
 export type Customer = { name: string; phone: string; idType: string | null; idLast4: string | null };
 
-/** Result of the government IMEI register check (Sanchar Saathi / CEIR "Know Your Mobile"). */
-export type KymStatus = "clear" | "blacklisted" | "duplicate" | "in_use";
-export const KYM_LABEL: Record<KymStatus, string> = {
-  clear: "No block — OK to buy",
-  blacklisted: "Black-listed (reported lost/stolen)",
-  duplicate: "Duplicate IMEI",
-  in_use: "Already in use",
-};
+// The government IMEI register's statuses and words live with the IMEI (lib/domain/imei.ts).
+export { KYM_LABEL, type KymStatus };
 
 /**
  * Where the case's model came from (migration 17): the IMEI (its type code, or the model number

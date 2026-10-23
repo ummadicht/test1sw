@@ -53,3 +53,24 @@ export function maskImei(imei: string): string {
   if (d.length < 6) return d;
   return d.slice(0, 2) + "•".repeat(d.length - 6) + d.slice(-4);
 }
+
+/* ─────────────────────────── the government IMEI register (KYM) ─────────────────────────── */
+
+/** Result of the government IMEI register check (Sanchar Saathi / CEIR "Know Your Mobile"). */
+export type KymStatus = "clear" | "blacklisted" | "duplicate" | "in_use";
+export const KYM_LABEL: Record<KymStatus, string> = {
+  clear: "No block — OK to buy",
+  blacklisted: "Black-listed (reported lost/stolen)",
+  duplicate: "Duplicate IMEI",
+  in_use: "Already in use",
+};
+
+/**
+ * Why no test starts on an early KYM answer that isn't clear — the register's own words (SUP-17).
+ * Only GSMA's "blacklisted" is said as "reported lost or stolen" (imeiResolve.ts BLACKLISTED): a
+ * duplicate or in-use IMEI is checked, and the lock's own KYM answer decides.
+ */
+export function kymEarlyStop(status: string): string {
+  const said = Object.hasOwn(KYM_LABEL, status) ? KYM_LABEL[status as KymStatus] : status;
+  return `IMEI register says "${said}" — check it before testing.`;
+}

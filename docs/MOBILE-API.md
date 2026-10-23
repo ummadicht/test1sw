@@ -213,8 +213,12 @@ editable, still required to be `clear` at lock. The lock's own KYM answer (`chec
 **Blacklisted** (`imeiLookup.blacklist === "blacklisted"` — for any IMEI the case ever had — or
 `kymEarly.status !== "clear"` when set):
 `POST /api/test-sessions { caseId }` → `409 { "error": "This phone is reported lost or stolen. It can't be
-traded in.", "reason": "blacklisted" }` and no session is made. On GSMA's `blacklisted` the lock refuses
-with the same sentence (and the reason) whatever it sends, and it is the first of `lockBlockers`; a
+traded in.", "reason": "blacklisted" }` and no session is made. An early KYM answer that isn't clear
+(GSMA not blacklisted) refuses the same way in the register's own words — `IMEI register says
+"Duplicate IMEI" — check it before testing.` ("Already in use", "Black-listed (reported
+lost/stolen)"; `lib/domain/imei.ts kymEarlyStop`), never "lost or stolen" for a duplicate or in-use
+IMEI (SUP-17); the desk's IMEI card says the same. On GSMA's `blacklisted` the lock refuses
+with GSMA's sentence (and the reason) whatever it sends, and it is the first of `lockBlockers`; a
 non-clear `kymEarly` is not a lock blocker — the lock's own KYM answer decides. Show the sentence in a
 red banner on the IMEI card and disable Start.
 
