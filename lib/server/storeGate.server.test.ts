@@ -4,8 +4,9 @@
  * SwapUp Store (the app and its browser version) sends "X-SwapUp-App: store/<version>+<versionCode>" and
  * a Bearer token. With SWAPUP_STORE_MIN_VERSION set, a store-staff Bearer call from an older, unversioned
  * or unreadable build gets 426 "Update SwapUp Store from /downloads." before the route does anything.
- * Unset, the gate is off (the 0.9.2 tablets in the field send no header). Never gated: the desk (its
- * cookie), SwapUp Check (Ticket) and the store tablet's Device token.
+ * Unset, the gate is off. Never gated: signing in (password, or PIN on the store tablet), the desk (its
+ * cookie), SwapUp Check (Ticket) and the store tablet's Device token — so an old build can still sign in
+ * and is told to update on its first staff call.
  *
  * Run: node --test --experimental-strip-types --no-warnings lib/server/storeGate.server.test.ts
  */
@@ -19,6 +20,9 @@ import { join } from "node:path";
 const dir = mkdtempSync(join(tmpdir(), "swapup-storegate-"));
 process.env.SWAPUP_DB = join(dir, "test.db");
 process.env.GRADEIQ_ENABLED = "0";
+// The seeded staff's password, so this file can sign in the way the app does.
+const PASSWORD = "storegate-test-password";
+process.env.SWAPUP_DEMO_PASSWORD = PASSWORD;
 for (const k of Object.keys(process.env)) if (k.startsWith("PRICEIQ_") || k.startsWith("PHONECHECK_") || k.startsWith("GEMINI_")) delete process.env[k];
 
 const origLog = console.log;
@@ -32,8 +36,10 @@ await ensureSeeded();
 const { db } = await import("./db.ts");
 const { issueToken, UPDATE_STORE } = await import("./auth.ts");
 const sessions = await import("./testSessions.ts");
-const { createStoreDevice } = await import("./storeTablet.ts");
+const { createStoreDevice, setOwnPin } = await import("./storeTablet.ts");
 const meRoute = await import("../../app/api/me/route.ts");
+const tokenRoute = await import("../../app/api/auth/token/route.ts");
+const unlockRoute = await import("../../app/api/tablet/unlock/route.ts");
 const casesRoute = await import("../../app/api/cases/route.ts");
 const deviceStatusRoute = await import("../../app/api/device/status/route.ts");
 const tabletRoute = await import("../../app/api/tablet/route.ts");
@@ -166,6 +172,32 @@ test("on: SwapUp Check (Ticket) and the store tablet's Device token are never re
   const { deviceToken } = createStoreDevice(manager, { name: "Counter tablet" });
   const tablet = await send(() => tabletRoute.GET(new Request("http://x/api/tablet", { headers: { authorization: `Device ${deviceToken}` } })), {});
   assert.equal(tablet.status, 200, JSON.stringify(tablet.body));
+});
+
+test("on: an old build can still sign in (password, or PIN on the tablet), and its first staff call is told to update", async () => {
+  process.env.SWAPUP_STORE_MIN_VERSION = "0.9.3";
+  const post = (url: string, auth: string | null, payload: unknown) =>
+    new Request(url, { method: "POST", headers: { "content-type": "application/json", ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify(payload) });
+
+  // "Sign in again" on a 0.9.2 build: no header on the sign-in either.
+  const signedIn = await send(() => tokenRoute.POST(post("http://x/api/auth/token", null, { username: "advisor", password: PASSWORD })), {});
+  assert.equal(signedIn.status, 200, JSON.stringify(signedIn.body));
+  const token = signedIn.body.token as string;
+  assert.ok(token);
+  // Home's first calls on that build carry no header either: the sentence, and nothing is done.
+  assert.deepEqual(await me({ authorization: `Bearer ${token}` }), { status: 426, body: { error: UPDATE_STORE } });
+  const before = caseCount();
+  assert.deepEqual(await openCase({ authorization: `Bearer ${token}` }), { status: 426, body: { error: UPDATE_STORE } });
+  assert.equal(caseCount(), before);
+
+  // The store tablet on a 0.9.2 build: the PIN unlocks as before; the staff calls after it are refused.
+  setOwnPin(advisor, { password: PASSWORD, pin: "5807" });
+  const { deviceToken } = createStoreDevice(manager, { name: "Old tablet" });
+  const unlocked = await send(() => unlockRoute.POST(post("http://x/api/tablet/unlock", `Device ${deviceToken}`, { userId: advisor.id, pin: "5807" })), {});
+  assert.equal(unlocked.status, 200, JSON.stringify(unlocked.body));
+  assert.deepEqual(await me({ authorization: `Bearer ${unlocked.body.token as string}` }), { status: 426, body: { error: UPDATE_STORE } });
+  // The same sign-in from a build that sends the header works.
+  assert.equal((await me({ authorization: `Bearer ${unlocked.body.token as string}`, "x-swapup-app": "store/0.9.3+15" })).status, 200);
 });
 
 test("a minimum that is not x.y.z leaves the gate off, and says so in the log once", async () => {

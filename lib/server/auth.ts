@@ -210,9 +210,10 @@ export async function getSession(): Promise<SessionUser | null> {
  * old tablet would keep showing old screens and totals. SwapUp Store sends
  * "X-SwapUp-App: store/<version>+<versionCode>" (e.g. "store/0.9.3+15") on every call; with
  * SWAPUP_STORE_MIN_VERSION set (e.g. "0.9.3"), a store-staff Bearer call whose header is missing,
- * malformed or names an older version gets 426 UPDATE_STORE. Unset or empty = the gate is off (the
- * 0.9.2 tablets in the field send no header); a value that is not x.y.z leaves it off too, and says so
- * in the log once — "update" would send staff to /downloads for nothing.
+ * malformed or names an older version gets 426 UPDATE_STORE. Unset or empty = the gate is off, the
+ * default; it is set to the first release that sends the header once that is on /downloads, and from
+ * then on refuses every older tablet (README → Deploy). A value that is not x.y.z leaves it off too,
+ * and says so in the log once — "update" would send staff to /downloads for nothing.
  */
 export const UPDATE_STORE = "Update SwapUp Store from /downloads.";
 

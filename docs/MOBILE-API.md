@@ -41,9 +41,12 @@ other roles get `403 "The store app is for store staff."`.
 `check/<version>+<versionCode>`, which is never gated. When the server has a minimum Store version
 (`SWAPUP_STORE_MIN_VERSION`, README → Deploy), a Bearer call from store staff gets
 `426 { error: "Update SwapUp Store from /downloads." }` before anything is done if the header is
-missing, does not read as `store/x.y.z+n`, or names an older version. The app prints the sentence as
-sent. With no minimum set the gate is off. A bad token is still a 401. The desk's cookie, `Ticket` and
-`Device` calls are never gated.
+missing, does not read as `store/x.y.z+n`, or names an older version. A build that sends the header
+prints the sentence as sent; a 426 on the launch check (`GET /api/me`) opens the sign-in screen with it.
+Older builds (0.9.2, 0.8.0) don't know a 426: with a saved sign-in they open on "Can't reach SwapUp"
+with the sentence in the banner (README → Deploy says what to tell the stores). With no minimum set the
+gate is off. A bad token is still a 401. Signing in (`POST /api/auth/token`), the desk's cookie,
+`Ticket` and `Device` calls (including the PIN unlock) are never gated.
 
 `GET /api/me` (Bearer) → same `user` object.
 
