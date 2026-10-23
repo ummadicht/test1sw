@@ -141,6 +141,8 @@ export const CANCELLED_TEXT = "This trade-in was cancelled.";
 const CLOSED_TEXT = "This case is closed.";
 /** Staff: a PriceIQ trade-in is SwapUp's estimate, never shown to the customer as the market price (owner, R1). */
 export const ESTIMATE_NOTE = "Estimate from the refurbished market — not shown to the customer.";
+/** Staff: a quote of kind partner_manual (history only) — typed in, so nothing about a grade or a card (SUP-9). */
+export const TYPED_PRICE_NOTE = "A price typed in by an older build.";
 
 /** The sources whose figure IS what the buyback partner pays — the only ones the customer is shown (partner_manual: history only, nothing writes it now). */
 const PARTNER_SOURCES: readonly string[] = ["partner_manual", "partner_ratecard"];
@@ -306,7 +308,8 @@ export function buildAnswer(i: AnswerInput): Answer {
     lower && pricedAt && word
       ? `Priced at grade ${MARKET_GRADE_LETTER[pricedAt]}${gradePrice !== null ? ` (${inr(gradePrice)}${takenOff ? ` less ${inr(takenOff)}` : ""})` : ""} — none listed at grade ${MARKET_GRADE_LETTER[word]}.`
       : null;
-  const marketNotes = [open && i.market?.source === "priceiq" ? ESTIMATE_NOTE : null, pricedNote].filter((x): x is string => !!x);
+  const typed = i.market?.source === "partner_manual";
+  const marketNotes = [open && i.market?.source === "priceiq" ? ESTIMATE_NOTE : null, typed ? TYPED_PRICE_NOTE : pricedNote].filter((x): x is string => !!x);
   const pct = premium && premium.bp ? ` (${fmtBp(premium.bp)}${premiumEdge !== null ? `, lifted to what ${inr(premiumEdge)} earns` : ""})` : "";
   const staffNotes = {
     market: market && marketNotes.length ? marketNotes.join(" ") : null,

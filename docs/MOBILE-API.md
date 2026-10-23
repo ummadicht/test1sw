@@ -665,7 +665,9 @@ a Check the phone tap, the storage) re-grades and re-prices the case before it a
 
 Headlines: open — decide()'s ("Repair it — it's covered", "Repair recommended", "An upgrade is worth
 considering", "Either works — your choice", "Nothing to repair — a straight trade-in", else "Your
-offer"); traded "Traded in"; "Repair chosen". Staff notes: `we_pay` "Includes ₹1,000 SwapUp premium
+offer"); traded "Traded in"; "Repair chosen". Staff notes: `market` for a price typed in by an older
+build (`partner_manual`, history only) "A price typed in by an older build." — nothing about a grade
+or a card; the case's `partner.why` says the same for it; `we_pay` "Includes ₹1,000 SwapUp premium
 (4%)." (", lifted to what ₹15,000 earns" at a band edge; null when there is no premium); `bonus`
 "Upgrade bonus · 4%" / "Upgrade bonus · capped at ₹6,000", or `swap.bonusWhy` with no bonus.
 

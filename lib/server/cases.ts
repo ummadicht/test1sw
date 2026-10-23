@@ -25,7 +25,7 @@ import { bestCampaign, type BonusResult, type Campaign } from "../domain/bonus";
 import { decide, type Decision } from "../domain/decision";
 import { suggestUpgrade, UPGRADE_RULE_VERSION } from "../domain/upgrade";
 import { buildOffer, EXPIRED_BLOCKER, type Offer, type StorageQuote, type VariantSource } from "../domain/offer";
-import { customerAnswer, unrecordedDefect, type CustomerAnswer } from "../domain/answer";
+import { customerAnswer, unrecordedDefect, TYPED_PRICE_NOTE, type CustomerAnswer } from "../domain/answer";
 import { refurbDecisionShown, refurbEconomics, type RefurbEconomics } from "../domain/refurbEconomics";
 import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } from "../domain/premium";
 import { RuleError } from "../domain/errors";
@@ -538,7 +538,10 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
   const quoteExpired = quoteLapsed(c, quote);
   const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   const org = getOrg(c.org_id);
-  const partner = org?.partner_id ? partnerMode(org.partner_id) : null;
+  const mode = org?.partner_id ? partnerMode(org.partner_id) : null;
+  // A price typed in by an older build (partner_manual, history only) came from no rate card: its
+  // line says what it is, never the card's (SUP-9).
+  const partner = mode && quote?.source.kind === "partner_manual" ? { ...mode, why: TYPED_PRICE_NOTE } : mode;
   const view: CaseView = {
     id: c.id,
     ref: c.ref,

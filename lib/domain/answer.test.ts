@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAnswer, customerAnswer, defectNote, CANCELLED_TEXT, CANT_PRICE, CONFIRMING, ESTIMATE_NOTE, WORKING_OUT, type Answer, type AnswerInput } from "./answer.ts";
+import { buildAnswer, customerAnswer, defectNote, CANCELLED_TEXT, CANT_PRICE, CONFIRMING, ESTIMATE_NOTE, TYPED_PRICE_NOTE, WORKING_OUT, type Answer, type AnswerInput } from "./answer.ts";
 import { HEALTHY, type ConditionAnswers } from "./condition.ts";
 import { gradeAfterRefurb, tradeInGrade } from "./marketSell.ts";
 import { DEFECT_DEDUCTIONS, priceFromCard, type RateCard } from "./ratecard.ts";
@@ -574,6 +574,13 @@ test("a typed price (an older build's partner_manual) names no grade on a damage
   const m = locked.lines.find((l) => l.key === "market")!;
   assert.deepEqual([locked.lines[0].text, m.text, m.note], ["Current grade A", "Market price ₹18,888", null]);
   assert.equal(locked.market!.letter, null);
+  // Staff read what it is — a typed price — and nothing about a grade or a card (SUP-9).
+  assert.equal(locked.staffNotes.market, TYPED_PRICE_NOTE);
+  assert.equal(TYPED_PRICE_NOTE, "A price typed in by an older build.");
+  assert.doesNotMatch(TYPED_PRICE_NOTE, /grade|card/i);
+  assert.ok(!JSON.stringify(customerAnswer(locked)).includes(TYPED_PRICE_NOTE), "staff only");
+  // Every other source keeps its own note (none, here).
+  assert.equal(buildAnswer(f1({ status: "locked", locked: LOCKED })).staffNotes.market, null);
   // Nothing to take off: the typed price IS the phone's grade price.
   const clean = buildAnswer(f1({ condition: cond({ body: "scuffed" }), market: { amount: 30_000, source: "partner_manual", priceGrade: null } }));
   assert.equal(clean.lines.find((l) => l.key === "market")!.text, "Market price for grade B ₹30,000");

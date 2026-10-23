@@ -689,3 +689,20 @@ test("refurb decision: staff get the five lines off the card the trade-in came f
     connectPriceiq();
   }
 });
+
+test("SUP-9: an old typed quote (partner_manual, history only) — GET labels it a typed price; nothing about a grade or the card", async () => {
+  const v = await f1Case();
+  const locked = cases.lockTradeIn(adv, v.id, { customer: CUSTOMER, checks: CHECKS });
+  assert.equal(locked.status, "locked");
+  assert.match(locked.partner!.why, /rate card|No rate card/, "a card quote: the line describes the card");
+  // What 0.9.0 left on SU-AND-00020: a typed ₹18,888 with a reference, locked. History: never re-priced.
+  const typed = { ...locked.quote!, source: { kind: "partner_manual", label: "Partner quote" }, amount: 18_888, lines: [{ label: "Partner quote · ref PQ-20", amount: 18_888 }], partnerRef: "PQ-20" };
+  delete (typed as { grade?: string }).grade;
+  db().prepare(`UPDATE cases SET quote = ?, condition = ?, trade_value = 18888 WHERE id = ?`).run(JSON.stringify(typed), JSON.stringify({ ...COND, screen: "cracked", body: "back_cracked" }), v.id);
+  const g = cases.getCase(adv, v.id);
+  assert.equal(g.quote?.source.kind, "partner_manual");
+  assert.equal(g.offer!.answer.staffNotes.market, "A price typed in by an older build.");
+  assert.equal(g.partner!.why, "A price typed in by an older build.");
+  for (const said of [g.offer!.answer.staffNotes.market, g.partner!.why]) assert.doesNotMatch(said ?? "", /grade|card/i);
+  assert.equal(g.offer!.answer.lines.find((l) => l.key === "market")!.text, "Market price ₹18,888");
+});
