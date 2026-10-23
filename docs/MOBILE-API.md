@@ -36,6 +36,15 @@ often a different person's. Valid 12 h; on 401 the app returns to
 the sign-in screen. Only counter roles (`advisor`, `store_manager`) may use the store app;
 other roles get `403 "The store app is for store staff."`.
 
+**Which build (SUP-27).** SwapUp Store, both the app and its browser version, sends
+`X-SwapUp-App: store/<version>+<versionCode>` (e.g. `store/0.9.3+15`) on every call. SwapUp Check sends
+`check/<version>+<versionCode>`, which is never gated. When the server has a minimum Store version
+(`SWAPUP_STORE_MIN_VERSION`, README → Deploy), a Bearer call from store staff gets
+`426 { error: "Update SwapUp Store from /downloads." }` before anything is done if the header is
+missing, does not read as `store/x.y.z+n`, or names an older version. The app prints the sentence as
+sent. With no minimum set the gate is off. A bad token is still a 401. The desk's cookie, `Ticket` and
+`Device` calls are never gated.
+
 `GET /api/me` (Bearer) → same `user` object.
 
 `GET /api/stores/<storeId>/credit` (Bearer) → credit summary (`position.available`,

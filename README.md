@@ -206,3 +206,15 @@ add, so the build before runs on it, and the backup from before the deploy is in
 A live app that does not answer is never kept over the release kept before it.
 `deploy/deploy.test.ts` runs `deploy.sh` against a folder standing in for the VM (`FAKE_SSH`, with a
 stand-in pm2 running each build's own server), never the VM itself.
+
+**Old SwapUp Store builds (`SWAPUP_STORE_MIN_VERSION`).** The apps have no over-the-air updates, so an
+old tablet keeps its old screens and totals until someone reinstalls it. SwapUp Store sends
+`X-SwapUp-App: store/<version>+<versionCode>` (e.g. `store/0.9.3+15`) on every call. With
+`SWAPUP_STORE_MIN_VERSION=0.9.3` in `/etc/swapup.env` (then `pm2 restart swapup`), a store-staff call
+on a Bearer token from an older build, or with no header or one that doesn't read, gets
+`426 {"error":"Update SwapUp Store from /downloads."}` before anything is done, and the app prints it.
+Unset, the gate is off. That is the default, and neither deploy nor release sets it: the 0.9.2 tablets in
+the field send no header, so set it only once every tablet runs a build that sends one. A value that is
+not `x.y.z` leaves the gate off and says so in the pm2 log. Never gated: the desk (its cookie), SwapUp
+Check (Ticket), the store tablet's Device token (listing staff and unlocking by PIN), the partner, and
+public pages (`lib/server/auth.ts`, `lib/server/storeGate.server.test.ts`).
