@@ -14,16 +14,27 @@
  *                        (NOT_ON_CARD); else PriceIQ's own why when it was asked; else NO_RATE_CARD
  *
  * When PriceIQ can't price the phone the quote carries `priceiqWhy` — the trace says why, it is
- * never silent. Whatever this returns is the case quote: the lock holds THAT value on the store's
+ * never silent — once PriceIQ is connected (withoutOffNote). Whatever this returns is the case quote: the lock holds THAT value on the store's
  * credit line.
  */
 import { nowIso } from "./db";
 import { partnerMode, partnerQuote, type PartnerQuote } from "./buyback";
-import { cachedMarket, freshMarket, priceiqConfig, type MarketAsk } from "./priceiq";
+import { cachedMarket, freshMarket, priceiqConfig, NOT_CONNECTED, type MarketAsk } from "./priceiq";
 import { priceiqLabel, priceiqTradeIn, SWAPUP_DEDUCTIONS_LABEL, type PriceiqMeta, type PriceiqTradeIn } from "../domain/priceiqTradeIn";
 import { gradeAfterRefurb } from "../domain/marketSell";
 import { NOT_ON_CARD, NO_RATE_CARD } from "../domain/ratecard";
 import { healedCondition, type ConditionAnswers, type FaultId } from "../domain/condition";
+
+/**
+ * PriceIQ's why is said only once PriceIQ is connected (SUP-22): with no key, "PriceIQ isn't
+ * connected" under every card-priced case is noise. Quotes are written through it, and the case
+ * view reads stored ones through it, so a quote saved before says nothing either.
+ */
+export function withoutOffNote<Q extends { priceiqWhy?: string }>(q: Q): Q {
+  if (q.priceiqWhy !== NOT_CONNECTED) return q;
+  const { priceiqWhy: _off, ...rest } = q;
+  return rest as Q;
+}
 
 /** How long a PriceIQ trade-in quote binds when the programme sets no quote validity of its own. */
 export const PRICEIQ_QUOTE_VALIDITY_DAYS = 3;
@@ -93,11 +104,11 @@ export async function tradeInQuote(input: Ask): Promise<PartnerQuote> {
   const p = await priceiqQuote(input, mode.partnerName);
   if (p.quote) return p.quote;
   const q = await partnerQuote(input);
-  if (q.status === "priced") return { ...q, priceiqWhy: p.reason };
+  if (q.status === "priced") return withoutOffNote({ ...q, priceiqWhy: p.reason });
   // Nothing priced it — no price at all, never a made-up or typed one. The reason is the specific one,
   // said under "No market price yet": the card doesn't list it, else PriceIQ's why, else no card.
   const reason = mode.kind === "partner_ratecard" ? (q.reason ?? NOT_ON_CARD) : priceiqConfig().ok ? p.reason : NO_RATE_CARD;
-  return {
+  return withoutOffNote<PartnerQuote>({
     status: "unpriced",
     amount: null,
     lines: [],
@@ -108,7 +119,7 @@ export async function tradeInQuote(input: Ask): Promise<PartnerQuote> {
     validUntil: null,
     reason,
     priceiqWhy: p.reason,
-  };
+  });
 }
 
 /**

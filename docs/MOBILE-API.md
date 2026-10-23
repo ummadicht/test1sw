@@ -474,7 +474,8 @@ the lock holds exactly that amount on the store's credit line:
    battery, charging, cameras, speaker, mic, Wi-Fi/Bluetooth, fingerprint, buttons, vibration,
    liquid). Accessories and age are not defects. Full rules: `docs/GRADING.md` §6.
 2. `partner_ratecard` — the partner's uploaded rate card. When PriceIQ was asked first and had no
-   price, the quote says why in `priceiqWhy`. Since 2026-10-19 a card may price each grade
+   price, the quote says why in `priceiqWhy` — only while PriceIQ is connected: with no key there is
+   no `priceiqWhy` (a stored "PriceIQ isn't connected" is not sent either). Since 2026-10-19 a card may price each grade
    (CSV `model_id,variant,max_price,good_price,fair_price,best_value_price`, the last three optional,
    max ≥ good ≥ fair ≥ best value per row): a row with grade prices prices the phone at its look's
    grade (A = max, B = good, C = fair, D = best value; an empty column → the next LOWER grade listed,
@@ -514,7 +515,7 @@ type PartnerQuote = {
     ageDays?: number; stale?: boolean; // the market data's age when priced; stale = over 14 days
     note?: string | null;             // its age and/or "PriceIQ unreachable, last answer …"
   };
-  priceiqWhy?: string;                // PriceIQ was asked first and had no price: why
+  priceiqWhy?: string;                // PriceIQ was asked first and had no price: why (never while PriceIQ isn't connected)
   grade?: "Superb" | "Good" | "Fair" | "Best Value";   // a rate-card row with grade prices: the grade priced
 };
 ```

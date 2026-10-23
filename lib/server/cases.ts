@@ -2,7 +2,7 @@ import { db, tx, nowIso, todayIso, newId, nextSeq, parseJson, audit } from "./db
 import { HttpError, orgSettings, type SessionUser } from "./auth";
 import { getOrg, getStore, ownStore, storeInScope, canSeeStore, orgPartnerId, type StoreRow } from "./scope";
 import { partnerQuote, partnerMode, rateCardById, type PartnerQuote, type PartnerMode } from "./buyback";
-import { tradeInQuote, priceiqRepaired } from "./tradeIn";
+import { tradeInQuote, priceiqRepaired, withoutOffNote } from "./tradeIn";
 import { storeEvents, storePolicy, postEvents } from "./credit";
 import { activeCampaigns, newDevices } from "./catalog";
 import { caseMarketSell, type CaseMarketSell } from "./marketPrices";
@@ -475,6 +475,12 @@ function repairNotServicedFor(tm: TradeModel | null, org: ReturnType<typeof getO
   return tm && org?.target_brand && tm.brand !== org.target_brand ? `This centre repairs ${org.target_brand} only — enter the customer's outside quote.` : null;
 }
 
+/** The case's stored quote as the screens read it: no "PriceIQ isn't connected" note (tradeIn.ts withoutOffNote). */
+function storedQuote(raw: string | null): PartnerQuote | null {
+  const q = parseJson<PartnerQuote | null>(raw, null);
+  return q && withoutOffNote(q);
+}
+
 /**
  * THE ANSWER for a case (lib/domain/offer.ts) from its stored rows ONLY — no re-price, no partner,
  * PriceIQ or GradeIQ call, no grading report, no write: a few indexed SELECTs, so the customer's
@@ -485,7 +491,7 @@ function offerFor(c: CaseRow, store: StoreRow): Offer {
   const org = getOrg(c.org_id);
   const faults = parseJson<FaultId[]>(c.faults, []);
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
-  const quote = parseJson<PartnerQuote | null>(c.quote, null);
+  const quote = storedQuote(c.quote);
   const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   const upgrade = parseJson<UpgradeChoice | null>(c.upgrade, null);
   const manualRepair = parseJson<ManualQuote | null>(c.manual_repair, null);
@@ -528,7 +534,7 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
   const advisor = db().prepare(`SELECT name FROM users WHERE id = ?`).get(c.advisor_id) as { name: string } | undefined;
   const faults = parseJson<FaultId[]>(c.faults, []);
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
-  const quote = parseJson<PartnerQuote | null>(c.quote, null);
+  const quote = storedQuote(c.quote);
   const quoteExpired = quoteLapsed(c, quote);
   const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   const org = getOrg(c.org_id);
@@ -1506,7 +1512,7 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
 
   // 2. The trade-in quote and the repaired value — only with a complete, consistent description of
   //    the phone. Always the system's: tradeIn.ts asks, best first.
-  let quote = parseJson<PartnerQuote | null>(c.quote, null);
+  let quote = storedQuote(c.quote);
   let repairedQuote = parseJson<PartnerQuote | null>(c.repaired_quote, null);
   const consistent = !!condition && conditionFloor(condition, faults).length === 0;
   // A quote from a source that no longer exists (an older build's) is re-asked like a lapsed one.

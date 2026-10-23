@@ -311,7 +311,7 @@ The trade-in is priced in this order (`lib/server/tradeIn.ts`), and whatever win
    - **PriceIQ unreachable** — the last good answer, labelled "PriceIQ unreachable, last answer …".
 2. **The partner's uploaded rate card** — when PriceIQ has no price. The quote carries `priceiqWhy`
    (e.g. "PriceIQ has no refurbished market price for the Galaxy Z Fold6 256GB.") and the answer's
-   Show details says it.
+   Show details says it — once PriceIQ is connected: with no key, nothing about PriceIQ is said.
 3. **None** (`source.kind: "none"`) — "No market price yet", and the reason: "This phone isn't on the
    rate card yet.", PriceIQ's own why, or "No rate card is active yet." Never a guess.
 
