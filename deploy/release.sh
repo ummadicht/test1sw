@@ -154,13 +154,24 @@ esac
 mkdir -p "$LOGS"
 DEPLOY_LOG=$LOGS/deploy-$STAMP.log
 DEPLOY_ENV=(MOBILE="$MOBILE_REPO" WEB_DIST="$VDIR/dist-web" MOBILE_DIST="$VDIR/dist" BUILD="$RW/next-build" SWAPUP_DB_BACKUP="$BACKUP")
+# A deploy that stops once the new build is on the VM puts the release before it back (deploy.sh says
+# ROLLED BACK, or DOWN when that did not answer either) and exits 1; nothing is then verified or recorded.
+deploy_failed() {
+  tail -30 "$DEPLOY_LOG"
+  if grep -q "ROLLED BACK" "$DEPLOY_LOG"; then
+    stop "Stopping: $VER did not go live — deploy.sh put the release before it back, and it answers. See $DEPLOY_LOG; nothing is recorded (the database backup is $BACKUP)."
+  elif grep -q "✗ DOWN" "$DEPLOY_LOG"; then
+    stop "Stopping: $VER did not go live and the rollback did not bring the release before it back — the site is DOWN. See $DEPLOY_LOG (the database backup is $BACKUP)."
+  fi
+  stop "Stopping: deploy.sh failed — see $DEPLOY_LOG (the database backup is $BACKUP)."
+}
 echo "▸ deploy (server + browser apps + APKs; log $DEPLOY_LOG)"
 if [ -n "$FAKE" ]; then
-  if [ -n "${FAKE_DEPLOY:-}" ]; then env "${DEPLOY_ENV[@]}" bash "$FAKE_DEPLOY" > "$DEPLOY_LOG" 2>&1 || { tail -20 "$DEPLOY_LOG"; stop "Stopping: the deploy failed — see $DEPLOY_LOG."; }
+  if [ -n "${FAKE_DEPLOY:-}" ]; then env "${DEPLOY_ENV[@]}" bash "$FAKE_DEPLOY" > "$DEPLOY_LOG" 2>&1 || deploy_failed
   else echo "  FAKE_SSH: deploy.sh not run" > "$DEPLOY_LOG"; fi
 else
   worktree "$SWAPUP_REPO" swapup "$S_FULL"
-  (cd "$SRC/swapup" && env "${DEPLOY_ENV[@]}" bash deploy/deploy.sh) > "$DEPLOY_LOG" 2>&1 || { tail -30 "$DEPLOY_LOG"; stop "Stopping: deploy.sh failed — see $DEPLOY_LOG (the database backup is $BACKUP)."; }
+  (cd "$SRC/swapup" && env "${DEPLOY_ENV[@]}" bash deploy/deploy.sh) > "$DEPLOY_LOG" 2>&1 || deploy_failed
 fi
 grep -E "✓ deployed|→|FAKE_SSH" "$DEPLOY_LOG" | tail -8 || true
 

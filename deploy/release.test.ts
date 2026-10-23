@@ -4,6 +4,7 @@
  *
  *   - no active rate card and no PriceIQ key → it stops with one plain sentence, before any backup;
  *   - an active card → it backs up the live database, then deploys, verifies and records the APKs;
+ *   - a deploy that deploy.sh rolled back (or could not) → one sentence saying which; nothing recorded;
  *   - a kept build whose APK isn't its manifest's (sha256) is refused before the VM is asked anything;
  *   - --plan changes nothing; a dirty tree or a version the repos don't say is refused;
  *   - vm.sh's list of retired sentences is lib/server/seed.ts's.
@@ -243,6 +244,35 @@ test("a case still storing a retired sentence after the deploy fails the verify 
   } finally {
     live(`DELETE FROM rate_cards`);
     live(`DELETE FROM cases WHERE id = 'c2'`);
+    reset();
+  }
+});
+
+test("a deploy that deploy.sh rolled back (or could not): release.sh says which in one sentence, and verifies and records nothing", () => {
+  const fakeDeploy = (name: string, line: string) => {
+    const f = join(T, name);
+    writeFileSync(f, `#!/usr/bin/env bash\necho "▸ health on the VM (/login and the API)"\necho "${line}" >&2\nexit 1\n`);
+    return f;
+  };
+  const rolledBack = fakeDeploy("fake-deploy-rolled-back", "✗ ROLLED BACK: the deploy stopped at the health check, so the release kept before it is running again and answers.");
+  const down = fakeDeploy("fake-deploy-down", "✗ DOWN: the deploy stopped at the health check and the rollback did not bring the release before it back — the site is down.");
+  live(`INSERT INTO rate_cards (id, active) VALUES ('rc_w42', 1)`);
+  try {
+    const r = release([VER], { FAKE_DEPLOY: rolledBack });
+    assert.notEqual(r.code, 0, r.out);
+    assert.match(
+      r.stderr,
+      /^Stopping: 9\.9\.9 did not go live — deploy\.sh put the release before it back, and it answers\. See \S+\/deploy-\d{8}T\d{6}Z\.log; nothing is recorded \(the database backup is \S+\/swapup-pre-9\.9\.9-\d{8}T\d{6}Z\.db\)\.$/m
+    );
+    assert.doesNotMatch(r.out, /▸ verify/);
+    assert.deepEqual(releases().releases, []);
+    reset();
+    const d = release([VER], { FAKE_DEPLOY: down });
+    assert.notEqual(d.code, 0, d.out);
+    assert.match(d.stderr, /^Stopping: 9\.9\.9 did not go live and the rollback did not bring the release before it back — the site is DOWN\./m);
+    assert.deepEqual(releases().releases, []);
+  } finally {
+    live(`DELETE FROM rate_cards`);
     reset();
   }
 });
