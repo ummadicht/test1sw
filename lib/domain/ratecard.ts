@@ -178,6 +178,13 @@ export type RateQuote =
 
 /** The card is active, but the phone (model + storage) is not on it. */
 export const NOT_ON_CARD = "This phone isn't on the rate card yet.";
+/** Nothing priced the phone and no rate card is active (PriceIQ off, or it gave no reason) — lib/server/tradeIn.ts. */
+export const NO_RATE_CARD = "No rate card is active yet.";
+/**
+ * No price, and nothing at the counter will give one: the active card doesn't list the phone, or no
+ * card is active (SUP-32). PriceIQ's own reasons are not final — it may answer on the next ask.
+ */
+export const finalNoPrice = (reason: string | null | undefined): boolean => reason === NOT_ON_CARD || reason === NO_RATE_CARD;
 
 export function findEntry(card: RateCard, modelId: string, variant: string): RateEntry | null {
   return card.entries.find((e) => e.modelId === modelId && e.variant === variant) ?? null;

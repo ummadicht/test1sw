@@ -656,7 +656,7 @@ a Check the phone tap, the storage) re-grades and re-prices the case before it a
 
 | status | ready | final | lines | customer text when not ready |
 | --- | --- | --- | --- | --- |
-| `draft` / `quoted` | a market price from the **partner** (`partner_manual` or `partner_ratecard`), not lapsed, not blocked | false | grade, market, we_pay, bonus, repair | "The advisor is working out your price." — or, for a PriceIQ estimate, "The advisor is confirming your price." (staff note: "Estimate from the refurbished market — not shown to the customer.") |
+| `draft` / `quoted` | a market price from the **partner** (`partner_manual` or `partner_ratecard`), not lapsed, not blocked | false | grade, market, we_pay, bonus, repair | "The advisor is working out your price." — or, for a PriceIQ estimate, "The advisor is confirming your price." (staff note: "Estimate from the refurbished market — not shown to the customer."); when nothing can price the phone here — the quote's reason is "This phone isn't on the rate card yet." or "No rate card is active yet." (storage not chosen: every size's), not blocked, not lapsed — "This phone can't be priced for trade-in here yet — the advisor will explain." (SUP-32; staff `lines` keep grade and repair) |
 | traded (`locked` … `not_received`) | true | true | grade, market, we_pay, bonus — from `trade_value`, `premium_value`, `bonus_value` | — |
 | `repair_chosen` | true | true | grade, repair | — |
 | `walked_away` | as the partner's price allows | true | as last worked out | "This case is closed." |
@@ -970,7 +970,7 @@ slice of `offer.answer` (§3c, `lib/domain/answer.ts customerAnswer`) — a **wh
 
 ```ts
 type CustomerAnswer =
-  | { ready: false; final: boolean; text: string; test: boolean }      // "The advisor is working out your price."
+  | { ready: false; final: boolean; text: string; test: boolean }      // "The advisor is working out your price." (table above)
   | { ready: true; final: boolean; headline: string;
       grade: { letter; word; note } | null; market: { amount; letter; word } | null; wePay: number | null;
       bonus: { amount } | null; newPhone: { label } | null;

@@ -47,7 +47,7 @@ export type AnswerLine = { key: AnswerLineKey; text: string; note: string | null
 export type Answer = {
   /** The customer may see the figures. Staff screens print `lines` whatever this says. */
   ready: boolean;
-  /** One customer sentence when !ready ("The advisor is working out your price."); null when ready. */
+  /** One customer sentence when !ready ("The advisor is working out your price.", CANT_PRICE…); null when ready. */
   text: string | null;
   /** The case has left the counter: the figures are the ones locked (or last shown). */
   final: boolean;
@@ -123,11 +123,19 @@ export type AnswerInput = {
   /** Closed traded cases: the figures frozen at lock win over the quote and bonus JSON. */
   locked: { trade: Rupees | null; premium: Rupees | null; premiumBp: BasisPoints | null; bonus: Rupees | null; payable: Rupees | null } | null;
   testProgramme: boolean;
+  /**
+   * Nothing can price the phone here — the active rate card doesn't list it, or no card is active
+   * (offer.ts, ratecard.ts finalNoPrice): an open case tells the customer CANT_PRICE instead of
+   * WORKING_OUT. Default false.
+   */
+  cantPrice?: boolean;
 };
 
 /* ─────────────────────────── the words ─────────────────────────── */
 
 export const WORKING_OUT = "The advisor is working out your price.";
+/** An open case nothing can price here (AnswerInput.cantPrice) — SUP-32, wording for the owner to confirm. */
+export const CANT_PRICE = "This phone can't be priced for trade-in here yet — the advisor will explain.";
 export const CONFIRMING = "The advisor is confirming your price.";
 export const CANCELLED_TEXT = "This trade-in was cancelled.";
 const CLOSED_TEXT = "This case is closed.";
@@ -247,7 +255,7 @@ export function buildAnswer(i: AnswerInput): Answer {
   let text: string | null = null;
   if (open) {
     ready = wePay !== null && !i.quoteExpired && !i.quoteBlocked && partnerPrice;
-    if (!ready) text = wePay !== null && !i.quoteExpired && !i.quoteBlocked ? CONFIRMING : WORKING_OUT;
+    if (!ready) text = i.cantPrice ? CANT_PRICE : wePay !== null && !i.quoteExpired && !i.quoteBlocked ? CONFIRMING : WORKING_OUT;
   } else if (traded || chosen) ready = true;
   else if (cancelled) {
     ready = false;

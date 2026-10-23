@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAnswer, customerAnswer, defectNote, CANCELLED_TEXT, CONFIRMING, ESTIMATE_NOTE, WORKING_OUT, type Answer, type AnswerInput } from "./answer.ts";
+import { buildAnswer, customerAnswer, defectNote, CANCELLED_TEXT, CANT_PRICE, CONFIRMING, ESTIMATE_NOTE, WORKING_OUT, type Answer, type AnswerInput } from "./answer.ts";
 import { HEALTHY, type ConditionAnswers } from "./condition.ts";
 import { gradeAfterRefurb, tradeInGrade } from "./marketSell.ts";
 import { DEFECT_DEDUCTIONS, priceFromCard, type RateCard } from "./ratecard.ts";
@@ -54,6 +54,8 @@ const F1 = {
 };
 /** F2 — customer, not ready. */
 const F2 = { ready: false, final: false, text: "The advisor is working out your price.", test: false };
+/** F2_CANT_PRICE — customer, not ready, and nothing can price the phone here: not on the active card, or no card (SUP-32). */
+const F2_CANT_PRICE = { ready: false, final: false, text: "This phone can't be priced for trade-in here yet — the advisor will explain.", test: false };
 /** F3 — customer, traded in (final). */
 const F3 = {
   ...F1,
@@ -162,6 +164,22 @@ test("answer F2: no price yet — one sentence for the customer, never half an o
   for (const over of [{ quoteExpired: true }, { quoteBlocked: true }] as Partial<AnswerInput>[]) {
     assert.deepEqual(customerAnswer(buildAnswer(f1(over))), F2, JSON.stringify(over));
   }
+});
+
+test("answer F2_CANT_PRICE: nothing can price the phone here — the customer is told so plainly, never 'working out' all visit (SUP-32)", () => {
+  const a = buildAnswer(f1({ market: null, cantPrice: true }));
+  assert.equal(a.ready, false);
+  assert.equal(a.text, CANT_PRICE);
+  assert.deepEqual(customerAnswer(a), F2_CANT_PRICE);
+  // The repair line stays where there is one: staff still see the grade and the repair.
+  assert.deepEqual(a.lines.map((l) => l.key), ["grade", "repair"]);
+  assert.equal(a.lines.find((l) => l.key === "repair")!.text, "or repair it for ₹34,096");
+  // Only an open case: past the counter the closed sentences stand.
+  assert.equal(customerAnswer(buildAnswer(f1({ status: "walked_away", market: null, cantPrice: true }))).ready, false);
+  assert.equal(buildAnswer(f1({ status: "walked_away", market: null, cantPrice: true })).text, "This case is closed.");
+  assert.equal(buildAnswer(f1({ status: "cancelled", market: null, cantPrice: true })).text, CANCELLED_TEXT);
+  // Not final (no reason given, a PriceIQ why): still the advisor working it out.
+  assert.deepEqual(customerAnswer(buildAnswer(f1({ market: null, cantPrice: false }))), F2);
 });
 
 test("answer F3 + F10: traded in — the locked figures, 'We paid you', the bonus with the phone, no repair line, and final", () => {

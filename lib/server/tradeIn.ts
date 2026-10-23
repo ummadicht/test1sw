@@ -22,11 +22,8 @@ import { partnerMode, partnerQuote, type PartnerQuote } from "./buyback";
 import { cachedMarket, freshMarket, priceiqConfig, type MarketAsk } from "./priceiq";
 import { priceiqLabel, priceiqTradeIn, SWAPUP_DEDUCTIONS_LABEL, type PriceiqMeta, type PriceiqTradeIn } from "../domain/priceiqTradeIn";
 import { gradeAfterRefurb } from "../domain/marketSell";
-import { NOT_ON_CARD } from "../domain/ratecard";
+import { NOT_ON_CARD, NO_RATE_CARD } from "../domain/ratecard";
 import { healedCondition, type ConditionAnswers, type FaultId } from "../domain/condition";
-
-/** Nothing priced the phone and no rate card is active (PriceIQ off, or it gave no reason). */
-export const NO_RATE_CARD = "No rate card is active yet.";
 
 /** How long a PriceIQ trade-in quote binds when the programme sets no quote validity of its own. */
 export const PRICEIQ_QUOTE_VALIDITY_DAYS = 3;

@@ -275,7 +275,7 @@ test("migration 16: an older database's locked case keeps premium_value NULL —
 
 /* ─────────────────────────── the customer's phone (§E) ─────────────────────────── */
 
-test("device status: applied but no partner price — one sentence ('confirming' a PriceIQ estimate, 'working out' with none)", async () => {
+test("device status: applied but no partner price — one sentence ('confirming' a PriceIQ estimate, 'working out' while something may price it, plainly 'can't be priced' when nothing can)", async () => {
   connectPriceiq();
   resetPriceiqState();
   const t = await testedCase();
@@ -283,14 +283,31 @@ test("device status: applied but no partner price — one sentence ('confirming'
   assert.equal(s.status, "applied");
   assert.equal(cases.getCase(adv, t.caseId).quote?.source.kind, "priceiq");
   assert.deepEqual(s.answer, { ready: false, final: false, text: "The advisor is confirming your price.", test: true });
+  // PriceIQ has no price for this phone and no card is active: PriceIQ may answer next time — working it out.
+  const fold = await cases.updateCase(adv, t.caseId, { modelId: "galaxy-z-fold6", variant: "256GB", faults: [], condition: COND });
+  assert.equal(fold.quote?.status, "unpriced");
+  assert.deepEqual(sessions.deviceStatus(t.ticket).answer, { ready: false, final: false, text: "The advisor is working out your price.", test: true });
+  // SUP-32: nothing can price it here — no card active with PriceIQ off, or a card that doesn't list it.
+  const CANT = { ready: false, final: false, text: "This phone can't be priced for trade-in here yet — the advisor will explain.", test: true };
   disconnectPriceiq();
   resetPriceiqState();
   try {
     const n = await testedCase();
-    assert.deepEqual(sessions.deviceStatus(n.ticket).answer, { ready: false, final: false, text: "The advisor is working out your price.", test: true });
+    assert.equal(cases.getCase(adv, n.caseId).quote?.reason, "No rate card is active yet.");
+    assert.deepEqual(sessions.deviceStatus(n.ticket).answer, CANT);
   } finally {
     connectPriceiq();
   }
+  await withF1Card(async () => {
+    const off = await cases.updateCase(adv, t.caseId, { modelId: "galaxy-s23-ultra", variant: "512GB", faults: ["screen_cracked"], condition: COND });
+    assert.equal(off.quote?.reason, "This phone isn't on the rate card yet.");
+    assert.deepEqual(sessions.deviceStatus(t.ticket).answer, CANT);
+    // Staff still see the why and the repair line; the card's size prices it, and the customer sees the lines.
+    assert.ok(off.offer!.answer.lines.some((l) => l.key === "repair"), "the repair line stays");
+    const on = await cases.updateCase(adv, t.caseId, { variant: "256GB" });
+    assert.equal(on.quote?.status, "priced");
+    assert.equal(sessions.deviceStatus(t.ticket).answer?.ready, true);
+  });
 });
 
 test("device status: a defect with no fault recorded (no power, liquid, Wi-Fi) — never 'Nothing to repair'; the advisor quotes the repair; the price doesn't move (SUP-96)", async () => {

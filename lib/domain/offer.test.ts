@@ -453,6 +453,33 @@ test("offer 7b: nothing priced it — 'No market price yet' and the reason why, 
   assert.equal(noPriceWhy(null), null);
 });
 
+test("offer 7d: nothing can price it here (not on the active card, no card) — the customer is told so; any other why, still 'working out' (SUP-32)", () => {
+  const CANT = { ready: false, final: false, text: "This phone can't be priced for trade-in here yet — the advisor will explain.", test: false };
+  const WORKING = { ready: false, final: false, text: "The advisor is working out your price.", test: false };
+  const unpriced = (reason: string) => ({ status: "unpriced" as const, amount: null, source: { kind: "none" as const }, partnerRef: null, reason });
+  for (const reason of ["This phone isn't on the rate card yet.", "No rate card is active yet."]) {
+    const o = buildOffer(priced({ quote: unpriced(reason) }));
+    assert.deepEqual(customerAnswer(o.answer), CANT, reason);
+    // Staff still read the why, once, and the repair line stays on the answer.
+    assert.deepEqual(o.asks.find((a) => a.kind === "no_price"), { kind: "no_price", title: "No market price yet", text: reason });
+    assert.deepEqual(o.answer.lines.map((l) => l.key), ["repair"]);
+    assert.equal(o.answer.lines[0].text, "or repair it for ₹34,096");
+    // The camera's identity block or a lapsed quote: the advisor has something to do — not final.
+    assert.deepEqual(customerAnswer(buildOffer(priced({ quote: unpriced(reason), quoteBlocked: "The camera saw a different phone." })).answer), WORKING, reason);
+    assert.deepEqual(customerAnswer(buildOffer(priced({ quote: unpriced(reason), quoteExpired: true })).answer), WORKING, reason);
+    // Closed: the closed sentence.
+    assert.deepEqual(customerAnswer(buildOffer(priced({ status: "walked_away", quote: unpriced(reason) })).answer), { ...WORKING, final: true, text: "This case is closed." });
+  }
+  // PriceIQ's own why, or none stored: it may price on the next ask — still working it out.
+  for (const reason of ["No refurbished market price yet — PriceIQ didn't answer within 6 s.", "No market price yet.", ""])
+    assert.deepEqual(customerAnswer(buildOffer(priced({ quote: unpriced(reason) })).answer), WORKING, reason);
+  // The storage not chosen yet: final only when every size is off the card.
+  const chips = (r: (string | null)[]) => r.map((reason, k) => ({ variant: ["256GB", "512GB"][k], amount: reason ? null : 18_800, reason }));
+  assert.deepEqual(customerAnswer(buildOffer(storageUnknown({ storageQuotes: chips(["This phone isn't on the rate card yet.", "This phone isn't on the rate card yet."]) })).answer), CANT);
+  assert.deepEqual(customerAnswer(buildOffer(storageUnknown({ storageQuotes: chips(["This phone isn't on the rate card yet.", null]) })).answer), WORKING);
+  assert.deepEqual(customerAnswer(buildOffer(storageUnknown({ storageQuotes: null })).answer), WORKING);
+});
+
 test("offer 7c: no price because of the condition — its first problem, never a partner ask", () => {
   const o = buildOffer(priced({ quote: null, conditionProblems: ["The screen is recorded flawless but it is cracked."] }));
   assert.equal(o.swap.why, "The screen is recorded flawless but it is cracked.");

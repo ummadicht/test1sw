@@ -35,7 +35,7 @@
 
 import { SWOLLEN_BATTERY_CAVEAT, type Decision, type Recommendation } from "./decision.ts";
 import type { Coverage, ManualQuote, RepairEstimate } from "./repair.ts";
-import type { PriceSourceKind, QuoteLine } from "./ratecard.ts";
+import { finalNoPrice, type PriceSourceKind, type QuoteLine } from "./ratecard.ts";
 import type { ConditionAnswers } from "./condition.ts";
 import type { MarketGrade } from "./marketSell.ts";
 import { fmtBp } from "./money.ts";
@@ -351,6 +351,15 @@ export function buildOffer(i: OfferInput): Offer {
             : q && q.status !== "priced"
               ? (noPriceWhy(q.reason) ?? (open ? REQUOTE_FOR_WHY : null))
               : (i.conditionProblems[0] ?? (!i.hasCondition ? NO_CONDITION : NO_TRADE_IN))));
+  // Nothing at the counter will price it (SUP-32): the quote's reason is final — or, the storage not
+  // chosen yet, every size's — so the customer is told so, not "working out your price" all visit.
+  const cantPrice =
+    open &&
+    !!device &&
+    !i.quoteBlocked &&
+    (variant
+      ? !!q && q.status !== "priced" && !i.quoteExpired && finalNoPrice(q.reason)
+      : !unlisted && !!i.storageQuotes?.length && i.storageQuotes.every((s) => s.amount === null && finalNoPrice(s.reason)));
   const up = i.upgrade;
   const b = up ? i.bonus : null;
   const bonus = b ? (b.override?.amount ?? b.amount) : null;
@@ -505,6 +514,7 @@ export function buildOffer(i: OfferInput): Offer {
       recommendation,
       locked: frozen,
       testProgramme: i.testProgramme === true,
+      cantPrice,
     }),
   };
 }
