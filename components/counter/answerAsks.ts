@@ -138,12 +138,23 @@ export const CHOOSE_NEW_PHONE_LINK = "Choose new phone";
 const SAYS_CHOOSE_NEW_PHONE = /^choose (?:the |a )?new phone\.?$/i;
 
 /**
- * Why "Swap up" is refused, said once in the trade-in tile — and not at all when the tile already
- * says it: as its why (no trade-in), as its warn note, or as its "Choose the new phone" link.
+ * Why the tile has no "We pay", said once: not when the headline's sentence under it already says
+ * it (a phone not on the rate card, a measured size not on file — "No market price yet" over
+ * "This phone isn't on the rate card yet.").
+ */
+export function swapWhy(o: Offer): string | null {
+  return o.swap.total === null && o.swap.why !== o.reason ? o.swap.why : null;
+}
+
+/**
+ * Why "Swap up" is refused, said once in the trade-in tile — and not at all when the card already
+ * says it: as the headline's sentence, as the tile's why (no trade-in), as its warn note, or as its
+ * "Choose the new phone" link.
  */
 export function swapRefusal(o: Offer): string | null {
   const no = o.actions.swap;
   if (!no) return null;
+  if (no === o.reason) return null;
   if (o.swap.total === null && no === o.swap.why) return null;
   if (no === o.swap.tradeInNote) return null;
   if (!o.swap.newPhone && SAYS_CHOOSE_NEW_PHONE.test(no.trim())) return null;

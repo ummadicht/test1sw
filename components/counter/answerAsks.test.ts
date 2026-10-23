@@ -17,6 +17,7 @@ import {
   requotable,
   requoteSpot,
   swapRefusal,
+  swapWhy,
   unlistedSize,
   withCameraReason,
 } from "./answerAsks.ts";
@@ -300,6 +301,33 @@ test("no trade-in: the tile's why says it; any other refusal is said once", () =
   assert.equal(swapRefusal(buildOffer(input({ ...NO_STORAGE }))), null);
   assert.equal(swapRefusal(buildOffer(input({ status: "draft" }))), "Not priced yet.");
   assert.equal(swapRefusal(buildOffer(input())), null);
+});
+
+test("a phone not on the rate card (or a measured size not on file): the reason is said ONCE — under the headline, not again in the Swap up tile", async () => {
+  const OFF_CARD = { status: "unpriced" as const, amount: null, source: { kind: "partner_ratecard" as const }, partnerRef: null, reason: "This phone isn't on the rate card yet." };
+  const UNLISTED = "Phone measures 1TB, not on file — no trade-in price for that size.";
+  const shown = [
+    [input({ quote: OFF_CARD }), OFF_CARD.reason],
+    [input({ quote: OFF_CARD, upgrade: null }), OFF_CARD.reason],
+    [input({ ...NO_STORAGE, measuredStorage: "1TB" }), UNLISTED],
+  ] as const;
+  for (const [i, sentence] of shown) {
+    const o = buildOffer(i);
+    assert.equal(o.reason, sentence, "the headline's sentence says it");
+    assert.equal(swapWhy(o), null, "not the tile's why again");
+    assert.equal(swapRefusal(o), null, "nor its refusal");
+    // Everything the card prints in words (AnswerCard): the sentence, the asks (their text dropped when it is the sentence), the tile.
+    const printed = [o.reason, ...o.asks.map((a) => (a.text !== o.reason ? a.text : null)), swapWhy(o), swapRefusal(o)];
+    assert.equal(printed.filter((t) => t === sentence).length, 1, JSON.stringify(printed));
+  }
+  // A why the headline doesn't say is still said, in the tile.
+  assert.equal(swapWhy(buildOffer(input({ ...NO_STORAGE }))), "Tap the storage to see the trade-in.");
+  assert.equal(swapWhy(buildOffer(input({ quote: null, hasCondition: false }))), "Record the condition.");
+  assert.equal(swapWhy(buildOffer(input())), null, "priced: there is a We pay");
+  // The card prints the tile's why only through swapWhy — never o.swap.why straight.
+  const card = (await import("node:fs")).readFileSync(new URL("./AnswerCard.tsx", import.meta.url), "utf8");
+  assert.match(card, /swapWhy\(o\)/);
+  assert.ok(!/\bw\.why\b|o\.swap\.why/.test(card), "no second way to print the tile's why");
 });
 
 /* ─────────────────────────── one name for the partner ─────────────────────────── */
