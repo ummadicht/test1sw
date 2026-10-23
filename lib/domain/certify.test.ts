@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   CERT_ROWS,
   REASON_ON_DESK,
+  allFineValue,
   certChoices,
   certifyAgainstCamera,
   certifyNeeded,
@@ -355,16 +356,53 @@ test("C10: a camera that wasn't conclusive or wants a person to review — clear
   assert.equal(both.grade, "Good");
 });
 
-test("SUP-5: a tap better than the camera confirmed gets the camera's sentence and where the reason goes; the same, worse, liquid or no floor stand", () => {
+test("SUP-5: a tap better than the camera confirmed gets the camera's words, the chip tapped by its label, and where the reason goes; the same, worse, liquid or no floor stand", () => {
   const floor = { screen: "lines_or_spots" as const, body: "dented" as const };
-  assert.equal(certifyAgainstCamera("screen", "ok", floor), `Camera confirmed the screen "Lines, spots or dead pixels" — "Flawless" ${REASON_ON_DESK}`);
-  assert.equal(certifyAgainstCamera("screen", "scratches", floor), `Camera confirmed the screen "Lines, spots or dead pixels" — "Visible scratches" ${REASON_ON_DESK}`);
-  assert.equal(certifyAgainstCamera("body", "scuffs", floor), `Camera confirmed the body "Dents on the frame" — "Light scuffs" ${REASON_ON_DESK}`);
-  assert.equal(REASON_ON_DESK, 'needs a reason, given under "Why it\'s better" on the desk.');
+  assert.equal(certifyAgainstCamera("screen", "ok", floor), `Camera confirmed the screen "Lines, spots or dead pixels" — "OK" ${REASON_ON_DESK}`);
+  assert.equal(certifyAgainstCamera("screen", "scratches", floor), `Camera confirmed the screen "Lines, spots or dead pixels" — "Scratches" ${REASON_ON_DESK}`);
+  assert.equal(certifyAgainstCamera("body", "scuffs", floor), `Camera confirmed the body "Dents on the frame" — "Scuffs" ${REASON_ON_DESK}`);
+  assert.equal(certifyAgainstCamera("body", "like_new", floor), `Camera confirmed the body "Dents on the frame" — "Like new" ${REASON_ON_DESK}`);
+  // The chip as the card shows it, word for word — never the condition's word for it ("Flawless").
+  for (const row of ["screen", "body"] as const)
+    for (const c of certChoices(row)) {
+      const why = certifyAgainstCamera(row, c.value, { screen: "cracked", body: "bent" });
+      if (why) assert.equal(why.match(/ — "([^"]+)" needs a reason/)?.[1], c.label, why);
+    }
+  // Where the reason is given: the desk step that exists, once the camera's finding is on the case.
+  assert.equal(REASON_ON_DESK, "needs a reason, given on the desk's What's wrong once the answer is open.");
   for (const [row, value] of [["screen", "lines"], ["screen", "cracked"], ["body", "dents"], ["body", "bent"], ["liquid", "clean"], ["screen", "nonsense"]] as const)
     assert.equal(certifyAgainstCamera(row, value, floor), null, `${row} ${value}`);
-  assert.equal(certifyAgainstCamera("screen", "ok", null), null, "no camera floor (before Apply): Apply's floor stands");
+  assert.equal(certifyAgainstCamera("screen", "ok", null), null, "no camera evidence");
   assert.equal(certifyAgainstCamera("screen", "ok", NO_FLOOR), null);
+});
+
+test("SUP-5: \"All fine\" means nothing beyond what the camera confirmed — on a row it confirmed worse, the camera's own chip; never refused", () => {
+  const screenOf = { flawless: "ok", scratched: "scratches", lines_or_spots: "lines", cracked: "cracked" } as const;
+  const bodyOf = { flawless: "like_new", scuffed: "scuffs", dented: "dents", back_cracked: "back_cracked", bent: "bent" } as const;
+  for (const [screen, chip] of Object.entries(screenOf)) {
+    const floor = { ...NO_FLOOR, screen: screen as keyof typeof screenOf };
+    assert.equal(allFineValue("screen", "ok", floor), chip, screen);
+    assert.equal(certifyAgainstCamera("screen", allFineValue("screen", "ok", floor), floor), null, `${screen}: never refused`);
+  }
+  for (const [body, chip] of Object.entries(bodyOf)) {
+    const floor = { ...NO_FLOOR, body: body as keyof typeof bodyOf };
+    assert.equal(allFineValue("body", "like_new", floor), chip, body);
+    assert.equal(certifyAgainstCamera("body", allFineValue("body", "like_new", floor), floor), null, `${body}: never refused`);
+  }
+  // Nothing confirmed, no camera, the liquid row: "All fine"'s own value.
+  assert.equal(allFineValue("screen", "ok", NO_FLOOR), "ok");
+  assert.equal(allFineValue("body", "like_new", null), "like_new");
+  assert.equal(allFineValue("liquid", "cant_see", { screen: "cracked", body: "bent" }), "cant_see");
+});
+
+test("SUP-5: a reason on record — the certification stands on the floor that stands: DS4 says why, no DS10 \"camera stands\"", () => {
+  const reason = { by: "Rahul Desai", userId: "u", reason: "Scratches are on the screen guard only", at: AT, items: ["screen:scratched"] };
+  const cam: GradingCamera = { ...FAILED, status: "final", final: true, lcd: { cameraChecked: false, verdict: null, reason: "x" }, floor: { screen: "scratched", body: "dented" }, faults: [], overrides: [reason] };
+  const g = grade(input({ camera: cam, condition: { ...COND, screen: "flawless", body: "dented" }, certification: certified({ screen: ["ok"], body: ["like_new"] }) }));
+  assert.equal(g.disclosures.find((d) => d.code === "DS4")?.text, "Recorded better than the camera saw, by Rahul Desai: Scratches are on the screen guard only");
+  const ds10 = g.disclosures.filter((d) => d.code === "DS10").map((d) => d.text);
+  // The screen the reason covers: no "camera stands" — it doesn't, the phone is priced flawless. The body it doesn't cover: the camera stands.
+  assert.deepEqual(ds10, ['Camera found dents on the frame; Asha K. certified "Like new" — camera stands.']);
 });
 
 test("SUP-5: the floor a tap stands on is the camera's, less what a recorded reason overruled", () => {

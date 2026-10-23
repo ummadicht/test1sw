@@ -64,7 +64,7 @@ import {
   type TestResult,
   type TestResults,
 } from "./diagnostics.ts";
-import { COMPONENT_LABEL, type CaseCameraCheck, type GiqComponentId, type RecordedOverride } from "./gradeiqMap.ts";
+import { COMPONENT_LABEL, standingFloor, type CaseCameraCheck, type GiqComponentId, type RecordedOverride } from "./gradeiqMap.ts";
 import type { PcOther } from "./phonecheck.ts";
 import { certChoice, type Certification, type CertRow } from "./certify.ts";
 
@@ -531,8 +531,9 @@ export function grade(input: GradingInput): Grading {
   }
   if (input.browserRun) disclosures.push({ code: "DS7", text: BROWSER_NOTE });
   if (cert?.liquid?.value === "cant_see") disclosures.push({ code: "DS9", text: `Liquid indicator not checked — ${cert.liquid.by} couldn't see it.` });
-  // The advisor recorded better than the camera CONFIRMED: the camera's finding stands (certifyRow kept the floor).
-  const floor0 = camera?.floor;
+  // The advisor recorded better than the camera CONFIRMED: the camera's finding stands (certifyRow kept the floor) —
+  // unless a recorded reason overruled it (DS4 says so), when the advisor's look is what was priced.
+  const floor0 = camera?.floor ? standingFloor({ floor: camera.floor, overrides: camera.overrides }) : undefined;
   if (cameraFinal && floor0) {
     const sc = cert?.screen ? certChoice("screen", cert.screen.value)?.screen : undefined;
     if (cert?.screen && sc && SCREEN_ORDER.indexOf(sc) < SCREEN_ORDER.indexOf(floor0.screen))

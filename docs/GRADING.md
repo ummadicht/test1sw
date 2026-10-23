@@ -134,7 +134,7 @@ Scuffs · Dents · Back cracked · Bent), the **liquid indicator** (Clean · Tri
 | DS7 | tested in a web browser | disclosure |
 | DS8 | Phonecheck reads the phone as another model on file (the case is kept) | disclosure |
 | DS9 | the liquid indicator couldn't be seen — "not checked", by whom | disclosure |
-| DS10 | a FINAL camera confirmed worse than the advisor certified (the camera's finding stands), or saw a bent frame / cracked back the advisor then checked by eye | disclosure |
+| DS10 | a FINAL camera confirmed worse than the advisor certified (the camera's finding stands — not where a recorded reason overruled it, DS4), or saw a bent frame / cracked back the advisor then checked by eye | disclosure |
 
 Owner decisions still open (spec §9): the one "scratched" bucket maps to Good (the refurbished
 market splits scratches by count); battery under 80 % is "Needs repair", not a lower grade.

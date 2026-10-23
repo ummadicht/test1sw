@@ -13,7 +13,8 @@ export const ALL_FINE_BUTTON = "All fine — screen OK, body like new";
  * advisor looks at the phone. One tap — "All fine — screen OK, body like new" — records the screen
  * OK, the body like new and the liquid indicator "Can't see" (honest: nobody looked at it), by name,
  * on every row nobody has tapped yet — a row already tapped (a liquid "Tripped" on SwapUp Store)
- * keeps its tap — exactly as SwapUp Store's own "All fine" would ({action: "certify", allFine: true}),
+ * keeps its tap, and a row the store camera confirmed worse gets the camera's own chip ("Scratches"),
+ * so it is never refused — exactly as SwapUp Store's own "All fine" would ({action: "certify", allFine: true}),
  * and opens the answer. Anything else is the faults and the condition on "What's wrong".
  */
 export function CheckByEye({ ops, onDone, onOther }: { ops: CaseOps; onDone: () => void; onOther: () => void }) {

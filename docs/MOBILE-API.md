@@ -1292,7 +1292,9 @@ audit row per row (`allFine: true`) — and opens the answer. The chips stay for
 taps **only the rows nobody has tapped yet**: a row already certified keeps its tap (it was looked
 at — a liquid "Tripped" tapped on SwapUp Store stays, with its water damage and its lower price),
 and the liquid indicator only when the card asks for it (`needed`), as SwapUp Store's `allFineTaps`
-skips it — so the desk's "All fine" never overwrites what the tablet recorded.
+skips it — so the desk's "All fine" never overwrites what the tablet recorded. On a screen or body
+the store camera confirmed worse it records the camera's own chip instead (below), so send it as
+`{allFine: true}`: a single `ok` / `like_new` tap there is refused.
 
 Which rows (`needed`) follow exactly what the SwapUp grade can only settle with a look
 (`certifySignals` in `lib/domain/certify.ts`): the screen when the cosmetic grade isn't final, the
@@ -1329,14 +1331,21 @@ SwapUp Check and nobody certified.
 - Faults it adds carry source `advisor`; changing the row takes off only the faults that row added
   (and only when nothing else found them). The screen and body take the certified value but never
   better than the case's faults.
-- A tap (or `allFine`) that would record the screen or body **better than the store camera
-  confirmed** (the case's camera floor, after Apply) is refused `409` `{ "error": "<sentence>" }` and
-  nothing is recorded — the camera's own sentence, the desk's, with where the reason goes:
-  `Camera confirmed the screen "Visible scratches" — "Flawless" needs a reason, given under "Why it's better" on the desk.`
-  (it names the row). Show it as it comes. Once a reason is on record (the desk's condition change
-  with "Why it's better"), that screen or body is no longer held to the camera and the tap stands.
-  Before Apply there is no camera floor on the case: Apply folds the camera in, and its finding
-  stands (DS10).
+- A tap that would record the screen or body **better than the store camera confirmed** is refused
+  `409` `{ "error": "<sentence>" }` and nothing is recorded — the camera's words (the desk's), the
+  chip tapped by its label, and where the reason goes:
+  `Camera confirmed the screen "Visible scratches" — "OK" needs a reason, given on the desk's What's wrong once the answer is open.`
+  Show it as it comes. What the camera confirmed is this session's: before Apply (the usual tap —
+  the card holds the answer until it is tapped) the session's own camera, the floor its Apply puts
+  on the case; after Apply the case's camera record. A re-test's taps are held to the re-test's
+  camera, never the earlier one's. Once a reason is on record (the desk's What's wrong, "Why it's
+  better" — it needs the camera's finding on the case, so after Apply), that screen or body is no
+  longer held to the camera: the tap stands, Apply (a re-test's too) doesn't floor it back, and the
+  grade report doesn't say "camera stands".
+- `allFine` is never refused for what the camera confirmed: "All fine" means nothing beyond what
+  the camera saw, so on a row the camera confirmed worse it records the camera's own chip (Screen
+  `scratches` on a camera's "Visible scratches", Body `dents` on its "Dents on the frame") — the row
+  then says what the phone is priced at.
 - `withColours` = the phone's phase was `colours` within the last 10 minutes.
 - Works before and after Apply, until the trade-in is locked. Before Apply the case has no
   condition yet: a tap records the row (and puts on any fault it means) but never invents the rest of
@@ -1345,7 +1354,7 @@ SwapUp Check and nobody certified.
   nothing (no audit row). Every change is audited `case.certify` `{row, value, prev, withColours,
   testSessionId, faultsAdded, faultsRemoved}`; the grade report gets a version (`certified`).
 - Errors: `403` "Only store staff certify a phone." (not advisor / store manager) · `404` the case or
-  that session isn't in scope · `409` past the counter, or better than the camera confirmed (above) ·
+  that session isn't in scope · `409` past the counter, or a tap better than the camera confirmed (above) ·
   `400` unknown row, or "Tap one of: OK, Scratches, Lines or spots, Cracked."
 - After the last tap the answer opens by itself (the session's `autoApply` goes `ready` → `applied`),
   recorded as whoever tapped last (else whoever released the Scan step, else who started it).

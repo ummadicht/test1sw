@@ -835,23 +835,29 @@ export function cameraOverrideProblems(answers: ConditionAnswers | null, faults:
 
 /**
  * The screen and body part of cameraOverrideProblems — a screen or body BETTER than the camera's
- * floor, each with its key and the camera's sentence. `needs` ends the sentence: the desk's save
- * asks for the reason right there (NEEDS_REASON); a tap on "Check the phone" says where it is given
- * (certify.ts certifyAgainstCamera).
+ * floor, each with its key, the camera's part of the sentence ('Camera confirmed the screen
+ * "Visible scratches"') and the desk's whole sentence. A tap on "Check the phone" words its own
+ * from the same camera part (certify.ts certifyAgainstCamera).
  */
-export function floorProblems(answers: Pick<ConditionAnswers, "screen" | "body">, floor: CameraFloor, needs: string = NEEDS_REASON): { key: string; why: string }[] {
-  const out: { key: string; why: string }[] = [];
-  if (SCREEN_ORDER.indexOf(answers.screen) < SCREEN_ORDER.indexOf(floor.screen))
-    out.push({ key: `screen:${floor.screen}`, why: `Camera confirmed the screen "${SCREEN_LABEL[floor.screen]}" — "${SCREEN_LABEL[answers.screen]}" ${needs}` });
-  if (BODY_ORDER.indexOf(answers.body) < BODY_ORDER.indexOf(floor.body))
-    out.push({ key: `body:${floor.body}`, why: `Camera confirmed the body "${BODY_LABEL[floor.body]}" — "${BODY_LABEL[answers.body]}" ${needs}` });
+export function floorProblems(answers: Pick<ConditionAnswers, "screen" | "body">, floor: CameraFloor): { key: string; camera: string; why: string }[] {
+  const out: { key: string; camera: string; why: string }[] = [];
+  if (SCREEN_ORDER.indexOf(answers.screen) < SCREEN_ORDER.indexOf(floor.screen)) {
+    const camera = `Camera confirmed the screen "${SCREEN_LABEL[floor.screen]}"`;
+    out.push({ key: `screen:${floor.screen}`, camera, why: `${camera} — "${SCREEN_LABEL[answers.screen]}" ${NEEDS_REASON}` });
+  }
+  if (BODY_ORDER.indexOf(answers.body) < BODY_ORDER.indexOf(floor.body)) {
+    const camera = `Camera confirmed the body "${BODY_LABEL[floor.body]}"`;
+    out.push({ key: `body:${floor.body}`, camera, why: `${camera} — "${BODY_LABEL[answers.body]}" ${NEEDS_REASON}` });
+  }
   return out;
 }
 
 /**
  * What the camera confirmed that no recorded reason has overruled: its floor, less a screen or body
  * an override covers (the desk's "Why it's better" — cases.ts updateCase records the key
- * cameraOverrideProblems gives). The floor a tap on "Check the phone" stands on.
+ * cameraOverrideProblems gives). The floor a tap on "Check the phone" stands on (cases.ts tapFloor),
+ * the floor Apply puts on the case (the reasons carry over to a re-test), and the one the grade
+ * report holds a certification to (grading.ts DS10).
  */
 export function standingFloor(camera: Pick<CaseCameraCheck, "floor" | "overrides">): CameraFloor {
   const covered = new Set((camera.overrides ?? []).flatMap((o) => o.items));
