@@ -183,7 +183,11 @@ export function refurbEconomics(i: RefurbInput): RefurbEconomics {
   // unknown (null), and the customer's covered price would leave that part out, so there is no
   // figure. The outside quote (manual) has no list total; its figure is the centre's own.
   const estimate = repair?.status !== "quoted" ? null : repair.basis === "manual" ? repair.customerPays : repair.listTotal;
+  // A defect in the condition with no fault recorded for it (a dead display, no power, liquid…): there
+  // is something to repair, but nothing says what — never "Nothing to repair", and no repaired price.
+  const unrecorded = faults.length === 0 && condition ? defectNote(condition) : null;
   if (refurbCost) repairCost = { amount: refurbCost.amount, basis: "store", source: `The store's own figure, entered by ${refurbCost.by}`, why: null };
+  else if (unrecorded) repairCost = { amount: null, basis: null, source: null, why: `Bench check needed (${unrecorded}) — enter the store's repair cost.` };
   else if (repair && estimate !== null) repairCost = { amount: estimate, basis: "estimate", source: estimateLine(repair), why: null };
   else if (faults.length === 0 || repair?.status === "nothing_to_repair") repairCost = { amount: 0, basis: "none", source: NOTHING_TO_REPAIR, why: null };
   else if (repair?.status === "needs_inspection")
@@ -206,6 +210,7 @@ export function refurbEconomics(i: RefurbInput): RefurbEconomics {
   else if (!card) postRepair = missingPost(PRICE_LIST_GONE);
   else if (!condition) postRepair = missingPost(NO_CONDITION);
   else if (!device?.variant) postRepair = missingPost(swap.why ?? NO_TRADE_IN);
+  else if (unrecorded) postRepair = missingPost(`No fault recorded for ${unrecorded} — the repaired price can't be worked out.`);
   else {
     const r = priceFromCard(card, device.modelId, device.variant, healedCondition(condition, faults));
     postRepair =

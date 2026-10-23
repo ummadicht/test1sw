@@ -304,3 +304,17 @@ test("the trace line: a card row without grade columns starts from its best-cond
   assert.equal(cardTraceLine([{ label: "Market price grade B · Week 42", amount: 33_574 }], "Good"), "grade B price");
   assert.equal(cardTraceLine([{ label: "Best-condition price on the rate card", amount: 24_000 }], null), "best-condition price");
 });
+
+test("a defect with no fault recorded (no power, liquid, a dead display): never 'Nothing to repair', no repaired price, no decision", () => {
+  for (const over of [{ powersOn: false }, { issues: ["liquid" as const] }, { screen: "not_working" as const }]) {
+    const { e } = run({ condition: cond(over), faults: [] });
+    assert.equal(e.repairCost.amount, null, JSON.stringify(over));
+    assert.match(e.repairCost.why ?? "", /^Bench check needed \(.+\) — enter the store's repair cost\.$/, JSON.stringify(over));
+    assert.equal(e.postRepair.amount, null, JSON.stringify(over));
+    assert.match(e.postRepair.why ?? "", /^No fault recorded for .+ — the repaired price can't be worked out\.$/, JSON.stringify(over));
+    assert.deepEqual([e.uplift.amount, e.uplift.verdict], [null, null], JSON.stringify(over));
+    assert.ok(e.preRefurb.amount !== null, "the trade-in itself is still priced");
+  }
+  // No defect and no fault is still nothing to repair.
+  assert.equal(run({ condition: cond({ screen: "scratched", body: "scuffed" }), faults: [] }).e.uplift.verdict, "nothing_to_repair");
+});

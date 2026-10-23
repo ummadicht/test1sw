@@ -107,6 +107,8 @@ const CSV = [
   "model_id,variant,max_price,good_price,fair_price,best_value_price",
   `${MODEL},${SIZES[0]},34960,33574,32255,30672`,
   ...SIZES.slice(1).map((v, i) => `${MODEL},${v},${39_960 + i * 5_000},${38_400 + i * 5_000},${36_900 + i * 5_000},${35_100 + i * 5_000}`),
+  // A row with only its top price, as the week-42 card's iPhone rows are.
+  "iphone-14,128GB,27780,,,",
 ].join("\n");
 uploadRateCard(partner, { label: "Week 42 (test)", effectiveFrom: "2026-10-12", quoteValidityDays: 3, csv: `${CSV}\n`, deductions: DEFECT_DEDUCTIONS, activate: true });
 const CARD = activeRateCard(orgPartnerId(adv.orgId))!;
@@ -291,6 +293,35 @@ test("storage: changing the size re-prices at the same grade; an unknown size sh
   holds(unknown, t.ticket, "size unknown, cracked/dented");
   holds(await patch(t.id, { faults: [], condition: { ...cracked, screen: "flawless", body: "flawless" } }), t.ticket, "size unknown, like new");
   holds(await patch(t.id, { variant: SIZES[SIZES.length - 1] }), t.ticket, "a size chosen again");
+});
+
+test("a card row with only its top price (the week-42 iPhones): grade A names A with the working-out; grade B names no grade and staff read why", async () => {
+  const id = cases.createCase(adv, { customerName: "Asha Rao", customerPhone: "9820012345" }).id;
+  const base = { powersOn: true, calls: true, issues: [], accessories: ALL_THERE, age: "lt3m" };
+  const back = await patch(id, { modelId: "iphone-14", variant: "128GB", imei: nextImei(), faults: [], condition: { ...base, screen: "flawless", body: "back_cracked" } });
+  assert.equal(back.quote?.source.kind, "partner_ratecard");
+  const m = back.offer!.answer.lines.find((l) => l.key === "market")!;
+  assert.deepEqual([back.offer!.answer.lines[0].text, m.text, m.note], ["Current grade A", "Market price for grade A ₹23,610", "₹27,780 less ₹4,170 for back glass cracked"]);
+  const scuffed = await patch(id, { faults: [], condition: { ...base, screen: "cracked", body: "scuffed" } });
+  const n = scuffed.offer!.answer.lines.find((l) => l.key === "market")!;
+  assert.deepEqual([scuffed.offer!.answer.grade?.letter, n.text, n.note], ["B", "Market price ₹15,830", null]);
+  assert.equal(scuffed.offer!.answer.staffNotes.market, "Priced at grade A (₹27,780 less ₹11,950) — none listed at grade B.");
+});
+
+test("a price typed on an older build, on a case still at the counter, is lapsed: re-asked on open and never locked on", async () => {
+  const t = await testedCase();
+  const v = await patch(t.id, { modelId: MODEL, variant: SIZES[0], imei: nextImei(), faults: [], condition: { powersOn: true, calls: true, screen: "flawless", body: "scuffed", issues: [], accessories: ALL_THERE, age: "lt3m" } });
+  // What a 0.9.0 counter left behind: a typed quote, valid for days yet.
+  const typed = { ...v.quote!, source: { kind: "partner_manual", label: "Partner quote" }, amount: 10_000, lines: [{ label: "Partner quote", amount: 10_000 }], validUntil: new Date(Date.now() + 2 * 86_400_000).toISOString() };
+  db().prepare(`UPDATE cases SET quote = ? WHERE id = ?`).run(JSON.stringify(typed), t.id);
+  const opened = cases.getCase(adv, t.id);
+  assert.equal(opened.quote?.source.kind, "partner_manual");
+  assert.equal(opened.quoteExpired, true, "lapsed: the desk and the store app re-quote it on open");
+  assert.ok(opened.lockBlockers.some((b) => /expired|re-quot/i.test(b)), opened.lockBlockers.join(" | "));
+  // Opening it re-quotes (the clients' quiet reprice): the card's price, one grade.
+  const re = await as(() => call(actionRoute.POST(new Request(`http://x/api/cases/${t.id}/action`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reprice" }) }), params(t.id))));
+  holds(re, t.ticket, "a typed quote re-asked");
+  assert.equal(re.quoteExpired, false);
 });
 
 test(`the matrix ran: every change above was checked on every surface`, () => {

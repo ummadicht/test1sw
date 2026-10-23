@@ -459,9 +459,16 @@ function withoutGradeiqId(c: CaseCameraCheck): Omit<CaseCameraCheck, "gradeiqId"
 const VARIANT_SOURCES = new Set<string>(["measured", "catalogue", "customer", "advisor"]);
 const readVariantSource = (s: string | null): VariantSource | null => (s && VARIANT_SOURCES.has(s) ? (s as VariantSource) : null);
 
-/** A quote that ran out — or one from a source SwapUp no longer has (an older build's): re-asked, never locked on. */
+/**
+ * A quote that ran out — or, on a case still at the counter, one from a source SwapUp no longer has
+ * (an older build's) or a price staff typed before 0.9.1 (`partner_manual`): re-asked on open (the
+ * desk's and the store app's quiet re-quote read this), never locked on. A traded case keeps its own.
+ */
 function quoteLapsed(c: CaseRow, quote: PartnerQuote | null): boolean {
-  return (!!quote?.validUntil && Date.parse(quote.validUntil) < Date.now()) || (!!quote && EDITABLE.includes(c.status) && retiredSource(quote.source?.kind));
+  return (
+    (!!quote?.validUntil && Date.parse(quote.validUntil) < Date.now()) ||
+    (!!quote && EDITABLE.includes(c.status) && (retiredSource(quote.source?.kind) || quote.source?.kind === "partner_manual"))
+  );
 }
 
 function repairNotServicedFor(tm: TradeModel | null, org: ReturnType<typeof getOrg>): string | null {

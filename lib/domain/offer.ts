@@ -477,11 +477,15 @@ export function buildOffer(i: OfferInput): Offer {
           : {
               amount: market,
               source: q?.source.kind ?? "none",
-              priceGrade: q?.source.kind === "priceiq" ? (q.priceiq?.grade ?? null) : (q?.grade ?? null),
-              // A rate card's grade column: the grade's own price before deductions — the trace's first
-              // line is that base ("Market price grade A · <card>", ratecard.ts priceFromCard).
-              gradePrice:
-                q?.source.kind === "partner_ratecard" && q?.grade && typeof q?.lines?.[0]?.amount === "number" ? q.lines[0].amount : null,
+              // A rate card prices at a grade column, or — a row with only its top price — at grade A: the
+              // row's max price IS grade A's (ratecard.ts RateEntry), less every condition % including the
+              // looks. So a grade-A phone on such a row names grade A and works the price out; a grade B–D
+              // phone names no grade, and staff read "Priced at grade A … — none listed at grade B".
+              priceGrade:
+                q?.source.kind === "priceiq" ? (q.priceiq?.grade ?? null) : q?.source.kind === "partner_ratecard" ? (q.grade ?? "Superb") : (q?.grade ?? null),
+              // The grade's own price before deductions — the trace's first line is that base
+              // ("Market price grade A · <card>" / "Best-condition price on the rate card", ratecard.ts priceFromCard).
+              gradePrice: q?.source.kind === "partner_ratecard" && typeof q?.lines?.[0]?.amount === "number" ? q.lines[0].amount : null,
               // What the price took off, in the customer's words (ratecard.ts: each deduction line's `word`).
               takenOff: (q?.lines ?? []).flatMap((l) => (l.word && l.amount < 0 ? [l.word] : [])),
             },

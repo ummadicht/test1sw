@@ -91,7 +91,10 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
   // The customer's copy: what we pay (the market price + the SwapUp premium) in ONE row, its market
   // price in the answer's own words under it. Never the word "premium", never the partner's name.
   const wePay = v.tradeValue === null ? null : v.tradeValue + (v.premiumValue ?? 0);
-  const marketWords = v.offer?.answer.lines.find((l) => l.key === "market")?.text ?? null;
+  // The line with its note — "Market price for grade A ₹29,710 · ₹34,960 less ₹5,250 for back glass cracked" —
+  // so a grade price with something taken off is never printed without the working-out.
+  const marketLine = v.offer?.answer.lines.find((l) => l.key === "market") ?? null;
+  const marketWords = marketLine ? (marketLine.note ? `${marketLine.text} · ${marketLine.note}` : marketLine.text) : null;
   const b = v.bonus;
   const bonusBp = b ? (b.override?.bp ?? b.bp) : null;
   const cond = conditionSummary(v.condition);

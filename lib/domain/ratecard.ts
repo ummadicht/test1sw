@@ -228,10 +228,10 @@ export function conditionDeductions(
 ): DeductionPart[] {
   const parts: DeductionPart[] = [];
   if (!a.powersOn) {
-    parts.push({ label: "Does not switch on (priced as non-working)", bp: d.deadBp, word: "doesn't switch on" });
+    parts.push({ label: "Does not switch on (priced as non-working)", bp: d.deadBp, word: "not switching on" });
     return parts;
   }
-  if (!a.calls) parts.push({ label: "Calls / network not working", bp: d.callsBp, word: "calls don't work" });
+  if (!a.calls) parts.push({ label: "Calls / network not working", bp: d.callsBp, word: "calls not working" });
   if (d.screen[a.screen] && deduct.screen(a.screen)) parts.push({ label: `Screen: ${SCREEN_LABEL[a.screen]}`, bp: d.screen[a.screen], word: SCREEN_WORD[a.screen] });
   if (d.body[a.body] && deduct.body(a.body)) parts.push({ label: `Body: ${BODY_LABEL[a.body]}`, bp: d.body[a.body], word: BODY_WORD[a.body] });
   for (const i of a.issues) if (d.issues[i]) parts.push({ label: ISSUE_LABEL[i], bp: d.issues[i], word: lowerFirst(ISSUE_LABEL[i]) });

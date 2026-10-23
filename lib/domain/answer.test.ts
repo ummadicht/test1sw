@@ -492,3 +492,35 @@ test("a rate-card price with something taken off names its grade and works it ou
   const n = b.lines.find((l) => l.key === "market")!;
   assert.deepEqual([n.text, n.note], ["Market price for grade A ₹34,960", null]);
 });
+
+test("a card row with only its top price (the week-42 iPhone rows) is grade A's price: a grade-A phone names A and works it out; B–D name no grade", () => {
+  const TOP_ONLY: RateCard = { ...PER_GRADE, entries: [{ modelId: "iphone-14", variant: "128GB", maxPrice: 27_780 }] };
+  const quote = (c: ConditionAnswers) => {
+    const q = priceFromCard(TOP_ONLY, "iphone-14", "128GB", c);
+    assert.ok(q.status === "priced" && q.grade === undefined);
+    return q as Extract<typeof q, { status: "priced" }>;
+  };
+  // What offer.ts hands the answer for such a row: priced at grade A, from the row's top price.
+  const fromTop = (q: ReturnType<typeof quote>): AnswerInput["market"] => ({ ...fromQuote(q)!, priceGrade: "Superb" });
+  const back = cond({ body: "back_cracked", accessories: { charger: true, box: true, bill: true }, age: "lt3m" });
+  const a = buildAnswer(f1({ condition: back, market: fromTop(quote(back)) }));
+  const m = a.lines.find((l) => l.key === "market")!;
+  assert.deepEqual([m.text, m.note], ["Market price for grade A ₹23,610", "₹27,780 less ₹4,170 for back glass cracked"]);
+  const scuffedCracked = cond({ screen: "cracked", body: "scuffed", accessories: { charger: true, box: true, bill: true }, age: "lt3m" });
+  const b = buildAnswer(f1({ condition: scuffedCracked, market: fromTop(quote(scuffedCracked)) }));
+  const n = b.lines.find((l) => l.key === "market")!;
+  assert.deepEqual([b.grade!.letter, n.text, n.note], ["B", "Market price ₹15,830", null]);
+  assert.equal(b.staffNotes.market, "Priced at grade A (₹27,780 less ₹11,950) — none listed at grade B.");
+});
+
+test("the market note's words read as a sum for a dead phone and dead calls", () => {
+  const dead = cond({ powersOn: false, accessories: { charger: true, box: true, bill: true }, age: "lt3m" });
+  const q = priceFromCard(PER_GRADE, "galaxy-s23-ultra", "256GB", dead);
+  assert.ok(q.status === "priced");
+  if (q.status !== "priced") return;
+  assert.match(buildAnswer(f1({ condition: dead, market: fromQuote(q) })).lines.find((l) => l.key === "market")!.note ?? "", / for not switching on$/);
+  const calls = cond({ calls: false, accessories: { charger: true, box: true, bill: true }, age: "lt3m" });
+  const c = priceFromCard(PER_GRADE, "galaxy-s23-ultra", "256GB", calls);
+  if (c.status !== "priced") return assert.fail("priced");
+  assert.match(buildAnswer(f1({ condition: calls, market: fromQuote(c) })).lines.find((l) => l.key === "market")!.note ?? "", / for calls not working$/);
+});
