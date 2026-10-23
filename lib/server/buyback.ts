@@ -57,6 +57,18 @@ export function activeRateCard(partnerId: string): RateCard | null {
   return card && card.source?.kind === "partner_ratecard" ? { ...card, id: row.id } : null;
 }
 
+/**
+ * A rate card by its id, active or not: the card a quote was read off (`source.rateCardId`), so the
+ * staff refurb decision prices the phone repaired off the SAME card as the trade-in, even after a
+ * newer card went live. Cards are never deleted; null for an id SwapUp doesn't have.
+ */
+export function rateCardById(id: string): RateCard | null {
+  const row = db().prepare(`SELECT id, data FROM rate_cards WHERE id = ?`).get(id) as { id: string; data: string } | undefined;
+  if (!row) return null;
+  const card = parseJson<RateCard | null>(row.data, null);
+  return card && card.source?.kind === "partner_ratecard" ? { ...card, id: row.id } : null;
+}
+
 export function partnerMode(partnerId: string): PartnerMode {
   const p = db().prepare(`SELECT name FROM orgs WHERE id = ? AND kind = 'partner'`).get(partnerId) as { name: string } | undefined;
   const partnerName = p?.name ?? "Buyback partner";

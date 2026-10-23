@@ -195,7 +195,7 @@ Once a trade-in is locked, the grade line on the case (`CaseView.grading`) is th
 staff too — the same one the receipt, the pickup and the partner show, linked to exactly that
 version. The partner's case view never carries the store camera's own GradeIQ letter, range or flags
 (`camera.grade` / `gradeRange` null, `flags` empty), nor the store's money (`refurbCost`, `offer`,
-`marketSell.amount` null).
+`refurbEconomics`, `marketSell.amount` null).
 
 ## 5. Phonecheck
 
