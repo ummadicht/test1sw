@@ -210,7 +210,7 @@ stand-in pm2 running each build's own server), never the VM itself.
 **Old SwapUp Store builds (`SWAPUP_STORE_MIN_VERSION`).** The apps have no over-the-air updates, so an
 old tablet keeps its old screens and totals until someone reinstalls it. SwapUp Store sends
 `X-SwapUp-App: store/<version>+<versionCode>` (e.g. `store/0.9.3+15`) on every call; the builds before
-that (0.9.2, 0.8.0) send none. With `SWAPUP_STORE_MIN_VERSION=0.9.3` in `/etc/swapup.env` (then
+that (0.9.2, 0.9.0, 0.8.0) send none. With `SWAPUP_STORE_MIN_VERSION=0.9.3` in `/etc/swapup.env` (then
 `pm2 restart swapup`), a store-staff call on a Bearer token from an older build, or with no header or one
 that doesn't read, gets `426 {"error":"Update SwapUp Store from /downloads."}` before anything is done.
 Unset, the gate is off. That is the default, and neither deploy nor release sets it. A value that is not
@@ -218,9 +218,15 @@ Unset, the gate is off. That is the default, and neither deploy nor release sets
 desk (its cookie), SwapUp Check (Ticket), the store tablet's Device token (listing staff and unlocking by
 PIN), the partner, and public pages (`lib/server/auth.ts`, `lib/server/storeGate.server.test.ts`).
 
-*When to set it:* to the first release that sends the header, once that release is on /downloads. From
-then on every older tablet, 0.9.2 and 0.8.0 alike, gets the sentence until someone reinstalls it; that is
-the gate's job. Waiting for every tablet to be updated first would leave nothing for it to refuse.
+*When to set it (owner, 2026-10-24):* it stays OFF until every counter tablet runs 0.9.3 or later (Linear
+SUP-24). Then set it to `0.9.3` and restart: from then on any tablet still on an older build gets the
+sentence until someone reinstalls it.
+
+*Older builds while the gate is off* talk to this server and work, with two differences from 0.9.3:
+"All fine" is sent as single taps, so on a row the store camera confirmed worse the tap is recorded as the
+camera's own chip instead of being refused (`legacyStoreBuild` in `app/api/cases/[id]/action/route.ts`,
+`certifyCase`) — exactly what 0.9.2 priced; and an early IMEI-register stop that isn't a GSMA blacklist
+still reads "reported lost or stolen" on the tablet (the desk and 0.9.3 say what the register reported).
 
 *What staff see.* A build that sends the header shows the sentence where the call was made (a refused
 launch opens the sign-in screen with it). Older builds don't know a 426:

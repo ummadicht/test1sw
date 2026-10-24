@@ -317,7 +317,7 @@ test("a defect with no fault recorded (no power, liquid, a dead display): never 
     assert.equal(e.repairCost.amount, null, JSON.stringify(over));
     assert.match(e.repairCost.why ?? "", /^No fault recorded \(.+\) — enter the service centre's quote\.$/, JSON.stringify(over));
     assert.equal(e.postRepair.amount, null, JSON.stringify(over));
-    assert.match(e.postRepair.why ?? "", /^No fault recorded \(.+\) — record it to work out the repaired price\.$/, JSON.stringify(over));
+    assert.match(e.postRepair.why ?? "", /^No fault recorded \(.+\) — no repaired price from the price list\.$/, JSON.stringify(over));
     assert.deepEqual([e.uplift.amount, e.uplift.verdict], [null, null], JSON.stringify(over));
     assert.ok(e.preRefurb.amount !== null, "the trade-in itself is still priced");
   }

@@ -207,7 +207,7 @@ export function refurbEconomics(i: RefurbInput): RefurbEconomics {
   else if (!card) postRepair = missingPost(PRICE_LIST_GONE);
   else if (!condition) postRepair = missingPost(NO_CONDITION);
   else if (!device?.variant) postRepair = missingPost(swap.why ?? NO_TRADE_IN);
-  else if (unrecorded) postRepair = missingPost(`No fault recorded (${unrecorded}) — record it to work out the repaired price.`);
+  else if (unrecorded) postRepair = missingPost(`No fault recorded (${unrecorded}) — no repaired price from the price list.`);
   else {
     const r = priceFromCard(card, device.modelId, device.variant, healedCondition(condition, faults));
     postRepair =

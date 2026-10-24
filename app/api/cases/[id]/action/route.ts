@@ -44,6 +44,14 @@ async function transition(fn: () => CaseView | Promise<CaseView>): Promise<CaseV
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
+/**
+ * A SwapUp Store build from before 0.9.3: a Bearer call (the Store app or its browser version) with no
+ * X-SwapUp-App header (SUP-27 added it in 0.9.3). Those builds send "All fine" as single taps, so a tap
+ * the camera disagrees with is recorded as the camera's chip for them instead of refused (cases.ts
+ * certifyCase) — until every tablet is reinstalled and SWAPUP_STORE_MIN_VERSION turns them away.
+ */
+const legacyStoreBuild = (req: Request): boolean => /^Bearer\s/i.test(req.headers.get("authorization") ?? "") && !req.headers.get("x-swapup-app");
+
 /** One door for every case action: reprice, choose_repair, walk_away, lock, cancel, data_clear, bonus_override, certify. */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   return handle(async () => {
@@ -68,7 +76,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       // The advisor certifies one row of "Check the phone" by eye: {row: screen|body|liquid, value, testSessionId?},
       // or all three at once — "All fine — screen OK, body like new": {allFine: true, testSessionId?}.
       case "certify":
-        return certifyCase(u, id, { row: b.row, value: b.value, testSessionId: b.testSessionId, allFine: b.allFine });
+        return certifyCase(u, id, { row: b.row, value: b.value, testSessionId: b.testSessionId, allFine: b.allFine, legacyStore: legacyStoreBuild(req) });
       case "bonus_override": {
         if (b.bp !== null && typeof b.bp !== "number") throw new HttpError(400, "Send the bonus in basis points, or null to reset it.");
         return setBonusOverride(u, id, { bp: b.bp, reason: str(b.reason) });

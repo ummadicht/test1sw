@@ -64,8 +64,10 @@ const adv = who("usr_adv_and");
 
 const H = globalThis as { __swapupTestHeaders?: Record<string, string> };
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
-async function send(fn: () => Promise<Response>): Promise<{ status: number; data: View & { error?: string } }> {
-  H.__swapupTestHeaders = { authorization: `Bearer ${issueToken(adv)}` };
+/** As SwapUp Store 0.9.3+ (it sends X-SwapUp-App); `legacy` = a pre-0.9.3 Store build, which doesn't. */
+async function send(fn: () => Promise<Response>, legacy = false): Promise<{ status: number; data: View & { error?: string } }> {
+  H.__swapupTestHeaders = { authorization: `Bearer ${issueToken(adv)}`, "x-swapup-app": legacy ? "" : "store/0.9.3+15" };
+  if (legacy) delete H.__swapupTestHeaders["x-swapup-app"];
   try {
     const r = await fn();
     return { status: r.status, data: (await r.json()) as View & { error?: string } };
@@ -75,8 +77,8 @@ async function send(fn: () => Promise<Response>): Promise<{ status: number; data
 }
 const json = (method: string, body: Record<string, unknown>) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 /** POST /api/cases/<id>/action certify — one tap, or {allFine: true}. */
-const certify = (id: string, body: Record<string, unknown>) =>
-  send(() => actionRoute.POST(new Request(`http://x/api/cases/${id}/action`, json("POST", { action: "certify", ...body })), params(id)));
+const certify = (id: string, body: Record<string, unknown>, legacy = false) =>
+  send(() => actionRoute.POST(new Request(`http://x/api/cases/${id}/action`, { ...json("POST", { action: "certify", ...body }), headers: { "content-type": "application/json", ...H.__swapupTestHeaders } }), params(id)), legacy);
 /** PATCH /api/cases/<id> — the desk's condition change. */
 const patch = (id: string, body: Record<string, unknown>) => send(() => caseRoute.PATCH(new Request(`http://x/api/cases/${id}`, json("PATCH", body)), params(id)));
 
@@ -366,4 +368,20 @@ test("a reason on record carries over to a re-test: the tap stands before Apply,
     assert.ok(said.some((d) => d.startsWith("DS4: ")), said.join("\n"));
     assert.ok(!said.some((d) => d.startsWith("DS10")), said.join("\n"));
   });
+});
+
+test("a Store build from before 0.9.3 (no X-SwapUp-App): its \"All fine\" single taps are never refused — a tap the camera disagrees with records the camera's chip, as 0.9.2 priced it", async () => {
+  const id = await cameraCase({ screen: "scratched", body: "flawless" });
+  // The 0.9.2 / 0.9.0 app's "All fine": three single taps, in order, with no version header.
+  for (const [row, value] of [["screen", "ok"], ["body", "like_new"], ["liquid", "cant_see"]] as const) {
+    const r = await certify(id, { row, value }, true);
+    assert.equal(r.status, 200, `${row}=${value}: ${JSON.stringify(r.data).slice(0, 200)}`);
+  }
+  const v = cases.getCase(adv, id);
+  assert.equal(v.certification.screen?.value, "scratches", "the camera's own chip, not OK");
+  assert.equal(v.certification.body?.value, "like_new");
+  assert.equal(v.condition?.screen, "scratched", "priced at what the camera confirmed");
+  // The same tap from SwapUp Store 0.9.3 (it sends the header) is still refused with the sentence.
+  const id2 = await cameraCase({ screen: "scratched", body: "flawless" });
+  assert.equal((await certify(id2, { row: "screen", value: "ok" })).status, 409);
 });

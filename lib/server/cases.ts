@@ -1027,7 +1027,11 @@ export function allFineTaps(
  * never refused: on a row the camera confirmed worse it taps the camera's own chip
  * (allFineValue). Store staff only, while the case is at the counter.
  */
-export async function certifyCase(u: SessionUser, id: string, input: { row?: unknown; value?: unknown; testSessionId?: unknown; allFine?: unknown }): Promise<CaseView> {
+export async function certifyCase(
+  u: SessionUser,
+  id: string,
+  input: { row?: unknown; value?: unknown; testSessionId?: unknown; allFine?: unknown; legacyStore?: boolean },
+): Promise<CaseView> {
   if (u.role !== "advisor" && u.role !== "store_manager") throw new HttpError(403, "Only store staff certify a phone.");
   const { c, store } = caseInScope(u, id);
   if (!EDITABLE.includes(c.status)) throw new HttpError(409, "The case is past the counter.");
@@ -1069,7 +1073,10 @@ export async function certifyCase(u: SessionUser, id: string, input: { row?: unk
     const done: { row: CertRow; value: string; prev: string | null; faultsAdded: FaultId[]; faultsRemoved: FaultId[] }[] = [];
     // "All fine" on what is stored now: a row tapped since (SwapUp Store, another desk) keeps its tap;
     // a row the camera confirmed worse gets the camera's own chip — nothing beyond what it saw.
-    for (const t of allFine ? taps.filter((x) => !prevCert[x.row]).map((x) => ({ row: x.row, value: allFineValue(x.row, x.value, floor) })) : taps) {
+    // A Store build from before 0.9.3 (no X-SwapUp-App) sends "All fine" as single taps and can't show a
+    // refusal mid-way: for it, a tap the camera disagrees with is the camera's own chip — what 0.9.2 priced.
+    const asCamera = (x: { row: CertRow; value: string }) => ({ row: x.row, value: allFineValue(x.row, x.value, floor) });
+    for (const t of allFine ? taps.filter((x) => !prevCert[x.row]).map(asCamera) : input.legacyStore === true ? taps.map(asCamera) : taps) {
       // Better than the camera confirmed: refused with the camera's sentence, as the desk's condition
       // save is (updateCase) — never recorded and quietly floored. Nothing is written.
       const refused = certifyAgainstCamera(t.row, t.value, floor);
