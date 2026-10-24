@@ -69,6 +69,50 @@
       ],
       "dbBackup": "/home/ammar/swapup-backups/swapup-pre-0.9.2-20261023T023941Z.db",
       "verify": "passed"
+    },
+    {
+      "version": "0.9.3",
+      "releasedAt": "2026-10-24T04:29:02.504Z",
+      "swapup": "d1bd375",
+      "mobile": "4ad307d",
+      "apks": [
+        {
+          "app": "store",
+          "version": "0.9.3",
+          "versionCode": 15,
+          "commit": "4ad307d",
+          "sha256": "240a5bb322060412f4d78a1548e2f8a4bc26cd2ac501b9d255332b07f72923da",
+          "bytes": 41884865,
+          "builtAt": "2026-10-24T03:52:06Z"
+        },
+        {
+          "app": "check",
+          "version": "0.9.3",
+          "versionCode": 15,
+          "commit": "4ad307d",
+          "sha256": "27d4b6703ff256b1ad1faecdadc2e58bd8849d2c69e630fa9d04a0c4c547576d",
+          "bytes": 41887853,
+          "builtAt": "2026-10-24T03:49:46Z"
+        }
+      ],
+      "web": [
+        {
+          "app": "store",
+          "version": "0.9.3",
+          "commit": "4ad307d",
+          "bundle": "/app/store/_expo/static/js/web/index-fe2523342178385afcb03d527c732082.js",
+          "builtAt": "2026-10-24T03:46:25Z"
+        },
+        {
+          "app": "check",
+          "version": "0.9.3",
+          "commit": "4ad307d",
+          "bundle": "/app/check/_expo/static/js/web/index-67a9fa9df0f0b731b03972438c60e858.js",
+          "builtAt": "2026-10-24T03:46:33Z"
+        }
+      ],
+      "dbBackup": "/home/ammar/swapup-backups/swapup-pre-0.9.3-20261024T042642Z.db",
+      "verify": "passed"
     }
   ]
 }
