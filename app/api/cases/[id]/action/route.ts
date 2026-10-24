@@ -45,12 +45,13 @@ async function transition(fn: () => CaseView | Promise<CaseView>): Promise<CaseV
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
 /**
- * A SwapUp Store build from before 0.9.3: a Bearer call (the Store app or its browser version) with no
- * X-SwapUp-App header (SUP-27 added it in 0.9.3). Those builds send "All fine" as single taps, so a tap
- * the camera disagrees with is recorded as the camera's chip for them instead of refused (cases.ts
- * certifyCase) — until every tablet is reinstalled and SWAPUP_STORE_MIN_VERSION turns them away.
+ * A SwapUp Store build from before 0.9.3: a Bearer call (the Store app or its browser version; the same
+ * test as getSession's) with no X-SwapUp-App header (SUP-27 added it in 0.9.3). Those builds send
+ * "All fine" as single taps, so a tap the camera disagrees with is handled as 0.9.2 did — recorded as
+ * sent, floored to the camera, disclosed on the report — instead of refused (cases.ts certifyCase),
+ * until every tablet is reinstalled and SWAPUP_STORE_MIN_VERSION turns them away.
  */
-const legacyStoreBuild = (req: Request): boolean => /^Bearer\s/i.test(req.headers.get("authorization") ?? "") && !req.headers.get("x-swapup-app");
+const legacyStoreBuild = (req: Request): boolean => /^Bearer\s+\S+$/i.test(req.headers.get("authorization") ?? "") && !req.headers.get("x-swapup-app");
 
 /** One door for every case action: reprice, choose_repair, walk_away, lock, cancel, data_clear, bonus_override, certify. */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {

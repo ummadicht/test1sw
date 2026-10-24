@@ -223,9 +223,9 @@ SUP-24). Then set it to `0.9.3` and restart: from then on any tablet still on an
 sentence until someone reinstalls it.
 
 *Older builds while the gate is off* talk to this server and work, with two differences from 0.9.3:
-"All fine" is sent as single taps, so on a row the store camera confirmed worse the tap is recorded as the
-camera's own chip instead of being refused (`legacyStoreBuild` in `app/api/cases/[id]/action/route.ts`,
-`certifyCase`) — exactly what 0.9.2 priced; and an early IMEI-register stop that isn't a GSMA blacklist
+"All fine" is sent as single taps, so on a row the store camera confirmed worse the tap is not refused:
+it is recorded as sent, the price follows the camera, and the report says the camera stands
+(`legacyStoreBuild` in `app/api/cases/[id]/action/route.ts`, `certifyCase`) — exactly what 0.9.2 did; and an early IMEI-register stop that isn't a GSMA blacklist
 still reads "reported lost or stolen" on the tablet (the desk and 0.9.3 say what the register reported).
 
 *What staff see.* A build that sends the header shows the sentence where the call was made (a refused

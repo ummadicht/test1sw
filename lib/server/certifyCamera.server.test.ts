@@ -370,7 +370,7 @@ test("a reason on record carries over to a re-test: the tap stands before Apply,
   });
 });
 
-test("a Store build from before 0.9.3 (no X-SwapUp-App): its \"All fine\" single taps are never refused — a tap the camera disagrees with records the camera's chip, as 0.9.2 priced it", async () => {
+test("a Store build from before 0.9.3 (no X-SwapUp-App): its \"All fine\" single taps are never refused — recorded as sent, priced at what the camera confirmed, disclosed on the report, as 0.9.2 did", async () => {
   const id = await cameraCase({ screen: "scratched", body: "flawless" });
   // The 0.9.2 / 0.9.0 app's "All fine": three single taps, in order, with no version header.
   for (const [row, value] of [["screen", "ok"], ["body", "like_new"], ["liquid", "cant_see"]] as const) {
@@ -378,9 +378,10 @@ test("a Store build from before 0.9.3 (no X-SwapUp-App): its \"All fine\" single
     assert.equal(r.status, 200, `${row}=${value}: ${JSON.stringify(r.data).slice(0, 200)}`);
   }
   const v = cases.getCase(adv, id);
-  assert.equal(v.certification.screen?.value, "scratches", "the camera's own chip, not OK");
+  assert.equal(v.certification.screen?.value, "ok", "the advisor's own tap, as sent — never the camera's chip in their name");
   assert.equal(v.certification.body?.value, "like_new");
   assert.equal(v.condition?.screen, "scratched", "priced at what the camera confirmed");
+  assert.ok(disclosures(id).some((d) => d.startsWith("DS10") && /camera stands/.test(d)), `the report discloses that the camera stands (DS10), as 0.9.2's did: ${disclosures(id).join(" | ")}`);
   // The same tap from SwapUp Store 0.9.3 (it sends the header) is still refused with the sentence.
   const id2 = await cameraCase({ screen: "scratched", body: "flawless" });
   assert.equal((await certify(id2, { row: "screen", value: "ok" })).status, 409);

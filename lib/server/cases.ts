@@ -1073,13 +1073,14 @@ export async function certifyCase(
     const done: { row: CertRow; value: string; prev: string | null; faultsAdded: FaultId[]; faultsRemoved: FaultId[] }[] = [];
     // "All fine" on what is stored now: a row tapped since (SwapUp Store, another desk) keeps its tap;
     // a row the camera confirmed worse gets the camera's own chip — nothing beyond what it saw.
-    // A Store build from before 0.9.3 (no X-SwapUp-App) sends "All fine" as single taps and can't show a
-    // refusal mid-way: for it, a tap the camera disagrees with is the camera's own chip — what 0.9.2 priced.
-    const asCamera = (x: { row: CertRow; value: string }) => ({ row: x.row, value: allFineValue(x.row, x.value, floor) });
-    for (const t of allFine ? taps.filter((x) => !prevCert[x.row]).map(asCamera) : input.legacyStore === true ? taps.map(asCamera) : taps) {
+    for (const t of allFine ? taps.filter((x) => !prevCert[x.row]).map((x) => ({ row: x.row, value: allFineValue(x.row, x.value, floor) })) : taps) {
       // Better than the camera confirmed: refused with the camera's sentence, as the desk's condition
-      // save is (updateCase) — never recorded and quietly floored. Nothing is written.
-      const refused = certifyAgainstCamera(t.row, t.value, floor);
+      // save is (updateCase) — never recorded and quietly floored. Nothing is written. Except for a
+      // SwapUp Store build from before 0.9.3 (no X-SwapUp-App): it sends "All fine" as single taps and
+      // can't show a refusal mid-way, so its tap is recorded AS SENT and the condition is floored to the
+      // camera, with the report's "camera stands" disclosure (DS10) — exactly what 0.9.2 did. Never the
+      // camera's chip in the advisor's name: that would certify a finding they denied.
+      const refused = input.legacyStore === true ? null : certifyAgainstCamera(t.row, t.value, floor);
       if (refused) throw new HttpError(409, refused);
       const step = certifyRow({ ...r, cameraFloor: floor }, { row: t.row, value: t.value, by: u.name, userId: u.id, at, withColours, testSessionId: session?.id ?? null });
       if ("error" in step) throw new HttpError(400, step.error);
