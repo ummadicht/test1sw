@@ -54,7 +54,22 @@ import { CERT_ROWS, allFineValue, certChoices, certifyAgainstCamera, certifyNeed
 import { cameraEvidence, type GiqRow } from "./gradeiqBridge";
 import type { DeviceReport } from "../domain/diagnostics";
 import type { ImeiLookup } from "./gradeiq";
-import { BLACKLISTED, blacklistWarning, caseLookupView, gsmaBlacklisted, lookupFor, resolveImei, tradeModelRefs, withLookup, type KymEarly, type StoredImeiLookup } from "./imeiResolve";
+import {
+  BLACKLISTED,
+  IMEI_NAMES_NO_MODEL,
+  blacklistWarning,
+  caseImeiModel,
+  caseLookupView,
+  gsmaBlacklisted,
+  imeiUnlistedSentence,
+  lookupFor,
+  resolveImei,
+  tradeModelRefs,
+  withLookup,
+  type KymEarly,
+  type StoredImeiLookup,
+} from "./imeiResolve";
+import { imeiModelNow } from "../domain/tac";
 
 /* ─────────────────────────── types ─────────────────────────── */
 
@@ -535,7 +550,19 @@ function offerFor(c: CaseRow, store: StoreRow): Offer {
     // Past the counter, the figures frozen at lock win over the quote and bonus JSON.
     locked: EDITABLE.includes(c.status) ? null : { trade: c.trade_value, premium: c.premium_value, premiumBp: c.premium_bp, bonus: c.bonus_value, payable: c.payable },
     testProgramme: !!org?.demo,
+    imeiUnlisted: imeiUnlistedOn(c, tm),
   });
+}
+
+/**
+ * A case at the counter with no model whose IMEI names a phone SwapUp doesn't list: the sentence
+ * staff read in place of a price ("The IMEI says Apple iPhone 17 Pro Max — not on SwapUp's list, so
+ * it can't be priced here yet."), and the customer's CANT_PRICE — never another phone's price. null otherwise.
+ */
+function imeiUnlistedOn(c: CaseRow, tm: TradeModel | null): string | null {
+  if (tm || !c.imei || !EDITABLE.includes(c.status)) return null;
+  const said = caseImeiModel(c);
+  return said.kind === "unlisted" ? imeiUnlistedSentence(said.label) : null;
 }
 
 function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {}): CaseView {
@@ -690,11 +717,19 @@ function imeiWarnings(c: CaseRow, tm: TradeModel | null): string[] {
   const out: string[] = bad ? [bad] : [];
   const dup = imeiOnOpenTradeIn(c.id, [c.imei, c.imei2]);
   if (dup) out.push(`This IMEI is already on trade-in ${dup.ref}.`);
-  // The IMEI names another model than the one on the case (staff's, or the phone's code): said, not changed.
-  const said = lookupFor(c.imei_lookup, c.imei);
-  if (said?.modelId && tm && said.modelId !== tm.id) {
+  // What the IMEI names, read against today's list (a model added since is named now). Another model
+  // than the one on the case (staff's, or the phone's code) is said, not changed; a phone SwapUp doesn't
+  // list is said as such — it can't be priced here, and never as another phone (SUP-258).
+  const kept = lookupFor(c.imei_lookup, c.imei);
+  const said = caseImeiModel(c);
+  if (said.kind === "listed" && tm && said.modelId !== tm.id) {
     const other = getTradeModel(said.modelId);
     if (other) out.push(`The IMEI says ${other.brand} ${other.model}; the case has ${tm.brand} ${tm.model} — check Settings › About phone.`);
+  } else if (said.kind === "unlisted") {
+    out.push(imeiUnlistedSentence(said.label));
+    if (tm) out.push(`The IMEI says ${said.label}; the case has ${tm.brand} ${tm.model} — check Settings › About phone.`);
+  } else if (kept && !tm && (said.kind === "none" || said.kind === "ambiguous")) {
+    out.push(IMEI_NAMES_NO_MODEL);
   }
   return out;
 }
@@ -1187,8 +1222,8 @@ export const PRICE_NOT_TYPED = "Prices can't be typed in — change what's wrong
  */
 export type UpdateInternal = {
   variantSource?: "measured" | "catalogue" | "customer";
-  /** Where patch.modelId came from (Apply: the phone's code or the customer's pick; a Phonecheck attach). Default "advisor". */
-  modelSource?: "phone" | "customer" | "phonecheck";
+  /** Where patch.modelId came from (Apply: the IMEI, the phone's code or the customer's pick; a Phonecheck attach). Default "advisor". */
+  modelSource?: "imei" | "phone" | "customer" | "phonecheck";
   autoUpgrade?: boolean;
   measuredStorage?: string | null;
   /** Why the grading report gets a new version, when it does (default "edited"): Apply says "swapup_check", a Phonecheck attach "phonecheck". */
@@ -1232,12 +1267,19 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   const sets: Record<string, unknown> = {};
   let pricingChanged = false;
 
-  // The model the new IMEI names — only for a case with none, or one an earlier IMEI named (that
-  // IMEI is gone, so is its basis). Staff's own model, the phone's code and the customer's pick stand.
+  // The model the new IMEI names (owner, 2026-10-25: the model is "derived from" the IMEI) — read
+  // against today's list, so an answer kept from before a model joined it names that model now. It is
+  // the case's model where the case has none, where an earlier IMEI named it (that IMEI is gone, so is
+  // its basis), or where the customer only picked one on their phone (a claim): a phone the IMEI names
+  // that SwapUp doesn't list then leaves NO model — never another phone to price (SUP-258). Staff's
+  // own model, the phone's code and a Phonecheck report stand (imeiWarnings says when they disagree).
   let imeiModel: string | null | undefined;
   if (patch.modelId === undefined && resolved) {
-    if (!c.model_id && resolved.rec.modelId) imeiModel = resolved.rec.modelId;
-    else if (c.model_id && c.model_source === "imei" && resolved.rec.modelId !== c.model_id) imeiModel = resolved.rec.modelId;
+    const said = imeiModelNow(resolved.rec, tradeModelRefs());
+    const claim = c.model_source === "customer";
+    if (said.kind === "listed") {
+      if (!c.model_id || claim || (c.model_source === "imei" && said.modelId !== c.model_id)) imeiModel = said.modelId;
+    } else if (c.model_id && (c.model_source === "imei" || (claim && said.kind === "unlisted"))) imeiModel = null;
   }
   const modelPatch = patch.modelId !== undefined ? patch.modelId : imeiModel;
   if (modelPatch !== undefined) {
@@ -1251,9 +1293,11 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     pricingChanged = true;
   }
   const modelChanged = "model_id" in sets && sets.model_id !== c.model_id;
-  // Where the model came from. The phone's own code confirming the model on the case makes it the phone's.
+  // Where the model came from. The phone's own code confirming the model on the case makes it the phone's;
+  // the IMEI naming the model the customer picked makes it the IMEI's (no longer only a claim).
   if (modelChanged) sets.model_source = sets.model_id ? (patch.modelId !== undefined ? (internal.modelSource ?? "advisor") : "imei") : null;
   else if (patch.modelId && internal.modelSource === "phone" && c.model_source !== "phone") sets.model_source = "phone";
+  else if (sets.model_id && c.model_source === "customer" && (imeiModel !== undefined || internal.modelSource === "imei")) sets.model_source = "imei";
   let variantChanged = false;
   if (patch.variant !== undefined) {
     const tm = getTradeModel((sets.model_id as string | undefined) ?? c.model_id);
@@ -1315,7 +1359,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
         action: "case.imei_lookup",
         entity: "case",
         entityId: id,
-        detail: { source: resolved.rec.source, blacklist: resolved.rec.blacklist, modelId: resolved.rec.modelId, modelNumber: resolved.rec.modelNumber, ...(imeiModel !== undefined ? { setModel: imeiModel } : {}) },
+        detail: { source: resolved.rec.source, blacklist: resolved.rec.blacklist, modelId: resolved.rec.modelId, modelKind: resolved.rec.modelKind ?? null, modelNumber: resolved.rec.modelNumber, ...(imeiModel !== undefined ? { setModel: imeiModel } : {}) },
       });
   }
   // The early KYM answer was for the numbers the case had: a new number needs its own check.

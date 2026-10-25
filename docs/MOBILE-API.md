@@ -184,8 +184,14 @@ synchronously (≤ 10 s) and answers with the whole `CaseView`. The same IMEI sa
 (an IMEI the case had before is answered from the case). An IMEI that fails its check digit is saved as
 before (`imeiCheck: "invalid"`) but not resolved — a misread is never paid for. GradeIQ off
 (`GRADEIQ_ENABLED=0`), no `GRADEIQ_SERVER_KEY`, or no answer in 10 s → the type code's model only and
-`blacklist: "unknown"`, with no retry. The model is set ONLY when the case has none (or one an earlier
-IMEI set); never the storage. A NEW `imei` with no `imei2` in the patch clears the case's IMEI 2 (it
+`blacklist: "unknown"`, with no retry. The model comes from the model number, then the type code, then
+GSMA's own name (Apple's carries no model number: "Apple iPhone 17 Pro Max (A3257)" is read as "Apple
+iPhone 17 Pro Max" and mapped by the type code's explicit rules); `imeiLookup` shows the catalogue's
+brand and model when one mapped — never a codename ("DM3") or Apple's "(A####)". The model is set when
+the case has none, one an earlier IMEI set, or only the customer's pick (a claim, SUP-258) — an IMEI
+naming a phone SwapUp doesn't list then takes the pick off; staff's model, the phone's code and a
+Phonecheck report stand (a warning says so). Never the storage. A kept answer is read against TODAY's
+list, so a model added since (the boot backfill, SUP-259) is named without a second lookup. A NEW `imei` with no `imei2` in the patch clears the case's IMEI 2 (it
 was the other phone's; saving the IMEI 1 the case already has keeps it). An `imei` equal to the case's
 IMEI 2 with no `imei2` in the patch → `400 "IMEI 1 can't be the same as IMEI 2 — that number is this
 case's IMEI 2."` (not looked up); send both numbers to swap them.
@@ -207,6 +213,10 @@ CaseView += {
     // at once, while the case is at the counter (the lock still decides):
     // "This IMEI is already on trade-in SU-AND-00031."
     // "The IMEI says Samsung Galaxy S23 Ultra; the case has Samsung Galaxy S23 — check Settings › About phone."
+    // "The IMEI says Apple iPhone 13 Mini — not on SwapUp's list, so it can't be priced here yet." (SUP-258:
+    //   then also the mismatch line above when the case has a model; with none, the answer's `swap.why` is
+    //   that sentence and the customer reads CANT_PRICE — never another phone's price)
+    // "The IMEI doesn't name a model — choose it on the case." (an IMEI looked up, no model on the case)
     // "IMEI 2 (35…) is reported lost or stolen (GSMA)."  /  "IMEI 35…, saved on this case before, is
     // reported lost or stolen (GSMA)." — the blacklisted number when it isn't in the IMEI 1 slot
   kymEarly: { status: "clear" | "blacklisted" | "duplicate" | "in_use"; reference: string | null } | null;
@@ -234,16 +244,28 @@ with GSMA's sentence (and the reason) whatever it sends, and it is the first of 
 non-clear `kymEarly` is not a lock blocker — the lock's own KYM answer decides. Show the sentence in a
 red banner on the IMEI card and disable Start.
 
-**The model at the phone:** a case whose model the IMEI named (`modelSource: "imei"`) is what the join
-tells the phone (`identity.match: "exact"`), so an iPhone or a browser — which can't name itself — skips
-the customer's picker; the storage is still asked when the phone can't measure it, and when it did
-measure, Apply settles that model's storage from the reading (`variantSource: "measured"`) — no pick is
-needed. Any other case (no IMEI, or a model staff, the phone or the customer named) joins exactly as
-0.8.0: the phone's own answer, the picker when its code names nothing. The phone's own model
-code still wins when it matched, except against a model the IMEI named: at Apply a code that disagrees
-is a flag in `camera.flags` (`Model: phone code says Samsung Galaxy S23; the IMEI says Samsung Galaxy
-S23 Ultra — check Settings › About phone.`), never an overwrite. A code that agrees makes
-`modelSource: "phone"`.
+**The model at the phone** (owner, 2026-10-25: *"Browser should create session whatever IMEI entered
+and model derived from Phonecheck"* — SUP-258). With an IMEI on the case, the phone never picks or
+confirms a model the IMEI named:
+
+| Case has | IMEI says | Phone is told (`identity`) |
+|---|---|---|
+| a model the IMEI set, or any model equal to the IMEI's | that model | that model, `exact`; a phone code naming it too is upgraded to `exact` ("… The IMEI agrees."), so a US SM-S918U is not asked "Is this your phone?" |
+| no model, or only the customer's pick | a model on the list | that model, `exact` |
+| no model, or only the customer's pick | a phone not on the list | `exact`, `modelId: null`, `label` = the IMEI's name, `reason` "The IMEI says … — not on SwapUp's list, so it can't be priced here yet." |
+| no model, or only the customer's pick | nothing (unknown type code, or either of two phones) | the phone's own exact/family code; with none, `exact` `"Your phone"` — the advisor chooses the model on the case |
+| a model staff, the phone or Phonecheck set that the IMEI doesn't name | — | unchanged: the phone's own answer |
+
+SwapUp Check 0.9.3 skips Identify on any `exact` with a label, so this needs no app release. A case
+with no IMEI joins exactly as 0.8.0 (counter code, the demo code, "scan at hand-over"); an IMEI saved
+later reaches the phone through `GET /api/device/status`'s `identity` (below). The storage is still asked
+on the answer when the phone can't measure it; when it did, Apply settles that model's storage from the
+reading (`variantSource: "measured"`). At Apply, where the IMEI decides, a phone code or a customer pick
+that disagrees is a flag in `camera.flags`, never the case's model (`Model: phone code says Samsung
+Galaxy S23; the IMEI says Samsung Galaxy S23 Ultra — check Settings › About phone.`, `Model: customer
+picked Apple iPhone 15 Pro; the IMEI says Apple iPhone 17 Pro Max — the pick is not used.`); for a
+phone not on the list nothing becomes the case's model and the code or pick is flagged as not used.
+A code that agrees makes `modelSource: "phone"`; otherwise the model is `modelSource: "imei"`.
 
 ## 3. Test sessions (store side)
 
@@ -978,7 +1000,7 @@ Measured browser tests (touch, camera, display, connectivity…) keep their verd
 
 `POST /api/device/complete` `{}` → `{ ok: true, summary }`.
 
-`GET /api/device/status` → `{ status, progress, storeName, caseRef, reportPath, grading, colours, answer }` (lets the
+`GET /api/device/status` → `{ status, progress, storeName, caseRef, reportPath, grading, colours, answer, identity }` (lets the
 app show "The store has your results"; `colours: true` = show the test colours on the result screen
 for the advisor — "The test colours for the advisor", below). Since 2026-10-17, once the session is `applied`:
 `reportPath` = the path of the phone's public grade report, `"/r/<token>"` — open it on the
@@ -987,6 +1009,11 @@ letter, final }` of the version that link opens on (the latest issued one, never
 the customer's "Grade: Good (B)". No reasons and no price. Both `null` before Apply, or when
 nothing was reported. The app reads them through `src/check/report.ts` `customerReport`; after a
 restart on the "store has your results" screen it reads the status once more for them.
+
+`identity` (since 0.9.4, SUP-258): the Identify card as the join would tell it NOW — the same shape as
+the join's `session.identity` — so an IMEI the advisor saves after the phone joined (a counter code,
+"scan at hand-over") names the model on the phone: a SwapUp Check that reads it moves on from its
+picker by itself. `null` for a closed ticket. Check 0.9.3 ignores it. Never a price.
 
 `answer` (since 2026-10-18 — owner: the answer on the customer's phone too, native and browser
 alike): `null` before Apply, for a closed ticket and when the case is gone; else the customer's

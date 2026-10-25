@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { TAC_ALIASES, catalogueKey, modelForTacName, splitTacName, tacKey, tacLookup, tacModel, tacOf, type TacDb, type TacModelRef } from "./tac.ts";
+import { TAC_ALIASES, catalogueKey, gsmaModelName, imeiModelNow, modelForTacName, splitTacName, tacKey, tacLookup, tacModel, tacOf, type TacDb, type TacModelRef } from "./tac.ts";
 import { luhnCheckDigit } from "./imei.ts";
 
 const DB = JSON.parse(readFileSync(new URL("./tacdb.json", import.meta.url), "utf8")) as TacDb;
@@ -125,12 +125,12 @@ test("coverage: 126 of the 152 models on file are reached by a TAC name (the res
 
 test("tacModel: IMEI → the list's name → the model, with the catalogue's own spelling; never a storage", () => {
   const m = tacModel(imeiFor("Samsung Galaxy S25 Fe"), DB, MODELS);
-  assert.deepEqual(m, { tac: m.tac, name: "Samsung Galaxy S25 Fe", brand: "Samsung", model: "Galaxy S25 FE", modelId: "galaxy-s25-fe", why: "IMEI type code: Samsung Galaxy S25 Fe." });
+  assert.deepEqual(m, { tac: m.tac, name: "Samsung Galaxy S25 Fe", brand: "Samsung", model: "Galaxy S25 FE", modelId: "galaxy-s25-fe", kind: "mapped", why: "IMEI type code: Samsung Galaxy S25 Fe." });
   assert.ok(!("variant" in m));
   const mini = tacModel(imeiFor("Apple Iphone 13 Mini"), DB, MODELS);
-  assert.deepEqual([mini.brand, mini.model, mini.modelId], ["Apple", "iPhone 13 Mini", null], "named, not on file");
+  assert.deepEqual([mini.brand, mini.model, mini.modelId, mini.kind], ["Apple", "iPhone 13 Mini", null, "unlisted"], "named, not on file");
   const unknown = tacModel("352099001761481", DB, MODELS);
-  assert.deepEqual([unknown.tac, unknown.name, unknown.modelId], ["35209900", null, null]);
+  assert.deepEqual([unknown.tac, unknown.name, unknown.modelId, unknown.kind], ["35209900", null, null, "none"]);
   assert.equal(tacModel("12", DB, MODELS).tac, null);
   assert.equal(tacLookup("12", DB), null);
 });
@@ -176,4 +176,51 @@ test("SUP-259: 'Galaxy Z Flip 5' and 'Galaxy Z Fold4-5G' are the Flip5 and Fold4
   assert.equal(modelOf("Samsung Galaxy Z Flip5"), "galaxy-z-flip5", "the list's other spelling still maps");
   assert.equal(modelOf("Samsung Galaxy Z Flip 5G"), null, "the 2020 Z Flip 5G is not the Flip5");
   assert.equal(modelOf("Samsung Galaxy S26 Pro"), null, "against the S26+ on file: the owner decides");
+});
+
+/* ─────────────────────────── SUP-258: what kind of answer, GSMA's name, the model NOW ─────────────────────────── */
+
+test("SUP-258: modelForTacName says what kind of answer it is — mapped, unlisted (a phone, not on SwapUp's list), ambiguous (never guessed)", () => {
+  assert.deepEqual(modelForTacName("Apple Iphone 17 Pro Max", MODELS), { modelId: "iphone-17-pro-max", kind: "mapped", why: "IMEI type code: Apple Iphone 17 Pro Max." });
+  assert.deepEqual(modelForTacName("Apple Iphone 13 Mini", MODELS), { modelId: null, kind: "unlisted", why: '"Apple Iphone 13 Mini" isn\'t on SwapUp\'s list.' });
+  assert.equal(modelForTacName("Samsung Galaxy A14", MODELS).kind, "ambiguous", "the reviewed table's never");
+  const q9: TacModelRef[] = [
+    { id: "x", brand: "Samsung", model: "Galaxy Q9" },
+    { id: "x5", brand: "Samsung", model: "Galaxy Q9 5G" },
+  ];
+  assert.equal(modelForTacName("Samsung Galaxy Q9", q9).kind, "ambiguous", "a 4G/5G sibling on file");
+  assert.equal(modelForTacName("Samsung Galaxy Q9", [q9[0], { ...q9[0], id: "y" }]).kind, "ambiguous", "two phones of that name");
+  assert.equal(modelForTacName("Samsung Galaxy S23 Ultra 5G", [{ id: "galaxy-s23", brand: "Samsung", model: "Galaxy S23" }]).kind, "unlisted", "an alias to a model not on this list");
+});
+
+test("SUP-258: gsmaModelName — Apple's '(A####)' dropped, the brand never doubled, the TAC list's casing", () => {
+  assert.equal(gsmaModelName("Apple", "Apple iPhone 17 Pro Max (A3257)"), "Apple iPhone 17 Pro Max", "SU-AND-00048's answer");
+  assert.equal(gsmaModelName("Apple", "iPhone 17 Pro Max (A3257)"), "Apple iPhone 17 Pro Max");
+  assert.equal(gsmaModelName("Apple", "Apple Iphone 13"), "Apple iPhone 13");
+  assert.equal(gsmaModelName("Samsung", "Galaxy Z Flip5"), "Samsung Galaxy Z Flip5");
+  assert.equal(gsmaModelName("OnePlus", "OnePlus 12"), "OnePlus 12");
+  assert.equal(gsmaModelName(null, "Apple Iphone Air"), "Apple iPhone Air");
+  assert.equal(gsmaModelName("Apple", "  iPhone   16e  "), "Apple iPhone 16e");
+  assert.equal(gsmaModelName("Apple", "iPhone 16 (A3081) extra"), "Apple iPhone 16 (A3081) extra", "only a TRAILING code is Apple's");
+  for (const m of [null, undefined, "", "   ", " (A3257)"]) assert.equal(gsmaModelName("Apple", m), null, String(m));
+  // Mapped by the same explicit rules as a TAC name.
+  assert.equal(modelOf(gsmaModelName("Apple", "Apple iPhone 17 Pro Max (A3257)")!), "iphone-17-pro-max");
+  assert.equal(modelOf(gsmaModelName("Apple", "iPhone 16e (A3212)")!), "iphone-16e");
+});
+
+test("SUP-258: imeiModelNow — a kept answer read against TODAY's list: listed, unlisted, ambiguous or none; a cached row re-maps for free", () => {
+  assert.deepEqual(imeiModelNow({ modelId: "galaxy-s23-ultra", brand: "Samsung", model: "Galaxy S23 Ultra" }, MODELS), { kind: "listed", modelId: "galaxy-s23-ultra", label: "Samsung Galaxy S23 Ultra" });
+  // SU-AND-00048's row, kept before the 17 Pro Max joined the list: no model id, GSMA's name with Apple's code.
+  const kept = { modelId: null, brand: "Apple", model: "Apple iPhone 17 Pro Max (A3257)", tacName: "Apple Iphone 17 Pro Max" };
+  assert.deepEqual(imeiModelNow(kept, MODELS), { kind: "listed", modelId: "iphone-17-pro-max", label: "Apple iPhone 17 Pro Max" }, "re-mapped against today's list");
+  const before = MODELS.filter((m) => m.id !== "iphone-17-pro-max");
+  assert.deepEqual(imeiModelNow(kept, before), { kind: "unlisted", modelId: null, label: "Apple iPhone 17 Pro Max" }, "the list without it: a phone SwapUp doesn't list");
+  assert.deepEqual(imeiModelNow({ modelId: null, brand: "Apple", model: "iPhone 13 Mini", tacName: "Apple Iphone 13 Mini" }, MODELS), { kind: "unlisted", modelId: null, label: "Apple iPhone 13 Mini" });
+  // GSMA's codename beside a TAC name that maps: the TAC name names it.
+  assert.equal(imeiModelNow({ modelId: null, brand: "Samsung", model: "DM3", tacName: "Samsung Galaxy S23 Ultra" }, MODELS).modelId, "galaxy-s23-ultra");
+  // A model id no longer on the list falls back to the name.
+  assert.equal(imeiModelNow({ modelId: "gone-model", brand: "Apple", model: "iPhone 13" }, MODELS).modelId, "iphone-13");
+  assert.deepEqual(imeiModelNow({ modelId: null, brand: "Samsung", model: "Galaxy A14", tacName: "Samsung Galaxy A14" }, MODELS), { kind: "ambiguous", modelId: null, label: "Samsung Galaxy A14" });
+  assert.deepEqual(imeiModelNow({ modelId: null, brand: null, model: null, tacName: null }, MODELS), { kind: "none", modelId: null, label: null });
+  assert.deepEqual(imeiModelNow(null, MODELS), { kind: "none", modelId: null, label: null });
 });

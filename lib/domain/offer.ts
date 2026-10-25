@@ -203,6 +203,13 @@ export type OfferInput = {
    */
   tested?: boolean;
   newPhoneMatch?: boolean;
+  /**
+   * No model on the case because its IMEI names a phone SwapUp doesn't list (SUP-258): the sentence
+   * staff read ("The IMEI says Apple iPhone 17 Pro Max — not on SwapUp's list, so it can't be priced
+   * here yet.") in place of "Choose the phone first", and the customer is told CANT_PRICE — nothing at
+   * the counter will price it, and it is never priced as another phone. null/absent = not that case.
+   */
+  imeiUnlisted?: string | null;
 };
 
 /* ─────────────────────────── the words (spec §3.2, word for word) ─────────────────────────── */
@@ -366,12 +373,13 @@ export function buildOffer(i: OfferInput): Offer {
   // The phone measured a size that isn't on the model's list: say so, never a chip for another size.
   const measured = i.measuredStorage ?? null;
   const unlisted = device && !variant && measured && !device.variants.includes(measured) ? measuredUnlisted(measured) : null;
+  const imeiUnlisted = !device && i.imeiUnlisted ? i.imeiUnlisted : null;
   const swapWhy =
     tradeIn !== null
       ? null
       : (i.quoteBlocked ??
         (!device
-          ? CHOOSE_PHONE
+          ? (imeiUnlisted ?? CHOOSE_PHONE)
           : !variant
             ? (unlisted ?? TAP_STORAGE)
             : q && q.status !== "priced"
@@ -380,13 +388,15 @@ export function buildOffer(i: OfferInput): Offer {
   // Nothing at the counter will price it (SUP-32): the quote's reason is final — or, the storage not
   // chosen yet, every size's — so the customer is told so, not "working out your price" all visit.
   // A PriceIQ why beside the card's is never final (ratecard.ts finalNoPrice): it may answer next time.
+  // A phone the IMEI names that SwapUp doesn't list has no model to price at all (SUP-258): final too.
   const cantPrice =
     open &&
-    !!device &&
     !i.quoteBlocked &&
-    (variant
-      ? !!q && q.status !== "priced" && !i.quoteExpired && finalNoPrice(q)
-      : !unlisted && !!i.storageQuotes?.length && i.storageQuotes.every((s) => s.amount === null && finalNoPrice(s)));
+    (!device
+      ? !!imeiUnlisted
+      : variant
+        ? !!q && q.status !== "priced" && !i.quoteExpired && finalNoPrice(q)
+        : !unlisted && !!i.storageQuotes?.length && i.storageQuotes.every((s) => s.amount === null && finalNoPrice(s)));
   const up = i.upgrade;
   const b = up ? i.bonus : null;
   const bonus = b ? (b.override?.amount ?? b.amount) : null;
@@ -418,7 +428,7 @@ export function buildOffer(i: OfferInput): Offer {
   const asks: OfferAsk[] = [];
   if (open) {
     if (i.quoteBlocked) asks.push({ kind: "blocked", title: ASK_TITLE.blocked, text: i.quoteBlocked });
-    if (!device) asks.push({ kind: "model", title: ASK_TITLE.model, text: i.tested === false ? MODEL_TEXT_UNTESTED : MODEL_TEXT });
+    if (!device) asks.push({ kind: "model", title: ASK_TITLE.model, text: imeiUnlisted ?? (i.tested === false ? MODEL_TEXT_UNTESTED : MODEL_TEXT) });
     if (device && !variant) {
       if (unlisted) asks.push({ kind: "storage", title: ASK_TITLE.storage, text: unlisted, options: [], note: null });
       else {

@@ -30,6 +30,15 @@ import { digits } from "./imei.ts";
 export type TacDb = Readonly<Record<string, string>>;
 export type TacModelRef = { id: string; brand: string; model: string };
 
+/**
+ * What a name says against SwapUp's list (modelForTacName):
+ *   mapped     one model on the list
+ *   unlisted   a phone, but not one on SwapUp's list (it can't be priced here)
+ *   ambiguous  it could be either of two phones on the list — never guessed
+ * TacMatch adds `none`: the TAC isn't on the offline list, or it isn't an IMEI.
+ */
+export type TacNameKind = "mapped" | "unlisted" | "ambiguous";
+
 export type TacMatch = {
   tac: string | null;
   /** The name on the TAC list, as written there; null = the TAC isn't on it. */
@@ -40,6 +49,7 @@ export type TacMatch = {
   model: string | null;
   /** The trade model it names; null = none, or not without a guess. */
   modelId: string | null;
+  kind: TacNameKind | "none";
   why: string;
 };
 
@@ -135,26 +145,94 @@ export function tacLookup(imei: string, db: TacDb): { tac: string; name: string;
 }
 
 /** The trade model a TAC name is, by the three rules above; why = the sentence staff read. */
-export function modelForTacName(name: string, models: readonly TacModelRef[]): { modelId: string | null; why: string } {
+export function modelForTacName(name: string, models: readonly TacModelRef[]): { modelId: string | null; kind: TacNameKind; why: string } {
   const key = tacKey(name);
+  const either = { modelId: null, kind: "ambiguous" as const, why: `"${name}" could be either of two phones on the list — choose by hand.` };
+  const notOnList = { modelId: null, kind: "unlisted" as const, why: `"${name}" isn't on SwapUp's list.` };
   if (Object.prototype.hasOwnProperty.call(TAC_ALIASES, key)) {
     const id = TAC_ALIASES[key];
-    if (id === null) return { modelId: null, why: `"${name}" could be either of two phones on the list — choose by hand.` };
-    return models.some((m) => m.id === id) ? { modelId: id, why: `IMEI type code: ${name}.` } : { modelId: null, why: `"${name}" isn't on SwapUp's list.` };
+    if (id === null) return either;
+    return models.some((m) => m.id === id) ? { modelId: id, kind: "mapped", why: `IMEI type code: ${name}.` } : notOnList;
   }
   const hits = models.filter((m) => catalogueKey(m) === key);
-  if (hits.length !== 1) return { modelId: null, why: hits.length ? `"${name}" matches ${hits.length} phones — choose by hand.` : `"${name}" isn't on SwapUp's list.` };
+  if (hits.length > 1) return { modelId: null, kind: "ambiguous", why: `"${name}" matches ${hits.length} phones — choose by hand.` };
+  if (!hits.length) return notOnList;
   const sibling = models.some((m) => m.id !== hits[0].id && (catalogueKey(m) === `${key} 5g` || catalogueKey(m) === `${key} 4g`));
-  if (sibling) return { modelId: null, why: `"${name}" could be either of two phones on the list — choose by hand.` };
-  return { modelId: hits[0].id, why: `IMEI type code: ${name}.` };
+  if (sibling) return either;
+  return { modelId: hits[0].id, kind: "mapped", why: `IMEI type code: ${name}.` };
 }
 
 /** IMEI → the TAC list's name → SwapUp's trade model. Never the storage. */
 export function tacModel(imei: string, db: TacDb, models: readonly TacModelRef[]): TacMatch {
   const tac = tacOf(imei);
   const hit = tac ? tacLookup(imei, db) : null;
-  if (!hit) return { tac, name: null, brand: null, model: null, modelId: null, why: tac ? `Type code ${tac} isn't on the offline list.` : "Not an IMEI." };
+  if (!hit) return { tac, name: null, brand: null, model: null, modelId: null, kind: "none", why: tac ? `Type code ${tac} isn't on the offline list.` : "Not an IMEI." };
   const m = modelForTacName(hit.name, models);
   const onFile = m.modelId ? models.find((x) => x.id === m.modelId) : undefined;
-  return { tac, name: hit.name, brand: onFile ? onFile.brand : hit.brand || null, model: onFile ? onFile.model : hit.model || null, modelId: m.modelId, why: m.why };
+  return { tac, name: hit.name, brand: onFile ? onFile.brand : hit.brand || null, model: onFile ? onFile.model : hit.model || null, modelId: m.modelId, kind: m.kind, why: m.why };
+}
+
+/* ─────────────────────────── GSMA's name (GradeIQ's IMEI lookup) ─────────────────────────── */
+
+/**
+ * GSMA's make and model, as GradeIQ's IMEI lookup returns them, as ONE marketing name in the TAC
+ * list's form — so it is mapped by the same explicit rules (modelForTacName), never fuzzily. Apple's
+ * answer carries no model number and repeats the brand with Apple's own code on the end
+ * ("Apple" + "Apple iPhone 17 Pro Max (A3257)"): the trailing "(A####)" is dropped and the brand is
+ * never doubled → "Apple iPhone 17 Pro Max". Casing as GradeIQ's splitName ("Iphone" → "iPhone").
+ * null when there is no model to name.
+ */
+export function gsmaModelName(brand: string | null | undefined, model: string | null | undefined): string | null {
+  const clean = (x: string | null | undefined) =>
+    (x ?? "")
+      .replace(/\s*\(A\d{4}\)\s*$/i, "")
+      .replace(/\bIphone\b/g, "iPhone")
+      .replace(/\s+/g, " ")
+      .trim();
+  const m = clean(model);
+  if (!m) return null;
+  const b = clean(brand);
+  if (!b || tacKey(m) === tacKey(b) || tacKey(m).startsWith(`${tacKey(b)} `)) return m;
+  return `${b} ${m}`;
+}
+
+/** What a stored IMEI answer says about the model, read against TODAY's list (imeiModelNow). */
+export type ImeiModelNow =
+  | { kind: "listed"; modelId: string; label: string }
+  | { kind: "unlisted" | "ambiguous"; modelId: null; label: string }
+  | { kind: "none"; modelId: null; label: null };
+
+/**
+ * The model an IMEI's stored answer names NOW (owner, 2026-10-25: "model derived from" the IMEI):
+ *   listed     a model on SwapUp's list — the one its model number or name named, or, for an answer
+ *              kept from before that model joined the list, its name mapped against today's list
+ *   unlisted   a phone that isn't on SwapUp's list: it can't be priced here (never another phone's price)
+ *   ambiguous  either of two phones on the list — the phone's own code, or the advisor, decides
+ *   none       the answer names no phone (an unknown TAC, GradeIQ off with no TAC name)
+ * `label` is the full name staff read ("Apple iPhone 17 Pro Max"): the catalogue's brand + model when listed.
+ * Re-mapping a kept answer is free and offline: no lookup is ever repeated for it.
+ */
+export function imeiModelNow(
+  l: { modelId?: string | null; brand?: string | null; model?: string | null; tacName?: string | null } | null | undefined,
+  models: readonly TacModelRef[]
+): ImeiModelNow {
+  if (!l) return { kind: "none", modelId: null, label: null };
+  const listed = (id: string): ImeiModelNow | null => {
+    const m = models.find((x) => x.id === id);
+    return m ? { kind: "listed", modelId: m.id, label: `${m.brand} ${m.model}` } : null;
+  };
+  const byId = l.modelId ? listed(l.modelId) : null;
+  if (byId) return byId;
+  let first: ImeiModelNow | null = null;
+  for (const name of [gsmaModelName(l.brand, l.model), l.tacName ? gsmaModelName(null, l.tacName) : null]) {
+    if (!name) continue;
+    const r = modelForTacName(name, models);
+    if (r.kind === "mapped") {
+      const hit = r.modelId ? listed(r.modelId) : null;
+      if (hit) return hit;
+      continue;
+    }
+    first ??= { kind: r.kind, modelId: null, label: name };
+  }
+  return first ?? { kind: "none", modelId: null, label: null };
 }

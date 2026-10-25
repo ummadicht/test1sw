@@ -472,6 +472,30 @@ test("offer 7b: nothing priced it — 'No market price yet' and the reason why, 
   assert.equal(noPriceWhy(null), null);
 });
 
+test("SUP-258: no model because the IMEI names a phone SwapUp doesn't list — staff read the IMEI's sentence, the customer CANT_PRICE; without it, CHOOSE_PHONE", () => {
+  const CANT = { ready: false, final: false, text: "This phone can't be priced for trade-in here yet — the advisor will explain.", test: false };
+  const WORKING = { ready: false, final: false, text: "The advisor is working out your price.", test: false };
+  const SAYS = "The IMEI says Apple iPhone 17 Pro Max — not on SwapUp's list, so it can't be priced here yet.";
+  const none = { device: null, quote: null, repair: null, upgrade: null, bonus: null };
+  const o = buildOffer(priced({ ...none, imeiUnlisted: SAYS }));
+  assert.deepEqual(customerAnswer(o.answer), CANT, "nothing at the counter will price it: final, never 'working out' all visit");
+  assert.equal(o.swap.why, SAYS);
+  assert.equal(o.swap.tradeIn, null, "never another phone's price");
+  assert.deepEqual(o.asks, [{ kind: "model", title: "Which phone is it?", text: SAYS }]);
+  assert.equal(o.actions.swap, SAYS);
+  // Without it: the plain "choose the phone" — and the customer is told the advisor is working it out.
+  const plain = buildOffer(priced(none));
+  assert.equal(plain.swap.why, "Choose the phone first.");
+  assert.deepEqual(customerAnswer(plain.answer), WORKING);
+  // A model on the case (staff chose one): the IMEI's sentence is not the answer's — that model is priced.
+  const chosen = buildOffer(priced({ imeiUnlisted: SAYS }));
+  assert.equal(chosen.swap.why, null);
+  assert.notDeepEqual(customerAnswer(chosen.answer), CANT);
+  // Closed, or the camera's identity block: not "can't price here".
+  assert.deepEqual(customerAnswer(buildOffer(priced({ ...none, imeiUnlisted: SAYS, status: "walked_away" })).answer), { ...WORKING, final: true, text: "This case is closed." });
+  assert.deepEqual(customerAnswer(buildOffer(priced({ ...none, imeiUnlisted: SAYS, quoteBlocked: "The camera saw a different phone." })).answer), WORKING);
+});
+
 test("offer 7d: nothing can price it here (not on the active card, no card) — the customer is told so; any other why, still 'working out' (SUP-32)", () => {
   const CANT = { ready: false, final: false, text: "This phone can't be priced for trade-in here yet — the advisor will explain.", test: false };
   const WORKING = { ready: false, final: false, text: "The advisor is working out your price.", test: false };
