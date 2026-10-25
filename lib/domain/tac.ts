@@ -104,6 +104,11 @@ export const TAC_ALIASES: Readonly<Record<string, string | null>> = {
   // Other spellings of the same phone.
   "samsung galaxy s23 plus": "galaxy-s23-plus",
   "samsung galaxy z flip4 bespoke": "galaxy-z-flip4",
+  // SUP-259: the same phones written with a space or a "-5G" (16 and 34 TACs). "Samsung Galaxy Z Flip 5G"
+  // is the 2020 Z Flip 5G — another phone — and stays unmapped; "Galaxy S26 Pro" against the S26+ on
+  // file waits for the owner's decision.
+  "samsung galaxy z flip 5": "galaxy-z-flip5",
+  "samsung galaxy z fold4-5g": "galaxy-z-fold4",
   // " 4G" dropped: on file without it, and the list's 5G sibling is another phone.
   "samsung galaxy a14 4g": "galaxy-a14", // SM-A145F
   "samsung galaxy a52 4g": "galaxy-a52", // SM-A525F

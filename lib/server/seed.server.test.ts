@@ -26,7 +26,7 @@ for (const k of Object.keys(process.env)) if (k.startsWith("PRICEIQ_")) delete p
 
 const origLog = console.log;
 console.log = () => {};
-const { ensureSeeded, renameDemoPartner, renameDemoPartnerIds, removeExampleCases, retireOldQuotes, rewordQuoteTexts, RETIRED_QUOTE_CANCEL_REASON, demoPartnerId, DEMO_PARTNER, SEEDED_EXAMPLE_CASES } = await import("./seed.ts");
+const { ensureSeeded, backfillTradeModels, renameDemoPartner, renameDemoPartnerIds, removeExampleCases, retireOldQuotes, rewordQuoteTexts, RETIRED_QUOTE_CANCEL_REASON, demoPartnerId, DEMO_PARTNER, SEEDED_EXAMPLE_CASES } = await import("./seed.ts");
 const { quoteSourceLabel, retiredSource, NOT_ON_CARD, RETIRED_QUOTE_LABEL } = await import("../domain/ratecard.ts");
 const { NO_MARKET_PRICE } = await import("../domain/offer.ts");
 const { checkLedger } = await import("../domain/credit.ts");
@@ -72,6 +72,34 @@ test("a new database: the test programmes and their logins — no rate card of S
   const mode = partnerMode(DEMO_PARTNER.orgId);
   assert.equal(mode.kind, "none");
   assert.ok(!namesBrand(`${mode.label} ${mode.why}`));
+});
+
+test("SUP-259: a database seeded before a model joined the list gains it on boot — additive only, idempotent, audited; an edited row is never touched", () => {
+  const ADDED = ["iphone-13-pro-max", "iphone-14-plus", "iphone-14-pro-max", "iphone-15-plus", "iphone-15-pro-max", "iphone-16-plus", "iphone-16-pro", "iphone-16-pro-max", "iphone-16e", "iphone-17", "iphone-air", "iphone-17-pro", "iphone-17-pro-max"];
+  assert.equal(count(`SELECT COUNT(*) n FROM trade_models`), 152, "a new database has the whole list");
+  assert.deepEqual(backfillTradeModels(), [], "nothing to add on a new database");
+  // The live database as it was: none of the 13, and an admin's own edit on a row that IS on file.
+  const ph = ADDED.map(() => "?").join(",");
+  db().prepare(`DELETE FROM trade_models WHERE id IN (${ph})`).run(...ADDED);
+  db().prepare(`UPDATE trade_models SET variants = '["128GB"]', model = 'iPhone 13 (edited)' WHERE id = 'iphone-13'`).run();
+  const audits = () => count(`SELECT COUNT(*) n FROM audit WHERE action = 'catalog.trade_models.backfill'`);
+  const before = audits();
+  const added = backfillTradeModels();
+  assert.deepEqual([...added].sort(), [...ADDED].sort(), "exactly the 13");
+  assert.equal(count(`SELECT COUNT(*) n FROM trade_models`), 152);
+  const edited = one<{ variants: string; model: string }>(`SELECT variants, model FROM trade_models WHERE id = 'iphone-13'`);
+  assert.deepEqual([edited.model, edited.variants], ["iPhone 13 (edited)", '["128GB"]'], "a row on file is never overwritten");
+  const pm = one<{ brand: string; model: string; variants: string; release_year: number; service_tier: string; model_codes: string; source: string }>(`SELECT * FROM trade_models WHERE id = 'iphone-17-pro-max'`);
+  assert.deepEqual([pm.brand, pm.model, JSON.parse(pm.variants), pm.release_year, pm.service_tier, pm.model_codes, JSON.parse(pm.source).kind], ["Apple", "iPhone 17 Pro Max", ["256GB", "512GB", "1TB", "2TB"], 2025, "other", "[]", "approximate"]);
+  assert.equal(audits(), before + 1, "one audit row naming them");
+  const row = one<{ detail: string }>(`SELECT detail FROM audit WHERE action = 'catalog.trade_models.backfill' ORDER BY id DESC LIMIT 1`);
+  assert.deepEqual([...JSON.parse(row.detail).added].sort(), [...ADDED].sort());
+  // The second boot adds nothing and writes nothing.
+  assert.deepEqual(backfillTradeModels(), []);
+  assert.equal(audits(), before + 1);
+  // No price comes with them: nothing on any rate card, nothing in the repair book.
+  assert.equal(count(`SELECT COUNT(*) n FROM repair_book WHERE model_id IN (${ph})`, ...ADDED), 0);
+  db().prepare(`UPDATE trade_models SET variants = '["128GB","256GB"]', model = 'iPhone 13' WHERE id = 'iphone-13'`).run();
 });
 
 test("a database seeded under the partner's former name: renamed once — read from the partner's own row, only SwapUp's own sentences", () => {

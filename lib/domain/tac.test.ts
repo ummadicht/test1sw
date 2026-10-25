@@ -62,7 +62,7 @@ test("exact names map, compared without case — the list writes Iphone, Fe, M55
 });
 
 test("nothing loose: a longer or shorter name is another phone", () => {
-  assert.equal(modelOf("Apple Iphone 13 Pro Max"), null, "not the 13 Pro");
+  assert.equal(modelOf("Apple Iphone 13 Pro Max"), "iphone-13-pro-max", "the 13 Pro Max itself — never the 13 Pro");
   assert.equal(modelOf("Apple Iphone 13 Mini"), null, "not the 13");
   assert.equal(modelOf("Samsung Galaxy S26 Pro"), null);
   assert.equal(modelOf("Oneplus Nord Ce 3 Lite 5G"), null, "the CE 3 Lite is not the CE 3");
@@ -117,9 +117,9 @@ test("an alias to a model the catalogue doesn't have maps to nothing", () => {
   assert.equal(modelForTacName("Samsung Galaxy S23 Ultra 5G", [{ id: "galaxy-s23", brand: "Samsung", model: "Galaxy S23" }]).modelId, null);
 });
 
-test("coverage: 113 of the 139 models on file are reached by a TAC name (the rest are newer than the list, or ambiguous)", () => {
+test("coverage: 126 of the 152 models on file are reached by a TAC name (the rest are newer than the list, or ambiguous)", () => {
   const reached = new Set(NAMES.map(modelOf).filter(Boolean));
-  assert.equal(reached.size, 113);
+  assert.equal(reached.size, 126);
   for (const id of ["galaxy-z-fold8", "galaxy-s26-fe", "galaxy-m14-5g", "galaxy-m14", "galaxy-a22"]) assert.ok(!reached.has(id), id);
 });
 
@@ -127,8 +127,8 @@ test("tacModel: IMEI → the list's name → the model, with the catalogue's own
   const m = tacModel(imeiFor("Samsung Galaxy S25 Fe"), DB, MODELS);
   assert.deepEqual(m, { tac: m.tac, name: "Samsung Galaxy S25 Fe", brand: "Samsung", model: "Galaxy S25 FE", modelId: "galaxy-s25-fe", why: "IMEI type code: Samsung Galaxy S25 Fe." });
   assert.ok(!("variant" in m));
-  const pro = tacModel(imeiFor("Apple Iphone 13 Pro Max"), DB, MODELS);
-  assert.deepEqual([pro.brand, pro.model, pro.modelId], ["Apple", "iPhone 13 Pro Max", null], "named, not on file");
+  const mini = tacModel(imeiFor("Apple Iphone 13 Mini"), DB, MODELS);
+  assert.deepEqual([mini.brand, mini.model, mini.modelId], ["Apple", "iPhone 13 Mini", null], "named, not on file");
   const unknown = tacModel("352099001761481", DB, MODELS);
   assert.deepEqual([unknown.tac, unknown.name, unknown.modelId], ["35209900", null, null]);
   assert.equal(tacModel("12", DB, MODELS).tac, null);
@@ -139,4 +139,41 @@ test("catalogueKey: brand + model, without doubling a brand already in the name"
   assert.equal(catalogueKey({ brand: "Samsung", model: "Galaxy S23" }), "samsung galaxy s23");
   assert.equal(catalogueKey({ brand: "OnePlus", model: "OnePlus 9" }), "oneplus 9");
   assert.equal(catalogueKey({ brand: "Google", model: "Pixel 7" }), "google pixel 7");
+});
+
+/* ─────────────────────────── SUP-259: the iPhones an IMEI names, and two Samsung spellings ─────────────────────────── */
+
+test("SUP-259: the 13 iPhones added to the list are each named by the TAC list, with their own storage sizes", () => {
+  const ADDED: [string, string, string[]][] = [
+    ["Apple Iphone 13 Pro Max", "iphone-13-pro-max", ["128GB", "256GB", "512GB", "1TB"]],
+    ["Apple Iphone 14 Plus", "iphone-14-plus", ["128GB", "256GB", "512GB"]],
+    ["Apple Iphone 14 Pro Max", "iphone-14-pro-max", ["128GB", "256GB", "512GB", "1TB"]],
+    ["Apple Iphone 15 Plus", "iphone-15-plus", ["128GB", "256GB", "512GB"]],
+    ["Apple Iphone 15 Pro Max", "iphone-15-pro-max", ["256GB", "512GB", "1TB"]],
+    ["Apple Iphone 16 Plus", "iphone-16-plus", ["128GB", "256GB", "512GB"]],
+    ["Apple Iphone 16 Pro", "iphone-16-pro", ["128GB", "256GB", "512GB", "1TB"]],
+    ["Apple Iphone 16 Pro Max", "iphone-16-pro-max", ["256GB", "512GB", "1TB"]],
+    ["Apple Iphone 16E", "iphone-16e", ["128GB", "256GB", "512GB"]],
+    ["Apple Iphone 17", "iphone-17", ["256GB", "512GB"]],
+    ["Apple Iphone Air", "iphone-air", ["256GB", "512GB", "1TB"]],
+    ["Apple Iphone 17 Pro", "iphone-17-pro", ["256GB", "512GB", "1TB"]],
+    ["Apple Iphone 17 Pro Max", "iphone-17-pro-max", ["256GB", "512GB", "1TB", "2TB"]],
+  ];
+  const full = SEED.tradeModels as (TacModelRef & { variants: string[]; serviceTier: string })[];
+  for (const [name, id, sizes] of ADDED) {
+    assert.ok(NAMES.includes(name), `"${name}" is on the TAC list`);
+    assert.equal(modelOf(name), id, name);
+    const m = full.find((x) => x.id === id)!;
+    assert.deepEqual([m.brand, m.variants, m.serviceTier], ["Apple", sizes, "other"], id);
+    assert.equal(tacModel(imeiFor(name), DB, MODELS).modelId, id, `an IMEI on a ${name} TAC names ${id}`);
+  }
+  assert.equal(full.filter((m) => m.brand === "Apple").length, 22, "9 iPhones before, 13 added");
+});
+
+test("SUP-259: 'Galaxy Z Flip 5' and 'Galaxy Z Fold4-5G' are the Flip5 and Fold4 on file; the 2020 'Z Flip 5G' is another phone", () => {
+  assert.equal(modelOf("Samsung Galaxy Z Flip 5"), "galaxy-z-flip5");
+  assert.equal(modelOf("Samsung Galaxy Z Fold4-5G"), "galaxy-z-fold4");
+  assert.equal(modelOf("Samsung Galaxy Z Flip5"), "galaxy-z-flip5", "the list's other spelling still maps");
+  assert.equal(modelOf("Samsung Galaxy Z Flip 5G"), null, "the 2020 Z Flip 5G is not the Flip5");
+  assert.equal(modelOf("Samsung Galaxy S26 Pro"), null, "against the S26+ on file: the owner decides");
 });

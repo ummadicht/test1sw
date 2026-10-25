@@ -53,6 +53,8 @@ export function ensureSeeded(): Promise<void> {
     g.__swapup_seed = (async () => {
       const has = db().prepare(`SELECT COUNT(*) n FROM orgs`).get() as { n: number };
       if (has.n === 0) seedBase();
+      const added = backfillTradeModels();
+      if (added.length) console.log(`[swapup] trade models added to the catalogue from the seed data: ${added.join(", ")}`);
       backfillModelCodes();
       renameDemoCentres();
       renameDemoPartner();
@@ -68,6 +70,33 @@ export function ensureSeeded(): Promise<void> {
     })();
   }
   return g.__swapup_seed;
+}
+
+/**
+ * A database seeded before a model joined the seed data (production) gains it on boot, so a new
+ * model on SwapUp's list never waits for a fresh database (SUP-259: the iPhones an IMEI names).
+ * ADDITIVE ONLY and idempotent: a model already on file — whatever an admin has made of it — is
+ * never touched (INSERT OR IGNORE on the id, in one transaction); nothing is ever removed. A new model
+ * comes with no price: it stays unpriced until a rate card or PriceIQ prices it. Returns the ids it
+ * added; when it adds any, one audit row `catalog.trade_models.backfill` names them.
+ */
+export function backfillTradeModels(): string[] {
+  const d = db();
+  const have = new Set((d.prepare(`SELECT id FROM trade_models`).all() as { id: string }[]).map((r) => r.id));
+  const missing = DATA.tradeModels.filter((m) => !have.has(m.id));
+  if (!missing.length) return [];
+  const ins = d.prepare(
+    `INSERT OR IGNORE INTO trade_models (id, brand, model, series, release_year, support_end_year, variants, service_tier, care_plus_fee, model_codes, source) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+  );
+  const added: string[] = [];
+  d.transaction(() => {
+    for (const m of missing) {
+      const r = ins.run(m.id, m.brand, m.model, m.series, m.releaseYear, m.supportEndYear, JSON.stringify(m.variants), m.serviceTier, m.carePlusFee, JSON.stringify(m.modelCodes ?? []), JSON.stringify(m.source));
+      if (r.changes) added.push(m.id);
+    }
+    if (added.length) audit({ action: "catalog.trade_models.backfill", entity: "trade_models", detail: { added } });
+  })();
+  return added;
 }
 
 /**

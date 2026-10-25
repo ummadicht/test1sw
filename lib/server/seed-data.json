@@ -2712,6 +2712,282 @@
    }
   },
   {
+   "id": "iphone-13-pro-max",
+   "brand": "Apple",
+   "model": "iPhone 13 Pro Max",
+   "series": null,
+   "releaseYear": 2021,
+   "supportEndYear": null,
+   "variants": [
+    "128GB",
+    "256GB",
+    "512GB",
+    "1TB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-14-plus",
+   "brand": "Apple",
+   "model": "iPhone 14 Plus",
+   "series": null,
+   "releaseYear": 2022,
+   "supportEndYear": null,
+   "variants": [
+    "128GB",
+    "256GB",
+    "512GB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-14-pro-max",
+   "brand": "Apple",
+   "model": "iPhone 14 Pro Max",
+   "series": null,
+   "releaseYear": 2022,
+   "supportEndYear": null,
+   "variants": [
+    "128GB",
+    "256GB",
+    "512GB",
+    "1TB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-15-plus",
+   "brand": "Apple",
+   "model": "iPhone 15 Plus",
+   "series": null,
+   "releaseYear": 2023,
+   "supportEndYear": null,
+   "variants": [
+    "128GB",
+    "256GB",
+    "512GB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-15-pro-max",
+   "brand": "Apple",
+   "model": "iPhone 15 Pro Max",
+   "series": null,
+   "releaseYear": 2023,
+   "supportEndYear": null,
+   "variants": [
+    "256GB",
+    "512GB",
+    "1TB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-16-plus",
+   "brand": "Apple",
+   "model": "iPhone 16 Plus",
+   "series": null,
+   "releaseYear": 2024,
+   "supportEndYear": null,
+   "variants": [
+    "128GB",
+    "256GB",
+    "512GB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-16-pro",
+   "brand": "Apple",
+   "model": "iPhone 16 Pro",
+   "series": null,
+   "releaseYear": 2024,
+   "supportEndYear": null,
+   "variants": [
+    "128GB",
+    "256GB",
+    "512GB",
+    "1TB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-16-pro-max",
+   "brand": "Apple",
+   "model": "iPhone 16 Pro Max",
+   "series": null,
+   "releaseYear": 2024,
+   "supportEndYear": null,
+   "variants": [
+    "256GB",
+    "512GB",
+    "1TB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-16e",
+   "brand": "Apple",
+   "model": "iPhone 16e",
+   "series": null,
+   "releaseYear": 2025,
+   "supportEndYear": null,
+   "variants": [
+    "128GB",
+    "256GB",
+    "512GB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-17",
+   "brand": "Apple",
+   "model": "iPhone 17",
+   "series": null,
+   "releaseYear": 2025,
+   "supportEndYear": null,
+   "variants": [
+    "256GB",
+    "512GB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-air",
+   "brand": "Apple",
+   "model": "iPhone Air",
+   "series": null,
+   "releaseYear": 2025,
+   "supportEndYear": null,
+   "variants": [
+    "256GB",
+    "512GB",
+    "1TB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-17-pro",
+   "brand": "Apple",
+   "model": "iPhone 17 Pro",
+   "series": null,
+   "releaseYear": 2025,
+   "supportEndYear": null,
+   "variants": [
+    "256GB",
+    "512GB",
+    "1TB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
+   "id": "iphone-17-pro-max",
+   "brand": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "series": null,
+   "releaseYear": 2025,
+   "supportEndYear": null,
+   "variants": [
+    "256GB",
+    "512GB",
+    "1TB",
+    "2TB"
+   ],
+   "serviceTier": "other",
+   "carePlusFee": null,
+   "modelCodes": [],
+   "source": {
+    "kind": "approximate",
+    "label": "Release year approximate; update policy not recorded",
+    "observedAt": "2026-10-15"
+   }
+  },
+  {
    "id": "oneplus-9",
    "brand": "OnePlus",
    "model": "OnePlus 9",

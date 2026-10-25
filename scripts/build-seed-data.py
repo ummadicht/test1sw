@@ -142,6 +142,22 @@ OTHER = [
     ("Apple", "iPhone 11", 2019, 65000), ("Apple", "iPhone 12", 2020, 70000), ("Apple", "iPhone 13", 2021, 70000),
     ("Apple", "iPhone 13 Pro", 2021, 120000), ("Apple", "iPhone 14", 2022, 80000), ("Apple", "iPhone 14 Pro", 2022, 130000),
     ("Apple", "iPhone 15", 2023, 80000), ("Apple", "iPhone 15 Pro", 2023, 135000), ("Apple", "iPhone 16", 2024, 80000),
+    # Field test 25 Oct (SUP-259): the iPhones the TAC list names that SwapUp's list didn't have — an IMEI
+    # naming one got no model, and the customer's picker priced it as another phone. Their own storage
+    # sizes; no launch price recorded (none is used). Unpriced until a rate card or PriceIQ prices them.
+    ("Apple", "iPhone 13 Pro Max", 2021, None, ["128GB", "256GB", "512GB", "1TB"]),
+    ("Apple", "iPhone 14 Plus", 2022, None, ["128GB", "256GB", "512GB"]),
+    ("Apple", "iPhone 14 Pro Max", 2022, None, ["128GB", "256GB", "512GB", "1TB"]),
+    ("Apple", "iPhone 15 Plus", 2023, None, ["128GB", "256GB", "512GB"]),
+    ("Apple", "iPhone 15 Pro Max", 2023, None, ["256GB", "512GB", "1TB"]),
+    ("Apple", "iPhone 16 Plus", 2024, None, ["128GB", "256GB", "512GB"]),
+    ("Apple", "iPhone 16 Pro", 2024, None, ["128GB", "256GB", "512GB", "1TB"]),
+    ("Apple", "iPhone 16 Pro Max", 2024, None, ["256GB", "512GB", "1TB"]),
+    ("Apple", "iPhone 16e", 2025, None, ["128GB", "256GB", "512GB"]),
+    ("Apple", "iPhone 17", 2025, None, ["256GB", "512GB"]),
+    ("Apple", "iPhone Air", 2025, None, ["256GB", "512GB", "1TB"]),
+    ("Apple", "iPhone 17 Pro", 2025, None, ["256GB", "512GB", "1TB"]),
+    ("Apple", "iPhone 17 Pro Max", 2025, None, ["256GB", "512GB", "1TB", "2TB"]),
     ("OnePlus", "OnePlus 9", 2021, 50000), ("OnePlus", "OnePlus 10R", 2022, 38000), ("OnePlus", "OnePlus 11", 2023, 57000),
     ("OnePlus", "OnePlus 12", 2024, 65000), ("OnePlus", "OnePlus Nord CE 3", 2023, 27000),
     ("Xiaomi", "Redmi Note 11", 2022, 14000), ("Xiaomi", "Redmi Note 12", 2023, 17000), ("Xiaomi", "Redmi Note 13 Pro", 2024, 26000),
@@ -149,12 +165,14 @@ OTHER = [
     ("Google", "Pixel 6a", 2022, 44000), ("Google", "Pixel 7", 2022, 60000), ("Google", "Pixel 8", 2023, 76000),
 ]
 PIXEL_SEC = {"Pixel 6a": 5, "Pixel 7": 5, "Pixel 8": 7}
-for brand, model, y, launch in OTHER:
+for entry in OTHER:
+    brand, model, y = entry[:3]
+    sizes = entry[4] if len(entry) > 4 else ["128GB", "256GB"]
     mid = slug(model if brand != "Apple" else model)
     sec = PIXEL_SEC.get(model)
     models[mid] = {
         "id": mid, "brand": brand, "model": model, "series": None, "releaseYear": y,
-        "supportEndYear": (y + sec) if sec else None, "variants": ["128GB", "256GB"], "serviceTier": "other", "carePlusFee": None, "modelCodes": [],
+        "supportEndYear": (y + sec) if sec else None, "variants": sizes, "serviceTier": "other", "carePlusFee": None, "modelCodes": [],
         "source": {"kind": "approximate", "label": "Release year approximate; update policy not recorded" if not sec else f"Google update policy ({sec} yrs), release year approximate", "observedAt": OBSERVED},
     }
 

@@ -207,7 +207,7 @@ test("a case that has a model keeps it — the IMEI's other model is a warning; 
   await cases.updateCase(adv, d.id, { variant: "256GB" });
   const fixed = await cases.updateCase(adv, d.id, { imei: imeiOn(IP13) });
   assert.deepEqual([fixed.device?.modelId, fixed.modelSource, fixed.device?.variant], ["iphone-13", "imei", null], "the old IMEI's model and its storage go");
-  const none = await cases.updateCase(adv, d.id, { imei: imeiOn("Apple Iphone 13 Pro Max") });
+  const none = await cases.updateCase(adv, d.id, { imei: imeiOn("Apple Iphone 13 Mini") });
   assert.equal(none.device, null, "an IMEI that names no model on file leaves none — the old one had no basis left");
   assert.equal(none.modelSource, null);
 });
