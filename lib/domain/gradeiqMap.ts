@@ -630,7 +630,8 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
       cameraChecked: !incomplete,
       verdict: dc.verdict,
       confirmed: !incomplete && (dc.verdict === "pass" || displayFailConfirmed(dc)),
-      doubt: displayFailDoubt(dc),
+      // A fail from a sweep that missed colours is never a confirmed one, whatever it found (PV11).
+      doubt: incomplete && dc.verdict === "fail" ? SWEEP_INCOMPLETE_DOUBT : displayFailDoubt(dc),
       captured: dc.captures.length,
       requested,
       ...(aiOff ? { aiOff: true } : {}),
@@ -640,7 +641,13 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
           ? `captured ${dc.captures.length} of ${requested} colours, AI reader off — check by eye`
           : dc.reason || (dc.missing.length ? `Not captured: ${dc.missing.join(", ")}.` : dc.note || "The sweep couldn't judge the screen."),
     };
-    if (dc.verdict === "fail") {
+    // SUP-260 (SU-AND-00048: 4 of 6 colours, black and green missing, "fail" at 0.8 on one moderate
+    // "Dark area on left"): only a COMPLETE sweep's confirmed fail is display_lines and the
+    // lines_or_spots floor. A sweep that missed colours puts no screen fault on the case and no floor
+    // under the advisor's Screen tap: the advisor looks, and their own tap decides ("All fine" then
+    // records the screen fine).
+    if (incomplete) flags.push(SCREEN_PARTLY_CHECKED);
+    else if (dc.verdict === "fail") {
       if (displayFailConfirmed(dc)) {
         addFault(outFaults, {
           id: "display_lines",
@@ -669,6 +676,16 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
 
   return { usable, floor, faults: outFaults, suggested: outSuggested, flags: [...new Set(flags)], findings, lcd, identity: identityOf(s) };
 }
+
+/**
+ * The Screen row's note on "Check the phone" (cases.ts certifyBlock notes.screen) and the camera's
+ * flag: the sweep ran but didn't see every colour (or its reader was off), so the advisor looks.
+ */
+export const SCREEN_PARTLY_CHECKED = "Screen not fully camera-checked — look at it.";
+/** …and when no sweep ran at all. */
+export const SCREEN_NOT_CHECKED = "Screen not camera-checked — look at it.";
+/** Why an incomplete sweep's "fail" isn't confirmed (lcd.doubt — the grade's PV11 reads it). */
+export const SWEEP_INCOMPLETE_DOUBT = "the screen sweep didn't see every colour";
 
 /**
  * A camera screen-sweep "fail" that may go on the case. GradeIQ reports "fail"

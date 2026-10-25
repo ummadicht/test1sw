@@ -292,8 +292,9 @@ results on the case first (as the polling advisor; it waits up to 4 s) and alrea
 SwapUp Store never taps Apply on the way to the answer. The server applies the session — the same
 `applyTestSession`, every gate unchanged — once the phone has posted `complete`, the store camera's
 grade is no longer pending (`cameraGradePending`), and, where the camera couldn't decide the screen
-or the body, the advisor has tapped every row of "Check the phone" (§8b; applying first would end
-the phone's test colours, and the answer's numbers would move after the customer saw them). It is
+or the body, the advisor has tapped every row of "Check the phone" (§8b; the answer's numbers would
+otherwise move after the customer saw them). Nothing waits for test colours on the customer's phone
+(SUP-260): the phone is never asked for them. It is
 tried from the staff poll above, from `POST /api/device/complete`, and from the phone's own
 `GET /api/device/status` poll (then recorded as the advisor who started the trade-in), so the case
 is ready even with nobody on the Session screen. Audit `test_session.apply` carries `auto: true`.
@@ -362,7 +363,8 @@ type CertifyBlock = {
   needed: ("screen"|"body"|"liquid")[];   // the rows to show: screen when the camera's sweep didn't check it or its grade isn't final; body when it isn't final; liquid on that same card. [] when the camera decided both — no card
   rows: Record<"screen"|"body"|"liquid", { value: string; label: string; by: string; at: string; withColours: boolean } | null>;   // certified so far (the case's)
   choices: Record<"screen"|"body"|"liquid", { value: string; label: string }[]>;   // each row's chips, word for word, in order
-  colours: "showing" | "waiting" | "old_app" | "off";   // the test colours on the customer's phone: showing now / waiting for the phone (≥ 0.8.0 shows them on its result screen) / an app before 0.8.0 can't / not needed
+  colours: "showing" | "waiting" | "old_app" | "off";   // always "off" since 0.9.4 (SUP-260: no colour loop after the tests); the other values are kept for the 0.9.x apps
+  notes: { screen: string | null };   // under the Screen row when the card asks for it and the sweep didn't check every colour: "Screen not fully camera-checked — look at it." (a sweep ran, missed colours or its reader was off) / "Screen not camera-checked — look at it." (no sweep); null otherwise
 };
 type DiagnosticSummary = {
   model: { modelId: string|null; label: string|null; variant: string|null; match: "exact"|"family"|"none"; why: string };
@@ -1001,8 +1003,8 @@ Measured browser tests (touch, camera, display, connectivity…) keep their verd
 `POST /api/device/complete` `{}` → `{ ok: true, summary }`.
 
 `GET /api/device/status` → `{ status, progress, storeName, caseRef, reportPath, grading, colours, answer, identity }` (lets the
-app show "The store has your results"; `colours: true` = show the test colours on the result screen
-for the advisor — "The test colours for the advisor", below). Since 2026-10-17, once the session is `applied`:
+app show "The store has your results"; `colours` is always `false` since 0.9.4 — "The test colours for
+the advisor", below). Since 2026-10-17, once the session is `applied`:
 `reportPath` = the path of the phone's public grade report, `"/r/<token>"` — open it on the
 session's `server` origin ("See your phone's report", §9); `grading` = `{ status, label, grade,
 letter, final }` of the version that link opens on (the latest issued one, never the live grade) —
@@ -1049,14 +1051,15 @@ on each step change. Only the store's screen reads it (`TestSessionView.phonePha
 card's line); anything else → `400`. `colours` (≥ 0.8.0): the phone is showing the test colours on
 its result screen for the advisor (below) — a certification tapped then records `withColours`.
 
-**The test colours for the advisor (SwapUp Check ≥ 0.8.0).** The customer is never asked about
-condition. When the store camera's colour sweep didn't check the screen, the advisor certifies it in
-SwapUp Store while the phone shows the colours: `GET /api/device/status` says **`colours: true`**
-once the phone's phase is `done` (or `colours`), the session isn't applied, and the screen is still
-to certify. Then, on the result screen: white → black → red → green → blue → stripes, full-screen,
-about 2.5 s each, looping, brightness up, caption "The advisor is checking your screen — keep it
-face up"; poll the status about every 1.5 s, post phase `colours` while showing and `done` when
-`colours` turns false (the advisor tapped Screen, or Apply). The customer taps nothing.
+**The test colours for the advisor — retired in 0.9.4** (owner, 2026-10-25: *"initial scan IMEI and
+QR, take photos and functional test and back to advisor with report and details and offer"* —
+SUP-260). After the tests the customer's phone shows its result screen, and the advisor has the grade
+report, the details and the answer at once: `GET /api/device/status` always says **`colours:
+false`**, so SwapUp Check 0.8.0–0.9.3 never enters (or at once leaves) its colour loop
+(ResultColours.tsx). Where the store camera's colour sweep didn't check every colour, the advisor
+looks at the phone and taps the Screen row on "Check the phone" (§8b, `certify.notes.screen`); a
+sweep that missed colours never puts a screen fault on the case. Phase `colours` is still accepted
+from an older build.
 
 `GET /api/device/models` → `{ brands: string[] }` (most models first); `?brand=Samsung` (any case) →
 `{ models: [{ id, brand, model, variants }] }`, newest first. SwapUp's own model list, no prices.
@@ -1331,8 +1334,8 @@ Owner, 2026-10-17: *"advisor certify lcd in its app instead of asking"*. The cus
 about condition: the store camera tests it, and where the camera can't decide — no screen sweep, its
 AI off, a grade that isn't final — the advisor looks and taps what they see, **by name**, on one card
 in SwapUp Store ("Check the phone", **inside the camera step** of the Session screen, only when the
-camera couldn't decide — the body and liquid rows as soon as the scan is over, the screen once the
-phone's tests are done and it shows the colours). One tap per row; no forms, no confirm dialog;
+camera couldn't decide — every row as soon as the scan is over, the screen too: nothing waits for
+test colours since 0.9.4). One tap per row; no forms, no confirm dialog;
 tapping another chip replaces the earlier one. The **automatic** apply waits for every row on the
 card (above, "The answer, by itself") while it can still be tapped (`canEdit`); a **manual** Apply is
 never blocked: a row left untapped keeps the grade provisional, and the answer screen then shows the
@@ -1358,21 +1361,24 @@ Which rows (`needed`) follow exactly what the SwapUp grade can only settle with 
 sweep didn't check the screen, or it failed it without being sure; the body when the grade isn't
 final; both when the grade isn't conclusive or GradeIQ asks for a review; the screen / the body for
 a part a final grade rated C or D (front / back or frame); the body for a cracked back or bent frame
-the camera saw that isn't on the case. The Screen row **waits while the phone is still testing**
-(the colours come after the tests): SwapUp Store holds its chips, and the server answers `409`
-"Wait for the test colours — the phone is still testing." A Screen tapped before the colours showed
-keeps them wanted, and the same tap again (once they show) records it on them.
+the camera saw that isn't on the case. Since 0.9.4 (SUP-260) the Screen row is taken at any time —
+the server no longer answers `409` "Wait for the test colours …" — and **a sweep that didn't see
+every colour never adds `display_lines` or the `lines_or_spots` floor** (`lib/domain/gradeiqMap.ts`):
+the camera's record says "Screen not fully camera-checked — look at it." (`lcd.doubt` "the screen
+sweep didn't see every colour" for its fail, which the report's PV11 reads), and the advisor's own
+Screen tap decides — "All fine" then records the screen OK. A COMPLETE sweep's confirmed fail stays
+the fault and the floor (SUP-5). A screen certified without the colours keeps the report's grade
+"· provisional" (PV13) — honest: it rests on the advisor's look.
 
 `TestSessionView.certify` **and `CaseView.certify`** (staff only; the same block from the same code,
 `certifyBlock` in `lib/server/cases.ts`, so the answer screen opened from Home shows the card too)
 say what to show: `needed` (the rows), `rows` (certified so far), `choices` (the chips, word for
 word), `testSessionId` (send it back with each tap), `canEdit` (false once the case is past the
-counter: show the rows, no chips), `colours` — under Screen: `showing` → "The customer's phone is
-showing the test colours", `waiting` → "Waiting for the customer's phone to show the colours…"
-(also before the phone has joined), `old_app` → the phone can't show them (certify by looking at it;
-the grade says so), `off` → nothing to wait for (certified, the camera's sweep checked it, or the
-results are applied). `CaseView.certify` is `null` for a partner, and for a case nobody tested with
-SwapUp Check and nobody certified.
+counter: show the rows, no chips), `notes.screen` — under Screen, as sent (the desk shows it on its
+card; SwapUp Store from its next build — 0.9.3 says "Screen not checked — the camera couldn't check
+the screen — check it below" itself), and `colours`, always `off` since 0.9.4 (0.9.x apps read
+`showing` / `waiting` / `old_app` too, and never hold the Screen row on `off`). `CaseView.certify`
+is `null` for a partner, and for a case nobody tested with SwapUp Check and nobody certified.
 
 | Row | Chips (`value` · label) | On the case |
 |---|---|---|
@@ -1403,7 +1409,7 @@ SwapUp Check and nobody certified.
   the camera saw, so on a row the camera confirmed worse it records the camera's own chip (Screen
   `scratches` on a camera's "Visible scratches", Body `dents` on its "Dents on the frame") — the row
   then says what the phone is priced at.
-- `withColours` = the phone's phase was `colours` within the last 10 minutes.
+- `withColours` = the phone's phase was `colours` within the last 10 minutes (only an older build mid-loop since 0.9.4).
 - Works before and after Apply, until the trade-in is locked. Before Apply the case has no
   condition yet: a tap records the row (and puts on any fault it means) but never invents the rest of
   a condition nobody looked at — `condition` stays `null`, and Apply folds the certified screen and

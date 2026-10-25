@@ -228,11 +228,8 @@ function rowById(id: string): Row | null {
   return r ? expireIfDue(r) : null;
 }
 
-/**
- * What "Check the phone" needs for this session, and whether the customer's
- * phone should show the test colours (lib/server/cases.ts certifyBlock).
- */
-function certifyFor(r: Row, ce: ReturnType<typeof cameraEvidence>): { block: CertifyBlock; coloursWanted: boolean } {
+/** What "Check the phone" needs for this session (lib/server/cases.ts certifyBlock). */
+function certifyFor(r: Row, ce: ReturnType<typeof cameraEvidence>): { block: CertifyBlock } {
   const c = db().prepare(`SELECT status, camera_check, certification, faults FROM cases WHERE id = ?`).get(r.case_id) as
     | { status: string; camera_check: string | null; certification: string | null; faults: string | null }
     | undefined;
@@ -1469,10 +1466,11 @@ export function deviceStatus(authorization: string | null) {
   // Once applied, the customer's own link to the phone's grading report (public, no money in it),
   // and the grade that page opens on — the SwapUp grade with its letter ("Good (B)"), no reasons, no price.
   const applied = v.status === "applied";
-  // The tests are done and the advisor still has to certify the screen: show the test colours
-  // full-screen on the result screen until they tap it (or Apply). The customer taps nothing.
-  const phase = readPhase(r.phone_phase);
-  const colours = !applied && (phase === "done" || phase === "colours") && certifyFor(r, cameraEvidence(r)).coloursWanted;
+  // Owner, 2026-10-25: after the tests the phone goes back to the advisor with the report and the
+  // offer — the customer gets the result screen, the advisor the report and the answer at once. The
+  // phone is never asked for the test colours any more (SUP-260); `colours` stays in the reply, always
+  // false, for the 0.8.0–0.9.3 apps, which leave their colour loop on it (ResultColours.tsx).
+  const colours = false;
   return {
     status: v.status,
     progress: v.progress,

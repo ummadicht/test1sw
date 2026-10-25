@@ -78,11 +78,10 @@ the full contract; where it says more is asked, this paragraph wins.
    advisor's. Before it is priced: "The advisor is working out your price." — or, when nothing can price
    it here (not on the active rate card, or no card active, and PriceIQ not able to answer either):
    "This phone can't be priced for trade-in here yet — the advisor will explain." No partner name, no store margin. The clear-your-phone guide shows once it is traded in.
-   **The test colours (≥ 0.8.0)**: while `GET /api/device/status` says `colours: true` (the camera's sweep
-   didn't check the screen and the advisor hasn't certified it), the result screen shows white → black →
-   red → green → blue → stripes full-screen, about 2.5 s each, looping, brightness up, "The advisor is
-   checking your screen — keep it face up", and posts phase `colours`; back to `done` when it turns false.
-   The customer taps nothing; the advisor taps Screen on "Check the phone" (MOBILE-API §8b).
+   **The test colours (0.8.0–0.9.3) — retired in 0.9.4** (owner, 2026-10-25: IMEI + QR → photos →
+   functional tests → back to the advisor with the report, the details and the offer). `GET
+   /api/device/status` always says `colours: false`, so the result screen never loops the colours; the
+   advisor looks at the phone and taps Screen on "Check the phone" (MOBILE-API §8b, `notes.screen`).
 
 `nativeStep`: identify → scan → battery → auto → actions → done (resume-safe: `identifiedAt`,
 `pairing`, `battery` records in CheckState). `POST /api/device/phase {phase}` on each step change.
@@ -99,7 +98,8 @@ available), Battery (file input via expo-image-picker web), then today's interac
 - **Migration 14** (2026-10-17): `cases.certification TEXT` (what the advisor certified by eye — MOBILE-API §8b),
   `test_sessions.scan_release TEXT` (the advisor let the phone go on from Scan without the camera).
 - **The advisor certifies** (`{action:"certify"}`, MOBILE-API §8b): the staff session view's `certify` block lists
-  the rows and the chips; `GET /api/device/status` `colours` tells the phone to show the test colours.
+  the rows and the chips (and `notes.screen` when the sweep missed colours); `GET /api/device/status` `colours`
+  is always false since 0.9.4 — the phone is never asked to show the test colours.
 - The battery reader being off (GradeIQ's `/ocr` answers `ocr.source: "error"`, e.g. its AI out of credit) is a
   409 "Battery reader isn't available — skip; the advisor checks it." to the phone — never "try a clearer screenshot".
 - Join response gains `identity: { label, match: "exact"|"family"|"none", reason, variant, modelId, variants }` (matchModel;

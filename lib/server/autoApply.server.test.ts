@@ -90,8 +90,8 @@ const certifyAll = async (caseId: string, sessionId: string) => {
 
 test("still testing: nothing goes on the case, whatever the advisor taps", async () => {
   const t = testedPhone("Still Testing", { complete: false });
-  // The Screen waits for the test colours (after the tests); the body and liquid can be tapped now.
-  await assert.rejects(cases.certifyCase(adv, t.caseId, { row: "screen", value: "ok", testSessionId: t.sessionId }), (e: Error & { status?: number }) => e.status === 409);
+  // Every row can be tapped now — the Screen too: nothing waits for test colours any more (SUP-260).
+  await cases.certifyCase(adv, t.caseId, { row: "screen", value: "ok", testSessionId: t.sessionId });
   await cases.certifyCase(adv, t.caseId, { row: "body", value: "scuffs", testSessionId: t.sessionId });
   await cases.certifyCase(adv, t.caseId, { row: "liquid", value: "clean", testSessionId: t.sessionId });
   const v = (await sessions.getTestSession(adv, t.sessionId)).session;

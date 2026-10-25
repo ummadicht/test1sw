@@ -80,7 +80,9 @@ Battery health = the **lowest** reading (the phone's battery screen, Phonecheck)
 **The advisor's certification is evidence too** (`certification`, 2026-10-17.2 — owner: *"advisor
 certify lcd in its app instead of asking"*). When the store camera can't decide, the advisor taps
 what they see on "Check the phone" in SwapUp Store, by name: the **screen** (OK · Scratches · Lines
-or spots · Cracked) while the customer's phone shows the test colours, the **body** (Like new ·
+or spots · Cracked) by looking at the phone (since 0.9.4 the customer's phone no longer shows the
+test colours: a screen sweep that missed colours adds no screen fault, the advisor's tap decides —
+SUP-260), the **body** (Like new ·
 Scuffs · Dents · Back cracked · Bent), the **liquid indicator** (Clean · Tripped · Can't see).
 - On the case (`certifyRow`): Lines or spots → `display_lines`, Cracked → `screen_cracked`, Back
   cracked → `back_cracked`, Bent → `frame_damage`, Tripped → `water_damage`, each with source

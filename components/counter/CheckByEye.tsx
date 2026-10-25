@@ -38,6 +38,8 @@ export function CheckByEye({ ops, onDone, onOther }: { ops: CaseOps; onDone: () 
       </button>
       <div className="text-[15px] font-[720] leading-tight">Check the phone</div>
       <p className="text-[14px] text-ink-2 leading-snug">The store camera couldn&apos;t decide the screen or the body — look at the phone.</p>
+      {/* The camera's screen sweep missed colours (or never ran): the advisor's own look decides the Screen (SUP-260). */}
+      {view.certify?.notes?.screen ? <p className="text-[14px] font-semibold text-warn leading-snug">{view.certify.notes.screen}</p> : null}
       <button type="button" className="text-[13.5px] font-semibold text-fix hover:underline" onClick={onOther}>
         Something&apos;s wrong
       </button>

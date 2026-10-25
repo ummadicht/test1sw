@@ -670,3 +670,56 @@ test("the camera's final grade is said in SwapUp's letter — the grade the answ
   assert.equal(cameraGradeLine({ status: "failed", final: false, provisional: false, reasons: ["No camera grade — check by eye."] }, "", { screen: "flawless", body: "flawless" }), "No camera grade — check by eye.");
   assert.equal(cameraGradeLine({ status: "grading", final: false, provisional: false, reasons: ["Waiting for the camera grade."] }, "", { screen: "flawless", body: "flawless" }), null);
 });
+
+/* ─────────────────────────── SUP-260: an incomplete sweep never puts a screen fault on the case ─────────────────────────── */
+
+/** SU-AND-00048's sweep: 4 of 6 colours captured (black and green missing), "fail" at 0.8 on one moderate "Dark area on left". */
+const ALL6 = ["white", "black", "red", "green", "blue", "stripes"];
+function sweep(missing: string[]) {
+  return {
+    verdict: "fail",
+    confidence: 0.8,
+    note: "",
+    source: "gemini",
+    findings: [{ type: "dark_area", label: "Dark area on left", confidence: 0.8, pattern: "white", severity: "moderate" }],
+    patterns: ALL6,
+    captures: ALL6.filter((p) => !missing.includes(p)).map((p) => ({ pattern: p, photo: `/api/uploads/x-disp-${p}.jpg` })),
+    requested: ALL6,
+    missing,
+  };
+}
+
+test("SUP-260: a sweep that missed colours (4 of 6, a moderate 'fail') adds no display_lines and no floor — a flag, and a doubt for PV11; the same fail on a complete 6/6 sweep is the fault and the floor", () => {
+  const partial = mapCamera(snap({}, {}, { displayCheck: sweep(["black", "green"]) }), FINAL);
+  assert.deepEqual(partial.faults, [], "no display_lines");
+  assert.equal(partial.floor.screen, "flawless", "no lines_or_spots floor under the advisor's tap");
+  assert.ok(partial.flags.includes("Screen not fully camera-checked — look at it."), partial.flags.join(" | "));
+  assert.equal(partial.lcd.cameraChecked, false);
+  assert.equal(partial.lcd.confirmed, false);
+  assert.equal(partial.lcd.doubt, "the screen sweep didn't see every colour");
+  assert.equal(partial.lcd.verdict, "fail");
+  assert.deepEqual([partial.lcd.captured, partial.lcd.requested], [4, 6]);
+  assert.match(partial.lcd.reason!, /Not captured: black, green\./);
+  // A partial PASS, an unknown, nothing photographed, the reader off: no fault either, and the same flag.
+  for (const dc of [
+    { ...sweep(["black"]), verdict: "pass", findings: [] },
+    { ...sweep(["black", "green"]), verdict: "unknown", findings: [] },
+    { ...sweep(ALL6), verdict: "unknown", findings: [], reason: "the phone never confirmed it was showing the test patterns" },
+    { ...sweep([]), verdict: "unknown", findings: [], source: "stub" },
+  ]) {
+    const m = mapCamera(snap({}, {}, { displayCheck: dc }), FINAL);
+    assert.deepEqual([m.faults, m.floor.screen], [[], "flawless"], JSON.stringify(dc.missing));
+    assert.ok(m.flags.includes("Screen not fully camera-checked — look at it."), m.flags.join(" | "));
+  }
+  // The complete sweep: today's behaviour (SUP-5) — the confirmed fail is display_lines, on the floor.
+  const complete = mapCamera(snap({}, {}, { displayCheck: sweep([]) }), FINAL);
+  assert.deepEqual(ids(complete.faults), ["display_lines"]);
+  assert.equal(complete.floor.screen, "lines_or_spots");
+  assert.equal(complete.lcd.cameraChecked, true);
+  assert.equal(complete.lcd.confirmed, true);
+  assert.ok(!complete.flags.includes("Screen not fully camera-checked — look at it."));
+  // A complete but unconfirmed fail (minor only): the doubt flag, as today — no fault.
+  const minor = mapCamera(snap({}, {}, { displayCheck: { ...sweep([]), findings: [{ type: "speck", label: "faint speck", confidence: 0.8, pattern: "white", severity: "minor" }] } }), FINAL);
+  assert.deepEqual(minor.faults, []);
+  assert.match(minor.flags.join(" | "), /The screen sweep saw only minor marks \(faint speck\) — check by eye\./);
+});

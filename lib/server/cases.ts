@@ -30,7 +30,7 @@ import { refurbDecisionShown, refurbEconomics, type RefurbEconomics } from "../d
 import { exchange, premiumOn, NEW_PHONE_TOO_CHEAP, PREMIUM_RULE_VERSION } from "../domain/premium";
 import { RuleError } from "../domain/errors";
 import { retiredSource } from "../domain/ratecard";
-import { coloursApp, storageOnSave } from "../domain/phoneLed";
+import { storageOnSave } from "../domain/phoneLed";
 import { canHold } from "../domain/credit";
 import { readImei, KYM_LABEL, type KymStatus } from "../domain/imei";
 import { indianMobile } from "../domain/phone";
@@ -45,6 +45,8 @@ import {
   blankCameraCheck,
   cameraOverrideProblems,
   CAMERA_REASON_MIN,
+  SCREEN_NOT_CHECKED,
+  SCREEN_PARTLY_CHECKED,
   faultsAfterConditionEdit,
   identityBlock,
   reconcileFaultSources,
@@ -52,7 +54,6 @@ import {
 } from "../domain/gradeiqMap";
 import { CERT_ROWS, allFineValue, certChoices, certifyAgainstCamera, certifyNeeded, certifyRow, certifySignals, isCertRow, readCertification, type Certification, type CertRow, type CertifySignals } from "../domain/certify";
 import { cameraEvidence, type GiqRow } from "./gradeiqBridge";
-import type { DeviceReport } from "../domain/diagnostics";
 import type { ImeiLookup } from "./gradeiq";
 import {
   BLACKLISTED,
@@ -222,10 +223,16 @@ export function certificationView(raw: string | null | undefined): Certification
  *                  indicator on that same card. [] when the camera decided both: no card
  *   rows           what is certified so far (the case's), by name and time
  *   choices        each row's chips, word for word
- *   colours        the test colours on the customer's phone: "showing" now, "waiting"
- *                  for the phone (it shows them on its result screen), "old_app" (an app
- *                  before 0.8.0 can't), "off" (not needed: certified, the sweep checked
- *                  it, or the results are applied)
+ *   colours        always "off" since 0.9.4 (owner, 2026-10-25: after the tests the phone goes
+ *                  back to the advisor with the report and the offer — no colour loop). Kept
+ *                  for the 0.9.x apps, which read "showing" / "waiting" / "old_app" / "off" and
+ *                  never hold the Screen row on "off" (swapup-mobile flow.ts)
+ *   notes.screen   under the Screen row, when the card asks for it and the camera's sweep
+ *                  didn't check every colour: "Screen not fully camera-checked — look at it."
+ *                  (a sweep ran but missed colours, or its reader was off) or "Screen not
+ *                  camera-checked — look at it." (no sweep ran); null otherwise. The advisor's
+ *                  own Screen tap decides — an incomplete sweep never puts a screen fault on
+ *                  the case (lib/domain/gradeiqMap.ts, SUP-260)
  *   testSessionId  the session the taps are made against (send it back with each tap)
  *   canEdit        false once the case is past the counter: shown, not tappable
  */
@@ -234,37 +241,37 @@ export type CertifyBlock = {
   rows: Record<CertRow, CertifiedView | null>;
   choices: Record<CertRow, { value: string; label: string }[]>;
   colours: "showing" | "waiting" | "old_app" | "off";
+  notes: { screen: string | null };
   testSessionId: string | null;
   canEdit: boolean;
 };
 
-/** A test session the customer's phone can still show the colours for (not applied, ended or expired). */
-const SESSION_LIVE = ["waiting", "opened", "joined", "testing", "complete"];
-
 /**
- * The "Check the phone" block for a case and its (latest) test session, and
- * whether that session's phone should show the test colours now: the screen still
- * to certify, the camera's sweep didn't check it, and the results aren't applied.
- * After Apply the case's own camera record says what the camera did; before it,
- * the session's live evidence (`ce`, computed here when not passed).
+ * The "Check the phone" block for a case and its (latest) test session. After Apply the case's
+ * own camera record says what the camera did; before it, the session's live evidence (`ce`,
+ * computed here when not passed). The customer's phone is never asked to show the test colours
+ * any more (SUP-260): the card is the advisor's look, made at once.
  */
 export function certifyBlock(
   c: { status: string; camera_check: string | null; certification: string | null; faults?: string | null },
   s: (GiqRow & { phone_phase_at?: string | null }) | null,
   ce?: ReturnType<typeof cameraEvidence>
-): { block: CertifyBlock; coloursWanted: boolean } {
+): { block: CertifyBlock } {
   const cert = certificationView(c.certification);
   const onCase = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   const caseFaults = parseJson<string[]>(c.faults ?? null, []);
   // The same signals the SwapUp grade reads (certify.ts certifySignals), so the card asks
   // exactly what the grade can only settle with a look.
   let cam: CertifySignals | null = null;
+  let lcd: CaseCameraCheck["lcd"] | null = null;
   if (onCase && onCase.by !== null && (!s || onCase.testSessionId === s.id)) {
     const final = onCase.state === "ready" && onCase.final;
     const snap = final && s ? (ce ?? cameraEvidence(s)).snap : null;
+    lcd = onCase.lcd;
     cam = certifySignals({ final, lcd: onCase.lcd, conclusive: onCase.conclusive, needsHumanReview: onCase.needsHumanReview, suggested: onCase.suggested, components: snap?.components ?? null, faults: caseFaults });
   } else if (s) {
     const e = ce ?? cameraEvidence(s);
+    lcd = e.mapping.lcd;
     cam = certifySignals({
       final: e.fin.final,
       lcd: e.mapping.lcd,
@@ -278,23 +285,19 @@ export function certifyBlock(
   const needed = certifyNeeded(cam);
   const rows = Object.fromEntries(CERT_ROWS.map((row) => [row, cert[row] ?? null])) as CertifyBlock["rows"];
   const atCounter = EDITABLE.includes(c.status as CaseStatus);
-  // The colours are wanted until the screen is certified WITH them: an early tap (made before they
-  // showed) leaves them on, so the phone still shows them and the same tap again upgrades the row.
-  const coloursWanted =
-    !!s && atCounter && SESSION_LIVE.includes(s.status) && needed.includes("screen") && (!cam?.lcdChecked || !!cam.lcdDoubt) && rows.screen?.withColours !== true;
-  const showing = !!s && s.phone_phase === "colours" && !!s.phone_phase_at && Date.now() - Date.parse(s.phone_phase_at) < COLOURS_FRESH_MS;
-  const device = s ? parseJson<DeviceReport | null>(s.device, null) : null;
+  // The Screen row's note: the camera's sweep didn't check every colour, so the advisor looks.
+  const screenNote = needed.includes("screen") && !lcd?.cameraChecked ? (lcd && lcd.verdict !== null ? SCREEN_PARTLY_CHECKED : SCREEN_NOT_CHECKED) : null;
   return {
     block: {
       needed,
       rows,
       choices: Object.fromEntries(CERT_ROWS.map((row) => [row, certChoices(row)])) as CertifyBlock["choices"],
-      // A phone that hasn't joined yet isn't an old app: it may well show them.
-      colours: !coloursWanted ? "off" : showing ? "showing" : !device || coloursApp(device) ? "waiting" : "old_app",
+      // Owner, 2026-10-25: no colour loop after the tests — the phone is never asked for them.
+      colours: "off",
+      notes: { screen: screenNote },
       testSessionId: s?.id ?? null,
       canEdit: atCounter,
     },
-    coloursWanted,
   };
 }
 
@@ -1050,8 +1053,9 @@ export function allFineTaps(
 
 /**
  * THE ADVISOR CERTIFIES one row of "Check the phone" (lib/domain/certify.ts) —
- * one tap: the screen (while the customer's phone shows the test colours), the
- * body, or the liquid indicator — or every row still untapped at once with
+ * one tap: the screen (the advisor's own look — since 0.9.4 the phone is never asked
+ * for the test colours, and nothing waits for them), the body, or the liquid
+ * indicator — or every row still untapped at once with
  * `allFine: true` (allFineTaps). By name (the signed-in staff member), with the time and whether
  * the phone was showing the colours. The faults, their sources, the condition
  * and the certification move in ONE transaction; then the report follows and
@@ -1086,12 +1090,6 @@ export async function certifyCase(
   const taps: readonly { row: CertRow; value: string }[] = allFine
     ? allFineTaps(c, full)
     : [{ row: input.row as CertRow, value: typeof input.value === "string" ? input.value.trim().toLowerCase() : "" }];
-  // The Screen waits while the customer's phone is still testing and will show the test colours
-  // after: a tap now would be a look at the test screens (SwapUp Store holds the row the same way).
-  if (taps.some((t) => t.row === "screen") && full && !withColours) {
-    if (["waiting", "opened", "joined", "testing"].includes(full.status) && certifyBlock(c, full).block.colours === "waiting")
-      throw new HttpError(409, "Wait for the test colours — the phone is still testing.");
-  }
 
   const out = tx(() => {
     const fresh = row(id);

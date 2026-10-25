@@ -5,7 +5,8 @@
  *   the customer's phone (SwapUp Check 0.8.0) tests itself — nobody asks it
  *   about condition — while GradeIQ's camera photographs it, but its grade comes
  *   back a stand-in ("stub") and its colour sweep frames go unread; the battery
- *   reader says it is off; the phone shows the test colours on its result screen;
+ *   reader says it is off; the phone is never asked for the test colours (owner,
+ *   2026-10-25: after the tests, back to the advisor with the report and the offer);
  *   the advisor certifies screen, body and liquid indicator by name, one tap each;
  *   Apply; the grade and the GradeIQ-level report (every photo by angle, the
  *   colour frames, what was checked by hand) — with no vendor, no 402 and no
@@ -220,21 +221,25 @@ test("the customer's phone tests itself and is asked nothing about condition; th
   assert.ok(!v.summary?.notes.some((n) => /did not say|damage questions/.test(n)));
 });
 
-test("Check the phone: the card lists screen, body and liquid; the phone shows the test colours once its tests are done", async () => {
+test("Check the phone: the card lists screen, body and liquid with the Screen row's note; the phone is never asked for the test colours (SUP-260)", async () => {
   let v = (await sessions.getTestSession(adv, sessionId)).session;
   assert.deepEqual(v.certify?.needed, ["screen", "body", "liquid"]);
   assert.deepEqual(v.certify?.rows, { screen: null, body: null, liquid: null });
   assert.deepEqual(v.certify?.choices.screen.map((c) => c.label), ["OK", "Scratches", "Lines or spots", "Cracked"]);
-  assert.equal(v.certify?.colours, "waiting", "SwapUp Check 0.8.0 shows them on its result screen");
-  // Still testing: no colours yet.
+  assert.equal(v.certify?.colours, "off", "no colour loop after the tests");
+  assert.deepEqual(v.certify?.notes, { screen: "Screen not fully camera-checked — look at it." }, "2 of 6 colours photographed, unread");
+  // Testing, finished: the phone is never told to show the colours — the customer gets the result screen.
   sessions.devicePhase(ticket, { phase: "test" });
   assert.equal(sessions.deviceStatus(ticket).colours, false);
   sessions.devicePhase(ticket, { phase: "done" });
-  assert.equal(sessions.deviceStatus(ticket).colours, true);
+  assert.equal(sessions.deviceStatus(ticket).colours, false);
+  // A phone that still says "colours" (an older build mid-loop at the update) changes nothing on the card.
   sessions.devicePhase(ticket, { phase: "colours" });
   v = (await sessions.getTestSession(adv, sessionId)).session;
-  assert.equal(v.certify?.colours, "showing");
+  assert.equal(v.certify?.colours, "off");
   assert.equal(v.phonePhase, "colours");
+  assert.equal(sessions.deviceStatus(ticket).colours, false, "and it is told to stop");
+  sessions.devicePhase(ticket, { phase: "done" });
   // A device read never carries the staff card.
   assert.ok(!("certify" in sessions.deviceStatus(ticket)));
 });
@@ -251,7 +256,7 @@ test("certify: only store staff, one tap per row, by name; the same tap twice ch
   const screen = await act(adv, caseId, { action: "certify", row: "screen", value: "ok", testSessionId: sessionId });
   assert.equal(screen.status, 200);
   const cert = screen.data.certification as Record<string, { label: string; by: string; withColours: boolean }>;
-  assert.deepEqual([cert.screen.label, cert.screen.by, cert.screen.withColours], ["OK", "Rahul Desai", true]);
+  assert.deepEqual([cert.screen.label, cert.screen.by, cert.screen.withColours], ["OK", "Rahul Desai", false], "the advisor's own look, without the colours");
   assert.ok(!JSON.stringify(screen.data.certification).includes("usr_"), "no staff id on the view");
   // The CaseView carries the same card as the session view, so SwapUp Store's answer screen shows it opened from Home too.
   const card = screen.data.certify as { needed: string[]; rows: Record<string, { label: string; by: string } | null>; testSessionId: string | null; canEdit: boolean; colours: string };
@@ -259,9 +264,8 @@ test("certify: only store staff, one tap per row, by name; the same tap twice ch
   assert.deepEqual([card.rows.screen?.label, card.rows.screen?.by, card.rows.body], ["OK", "Rahul Desai", null]);
   assert.equal(card.testSessionId, sessionId);
   assert.equal(card.canEdit, true);
-  assert.equal(card.colours, "off", "the screen is certified: no more colours");
+  assert.equal(card.colours, "off");
   assert.ok(!JSON.stringify(card).includes("usr_"));
-  // The colours stop once the screen is certified.
   assert.equal(sessions.deviceStatus(ticket).colours, false);
   assert.equal((await sessions.getTestSession(adv, sessionId)).session.certify?.colours, "off");
 
@@ -284,7 +288,7 @@ test("certify: only store staff, one tap per row, by name; the same tap twice ch
   assert.deepEqual(JSON.parse(row.detail).row, "liquid");
 });
 
-test("Apply: the camera's failed grade doesn't block it; what was certified stands; the SwapUp grade is Good (B), provisional only for the unread battery", async () => {
+test("Apply: the camera's failed grade doesn't block it; what was certified stands; the SwapUp grade is Good (B), provisional for the unread battery and a screen looked at without the colours", async () => {
   const out = await sessions.applyTestSession(adv, sessionId);
   assert.equal(out.session.status, "applied");
   const c = cases.getCase(adv, caseId);
@@ -295,11 +299,13 @@ test("Apply: the camera's failed grade doesn't block it; what was certified stan
   assert.equal(c.grading?.status, "graded");
   assert.equal(c.grading?.label, "Good (B) · provisional");
   const live = gr.gradingReportFor(adv, caseId).live!;
-  assert.deepEqual(live.provisional.map((p) => p.code), ["PV5"], "the battery wasn't read (its reader is off) — nothing else is left to check");
+  // The battery wasn't read (its reader is off), and the screen rests on a look without the test colours
+  // (PV13 — honest: the sweep saw 2 of 6 colours and the phone is no longer asked to show them).
+  assert.deepEqual(live.provisional.map((p) => p.code), ["PV5", "PV13"]);
+  assert.equal(live.provisional.find((p) => p.code === "PV13")?.text, "Screen certified by Rahul Desai without the test colours.");
   const display = live.tests.find((t) => t.id === "display")!;
   assert.equal(display.result, "passed");
-  assert.deepEqual(display.sources.map((s) => [s.source, s.by, s.colours]), [["advisor", "Rahul Desai", true]]);
-  // Applied: the phone no longer shows colours.
+  assert.deepEqual(display.sources.map((s) => [s.source, s.by, s.colours ?? false]), [["advisor", "Rahul Desai", false]]);
   assert.equal(sessions.deviceStatus(ticket).colours, false);
   // After Apply the case's own camera record says which rows the card shows; the taps stand on it.
   assert.deepEqual(c.certify?.needed, ["screen", "body", "liquid"]);
@@ -333,7 +339,7 @@ test("the report: every store-camera photo by angle, the colour frames, what was
   ]);
   assert.equal(b.screen?.why, "Colours photographed; the automatic reader is off.");
   assert.deepEqual(Object.keys(b.certification ?? {}).sort(), ["body", "liquid", "screen"]);
-  assert.match(b.certification!.screen!.line, /^Screen certified by Rahul Desai: no lines, spots, dead pixels or scratches, on the test colours/);
+  assert.equal(b.certification!.screen!.line, "Screen certified by Rahul Desai: no lines, spots, dead pixels or scratches.");
   assert.equal(b.phone.os, "Android 14");
   const json = JSON.stringify(b);
   for (const word of [/gemini/i, /gradeiq/i, /\b402\b/, /credit/i, /AI call failed/i, /\/api\/uploads\//, /99999/]) assert.ok(!word.test(json), `${word} must not reach the report`);
@@ -422,7 +428,7 @@ test("the camera service can't be read: a 0.8.0 phone still learns `released` (n
   await until("the forwards", () => forwarded(created.session.id) && forwarded(old.session.id));
 });
 
-test("the Screen waits while the phone is still testing; a tap made before the colours showed keeps them on, and the same tap again records it on them", async () => {
+test("SUP-260: a Screen tap while the phone is still testing is taken at once — nothing waits for test colours, and the phone is never asked for them", async () => {
   const created = sessions.createTestSession(adv, { customerName: "Early Tap" });
   await until("the GradeIQ session", () => (db().prepare(`SELECT gradeiq_state FROM test_sessions WHERE id = ?`).get(created.session.id) as { gradeiq_state: string }).gradeiq_state === "ready");
   const j = sessions.joinByCode(
@@ -434,23 +440,17 @@ test("the Screen waits while the phone is still testing; a tap made before the c
   sessions.deviceResults(t, { results: [{ testId: "touch", outcome: "pass", at, detail: null }] });
   sessions.devicePhase(t, { phase: "test" });
   const id = created.session.caseId;
-  // Still testing: the Screen is refused (body and liquid aren't).
+  // Still testing: the Screen is taken like the body and the liquid indicator.
   const early = await act(adv, id, { action: "certify", row: "screen", value: "ok", testSessionId: created.session.id });
-  assert.equal(early.status, 409);
-  assert.equal(early.data.error, "Wait for the test colours — the phone is still testing.");
+  assert.equal(early.status, 200, JSON.stringify(early.data).slice(0, 200));
+  assert.equal((early.data.certification as Record<string, { withColours: boolean }>).screen.withColours, false);
   assert.equal((await act(adv, id, { action: "certify", row: "body", value: "like_new", testSessionId: created.session.id })).status, 200);
-  // Tests done, colours not up yet: the tap is taken — without the colours — and they stay wanted.
+  assert.equal(sessions.deviceStatus(t).colours, false);
+  // The tests finish: still no colours — the customer's phone shows its result, the advisor has the card.
   sessions.deviceComplete(t);
   sessions.devicePhase(t, { phase: "done" });
-  const before = await act(adv, id, { action: "certify", row: "screen", value: "ok", testSessionId: created.session.id });
-  assert.equal(before.status, 200);
-  assert.equal((before.data.certification as Record<string, { withColours: boolean }>).screen.withColours, false);
-  assert.equal(sessions.deviceStatus(t).colours, true, "the phone still shows the colours");
-  // The colours come up: the same tap again records the row on them.
-  sessions.devicePhase(t, { phase: "colours" });
-  const again = await act(adv, id, { action: "certify", row: "screen", value: "ok", testSessionId: created.session.id });
-  assert.equal((again.data.certification as Record<string, { withColours: boolean }>).screen.withColours, true);
-  assert.equal(sessions.deviceStatus(t).colours, false, "certified on the colours: they can stop");
+  assert.equal(sessions.deviceStatus(t).colours, false);
+  assert.equal((await sessions.getTestSession(adv, created.session.id)).session.certify?.colours, "off");
   // Let the join's forward to the stand-in finish before it closes.
   const forwarded = () => !!(db().prepare(`SELECT gradeiq_device_hash FROM test_sessions WHERE id = ?`).get(created.session.id) as { gradeiq_device_hash: string | null }).gradeiq_device_hash;
   await until("the forward", forwarded);

@@ -448,7 +448,7 @@ would be the next blocker once colours are captured (its display check returns `
   questions into "check it by eye" notes; one note says the advisor certifies. An old browser
   check's "yes" still counts (it can only make the phone worse).
 - **The advisor certifies, by name, one tap per row** — `{action:"certify"}` on the case (MOBILE-API
-  §8b): screen (while the phone shows the test colours), body, liquid indicator. It moves the faults,
+  §8b): screen (the advisor's own look; no colour loop since 0.9.4), body, liquid indicator. It moves the faults,
   the condition and the display test; the grade reads it (`docs/GRADING.md`, rules PV1/PV13/DS9/DS10).
 - **The phone shows the colours for it:** `GET /api/device/status` says `colours: true` once its tests
   are done and the screen is still to certify (no camera sweep checked it); the phone posts phase

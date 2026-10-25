@@ -22,8 +22,10 @@ and the desk (`/desk`, `/cases/:id`) — the fewest steps that keep the law, the
    no other battery reading exists (an attached Phonecheck report) — and it can be skipped.
 3. **One camera pass** — the store tablet scans the code on the customer's phone; GradeIQ's
    camera page photographs it and sweeps its screen in one go. Where the camera can't decide,
-   "Check the phone" opens **inside that step**: the advisor taps the screen (while the phone
-   shows the test colours), body and liquid indicator, one tap each, by name. A desk-only case
+   "Check the phone" opens **inside that step**: the advisor looks at the phone and taps the
+   screen, body and liquid indicator, one tap each, by name — no colour loop on the customer's
+   phone after the tests (owner, 2026-10-25), and a screen sweep that missed colours never puts a
+   screen fault on the case (the advisor's Screen tap decides). A desk-only case
    records the phone by hand instead: model, storage, IMEI, cover, and what is wrong with it.
 4. **The answer, by itself** — when the phone's tests and the camera grade are in (and the
    advisor's taps, where the camera couldn't decide), the server puts the results on the case

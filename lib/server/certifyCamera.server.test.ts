@@ -386,3 +386,129 @@ test("a Store build from before 0.9.3 (no X-SwapUp-App): its \"All fine\" single
   const id2 = await cameraCase({ screen: "scratched", body: "flawless" });
   assert.equal((await certify(id2, { row: "screen", value: "ok" })).status, 409);
 });
+
+/* ─────────────────────────── SUP-260: the owner's flow — no colour loop; a partial sweep is the advisor's look ─────────────────────────── */
+
+const ALL6 = ["white", "black", "red", "green", "blue", "stripes"];
+/** SU-AND-00048's sweep: 4 of 6 colours captured (black and green missing), "fail" at 0.8 on one moderate "Dark area on left"; `missing: []` = the complete 6/6 sweep. */
+function sweepCheck(missing: string[], verdict: "pass" | "fail" = "fail") {
+  return {
+    verdict,
+    confidence: 0.8,
+    note: "",
+    source: "gemini",
+    findings: verdict === "fail" ? [{ type: "dark_area", label: "Dark area on left", confidence: 0.8, pattern: "white", severity: "moderate" }] : [],
+    patterns: ALL6,
+    captures: ALL6.filter((p) => !missing.includes(p)).map((p) => ({ pattern: p, photo: `/api/uploads/x-disp-${p}.jpg` })),
+    requested: ALL6,
+    missing,
+    reason: null,
+  };
+}
+// The partner prices the S23 Ultra these phones are, so the answer opens with a trade-in to read.
+{
+  const partner = who((db().prepare(`SELECT id FROM users WHERE username = 'partner'`).get() as { id: string }).id);
+  const { uploadRateCard } = await import("./catalog.ts");
+  const { DEFECT_DEDUCTIONS } = await import("../domain/ratecard.ts");
+  uploadRateCard(partner, { label: "Week 43 (test)", effectiveFrom: "2026-10-19", quoteValidityDays: 3, csv: "model_id,variant,max_price\ngalaxy-s23-ultra,256GB,40000\n", deductions: DEFECT_DEDUCTIONS, activate: true });
+}
+
+/** The customer's phone (SwapUp Check 0.9.3) on a new case, its camera grade stored: final, nothing on the glass, the given sweep. */
+function sweptPhone(dc: ReturnType<typeof sweepCheck> | null, opts: { complete?: boolean } = {}) {
+  const created = sessions.createTestSession(adv, { customerName: "Sweep" });
+  const joined = sessions.joinByCode(
+    {
+      code: created.session.code,
+      installId: `install-sweep-${++installs}`,
+      appVersion: "0.9.3",
+      device: { brand: "samsung", manufacturer: "samsung", modelName: "SM-S918B", modelCode: "SM-S918B", osVersion: "14", totalDiskBytes: 256e9, isPhysicalDevice: true },
+    },
+    "127.0.0.1"
+  );
+  const ticket = `Ticket ${joined.ticket}`;
+  db().prepare(`UPDATE test_sessions SET gradeiq_state = 'ready', gradeiq_id = ?, gradeiq_snapshot = ? WHERE id = ?`).run(randomUUID(), JSON.stringify({ ...finalGrade(false), displayCheck: dc }), created.session.id);
+  const at = new Date().toISOString();
+  sessions.deviceResults(ticket, { results: DEFAULT_PLAN.filter((p) => p.id !== "battery_health" && (opts.complete !== false || p.id === "touch")).map((p) => ({ testId: p.id, outcome: "pass", at, detail: null })) });
+  if (opts.complete !== false) {
+    sessions.deviceComplete(ticket);
+    sessions.devicePhase(ticket, { phase: "done" });
+  }
+  return { sessionId: created.session.id, caseId: created.session.caseId, ticket };
+}
+const sessionStatus = (id: string) => (db().prepare(`SELECT status FROM test_sessions WHERE id = ?`).get(id) as { status: string }).status;
+async function untilApplied(id: string, poll: () => unknown) {
+  for (let i = 0; i < 100 && sessionStatus(id) !== "applied"; i++) {
+    poll();
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return sessionStatus(id);
+}
+
+test("SUP-260 (a): SU-AND-00048's partial sweep, tests done — no colour loop, the card's note; \"All fine\" records the screen OK with no display_lines and no −35%; the answer opens by itself", async () => {
+  const t = sweptPhone(sweepCheck(["black", "green"]));
+  await withCamera(async () => {
+    assert.equal(sessions.deviceStatus(t.ticket).colours, false, "the phone is never asked for the test colours");
+    const v = (await sessions.getTestSession(adv, t.sessionId)).session;
+    assert.equal(v.certify?.colours, "off");
+    assert.deepEqual(v.certify?.notes, { screen: "Screen not fully camera-checked — look at it." });
+    assert.ok(v.certify?.needed.includes("screen"));
+    assert.equal(v.autoApply?.state, "waiting", "the advisor's look, not a colour loop");
+    assert.equal((v.autoApply as { for?: string }).for, "certify");
+    // The advisor looks and taps "All fine" — nothing from the camera stands against it.
+    const fine = await certify(t.caseId, { allFine: true, testSessionId: t.sessionId });
+    assert.equal(fine.status, 200, fine.data.error);
+    assert.equal(fine.data.certification.screen?.value, "ok", "the advisor's fine, recorded");
+    // The session applies by itself — no Apply tap, no colours.
+    assert.equal(await untilApplied(t.sessionId, () => sessions.deviceStatus(t.ticket)), "applied");
+    const c = cases.getCase(adv, t.caseId);
+    assert.ok(!c.faults.includes("display_lines"), c.faults.join(","));
+    assert.equal(c.condition?.screen, "flawless");
+    assert.equal(c.camera?.floor.screen, "flawless", "no lines_or_spots floor");
+    assert.equal(c.camera?.lcd.doubt, "the screen sweep didn't see every colour");
+    assert.ok(c.camera?.flags.includes("Screen not fully camera-checked — look at it."), c.camera?.flags.join(" | "));
+    assert.equal(c.quote?.status, "priced");
+    assert.ok(!(c.quote?.lines ?? []).some((l) => l.bp === 3500), `no −35% lines deduction: ${JSON.stringify(c.quote?.lines)}`);
+    assert.ok(c.offer?.swap.tradeIn && c.offer.swap.tradeIn > 30000, String(c.offer?.swap.tradeIn));
+    // The answer's format and its ONE grade are unchanged: the report's grade is the answer's.
+    assert.ok(c.grading?.label, "one grade on the case");
+  });
+});
+
+test("SUP-260 (b): a COMPLETE, confirmed sweep fail + \"All fine\" — the fault stays (SUP-5): the camera's chip, display_lines, the floor", async () => {
+  const t = sweptPhone(sweepCheck([]));
+  await withCamera(async () => {
+    const v = (await sessions.getTestSession(adv, t.sessionId)).session;
+    assert.deepEqual(v.certify?.notes, { screen: null }, "the sweep saw every colour");
+    const fine = await certify(t.caseId, { allFine: true, testSessionId: t.sessionId });
+    assert.equal(fine.status, 200, fine.data.error);
+    assert.equal(fine.data.certification.screen?.value, "lines", "the camera's own chip: nothing beyond what it saw");
+    assert.equal(await untilApplied(t.sessionId, () => sessions.deviceStatus(t.ticket)), "applied");
+    const c = cases.getCase(adv, t.caseId);
+    assert.ok(c.faults.includes("display_lines"), c.faults.join(","));
+    assert.equal(c.condition?.screen, "lines_or_spots");
+    assert.ok((c.quote?.lines ?? []).some((l) => l.bp === 3500), "the lines deduction is priced");
+  });
+});
+
+test("SUP-260 (c): nothing to certify (a final grade, a complete passing sweep) — the answer opens at once, no colours, no card", async () => {
+  const t = sweptPhone(sweepCheck([], "pass"));
+  await withCamera(async () => {
+    assert.equal(sessions.deviceStatus(t.ticket).colours, false);
+    assert.equal(await untilApplied(t.sessionId, () => sessions.deviceStatus(t.ticket)), "applied");
+    const c = cases.getCase(adv, t.caseId);
+    assert.deepEqual(c.certify?.needed, []);
+    assert.deepEqual(c.certification, {});
+    assert.equal(c.condition?.screen, "flawless");
+  });
+});
+
+test("SUP-260 (d): a Screen tap while the phone is still testing is accepted — against the session's partial sweep, nothing to wait for", async () => {
+  const t = sweptPhone(sweepCheck(["black", "green"]), { complete: false });
+  await withCamera(async () => {
+    const r = await certify(t.caseId, { row: "screen", value: "ok", testSessionId: t.sessionId });
+    assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+    assert.equal(r.data.certification.screen?.value, "ok");
+    assert.ok(!r.data.faults.includes("display_lines"));
+    assert.equal(sessions.deviceStatus(t.ticket).colours, false);
+  });
+});

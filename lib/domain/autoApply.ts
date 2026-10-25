@@ -13,9 +13,9 @@
  *
  * "The camera grade is in" includes the advisor's certification when the camera
  * couldn't decide: the card ("Check the phone") sits inside the camera step, and
- * the customer's phone shows the test colours only until the results are applied —
- * so applying first would end the colours before the screen was looked at, and
- * the answer's numbers would move after the customer saw them. Every row on that
+ * applying first would move the answer's numbers after the customer saw them. No
+ * colour loop on the customer's phone is waited for (owner, 2026-10-25 — SUP-260):
+ * the advisor looks at the phone and taps. Every row on that
  * card has a choice for every phone (Cracked, Can't see…), so the wait always
  * ends with the advisor's taps. A manual Apply (Retry, "Apply the results so
  * far") is never held by it.
