@@ -24,6 +24,8 @@ import type { AddressInfo } from "node:net";
 const dir = mkdtempSync(join(tmpdir(), "swapup-grading-"));
 process.env.SWAPUP_DB = join(dir, "test.db");
 process.env.GRADEIQ_ENABLED = "0";
+// These fixtures join as SwapUp Check builds from before 0.9.3: the join's version gate (SUP-262) is off here.
+process.env.SWAPUP_CHECK_MIN_VERSION = "off";
 for (const k of Object.keys(process.env)) if (k.startsWith("PHONECHECK_") || k.startsWith("GEMINI_") || k.startsWith("PRICEIQ_")) delete process.env[k];
 // The trade-in is priced by PriceIQ: a stand-in on 127.0.0.1 with the S23 Ultra's refurbished market prices.
 const { startFakePriceiq, S23U_256 } = await import("./testing/fakePriceiq.ts");

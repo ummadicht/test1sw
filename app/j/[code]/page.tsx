@@ -108,8 +108,18 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
   return (
     <Shell store={s.storeName}>
       <section className="mt-9">
-        <Headline>Test your phone</Headline>
-        <Lead>About 5 minutes — nothing personal leaves your phone.</Lead>
+        {s.joined ? (
+          <>
+            {/* The code works for one phone, and one already took it (SUP-262): said first; the options stay for that phone's resume. */}
+            <Headline>Already connected to the customer&apos;s phone</Headline>
+            <Lead>If this is that phone, carry on below. Testing another phone? Ask the advisor for a new code.</Lead>
+          </>
+        ) : (
+          <>
+            <Headline>Test your phone</Headline>
+            <Lead>About 5 minutes — nothing personal leaves your phone.</Lead>
+          </>
+        )}
       </section>
 
       <h2 className="mt-8 text-[13px] font-bold tracking-[0.12em] text-[color:var(--xc-muted)] uppercase">Choose how to test</h2>

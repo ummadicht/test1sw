@@ -21,6 +21,8 @@ import Database from "better-sqlite3";
 const dir = mkdtempSync(join(tmpdir(), "swapup-answer-"));
 process.env.SWAPUP_DB = join(dir, "test.db");
 process.env.GRADEIQ_ENABLED = "0";
+// These fixtures join as SwapUp Check builds from before 0.9.3: the join's version gate (SUP-262) is off here.
+process.env.SWAPUP_CHECK_MIN_VERSION = "off";
 for (const k of Object.keys(process.env)) if (k.startsWith("PRICEIQ_") || k.startsWith("PHONECHECK_") || k.startsWith("GEMINI_")) delete process.env[k];
 // A stand-in PriceIQ that counts every call: the customer's phone polling must never reach it.
 const { startFakePriceiq, S23U_256 } = await import("./testing/fakePriceiq.ts");

@@ -68,6 +68,8 @@ import {
   nextBatteryHealth,
   storageFromTest,
   storageModelId,
+  readAppVersion,
+  versionAtLeast,
   type PhonePhase,
   type ImeiAgreement,
   type JoinIdentity,
@@ -1035,7 +1037,7 @@ export function regenerateCounterCode(u: SessionUser, origin?: string | null) {
  */
 export function openByCode(
   raw: string
-): { ok: true; code: string; kind: "session" | "demo" | "counter"; storeName: string; caseRef: string | null; status: SessionStatus } | { ok: false } {
+): { ok: true; code: string; kind: "session" | "demo" | "counter"; storeName: string; caseRef: string | null; status: SessionStatus; joined: boolean } | { ok: false } {
   const code = normaliseCode(raw);
   if (!code) return { ok: false };
   const st = standingFor(code);
@@ -1043,7 +1045,7 @@ export function openByCode(
     // Nothing is created by opening the link — only by a phone joining.
     const t = st.target;
     if (!t) return { ok: false };
-    return { ok: true, code, kind: t.kind, storeName: t.store.name, caseRef: t.kind === "demo" ? `${DEMO_CODE} (test)` : null, status: "opened" };
+    return { ok: true, code, kind: t.kind, storeName: t.store.name, caseRef: t.kind === "demo" ? `${DEMO_CODE} (test)` : null, status: "opened", joined: false };
   }
   const r0 = db()
     .prepare(`SELECT * FROM test_sessions WHERE code = ? ORDER BY created_at DESC LIMIT 1`)
@@ -1056,12 +1058,17 @@ export function openByCode(
     db().prepare(`UPDATE test_sessions SET status = 'opened', opened_at = COALESCE(opened_at, ?), updated_at = ? WHERE id = ? AND status = 'waiting'`).run(now, now, r.id);
   }
   const v = view(r);
-  return { ok: true, code, kind: "session", storeName: v.storeName, caseRef: v.caseRef, status: r.status === "waiting" ? "opened" : r.status };
+  // A session's code works for ONE phone (installId): `joined` = a phone already took it, so the page
+  // says so first ("Already connected to the customer's phone") and keeps the options for a resume.
+  return { ok: true, code, kind: "session", storeName: v.storeName, caseRef: v.caseRef, status: r.status === "waiting" ? "opened" : r.status, joined: !!r.install_id };
 }
 
 /* ─────────────────────────── device side ─────────────────────────── */
 
 const joinAttempts = new Map<string, { n: number; until: number }>();
+
+/** A session code another phone already joined (409), word for word. */
+export const IN_USE = "Already connected to the customer's phone — if this is the phone to test, ask the advisor for a new code.";
 
 /**
  * What this stops is guessing codes, so only REFUSED joins count. A phone
@@ -1087,9 +1094,100 @@ export function joinByCode(input: { code?: unknown; device?: unknown; appVersion
   try {
     return joinByCodeChecked(input, ip, origin);
   } catch (e) {
-    // Not a guess: a resume finding its check ended (410), or a busy store (429).
-    if (e instanceof HttpError && e.status < 500 && e.status !== 410 && e.status !== 429) noteRefusedJoin(ip);
+    // Not a guess: a resume finding its check ended (410), a busy store (429) — nor an old app
+    // (426), which would otherwise lock a store's Wi-Fi out after 20 tries of one old install.
+    if (e instanceof HttpError && e.status < 500 && e.status !== 410 && e.status !== 429) {
+      if (e.status !== 426) noteRefusedJoin(ip);
+      auditRefusedJoin(input, ip, e);
+    }
     throw e;
+  }
+}
+
+/* ─────────────────────────── old apps and stray joins (SUP-262) ─────────────────────────── */
+
+/** SwapUp Check's minimum native version when SWAPUP_CHECK_MIN_VERSION is unset (or not x.y.z). */
+export const CHECK_MIN_DEFAULT = "0.9.3";
+const XYZ = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})$/;
+let warnedCheckMin = "";
+
+/**
+ * The SwapUp Check version a NATIVE install must be to join: SWAPUP_CHECK_MIN_VERSION — unset or
+ * empty → 0.9.3; "off" → no gate (a local build that reports "0.0.0"); anything that isn't x.y.z →
+ * said once in the log, and 0.9.3 applies (a typo never switches the gate off).
+ */
+export function checkMinVersion(raw: string | undefined = process.env.SWAPUP_CHECK_MIN_VERSION): [number, number, number] | null {
+  const want = (raw ?? "").trim();
+  if (want.toLowerCase() === "off") return null;
+  const m = XYZ.exec(want);
+  if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (want && warnedCheckMin !== want) {
+    console.error(`[swapup] SWAPUP_CHECK_MIN_VERSION is not x.y.z or "off" — SwapUp Check ${CHECK_MIN_DEFAULT} is the minimum`);
+    warnedCheckMin = want;
+  }
+  return XYZ.exec(CHECK_MIN_DEFAULT)!.slice(1).map(Number) as [number, number, number];
+}
+
+/**
+ * Is this SwapUp Check too old to join? The browser build ("web-…") always passes — it is served by
+ * this server, so it is always the current one. A native build older than the minimum, or one that
+ * sends no readable version, is refused (the apps are sideloaded with no over-the-air updates).
+ */
+export function checkAppTooOld(appVersion: unknown, min: readonly number[] | null = checkMinVersion()): boolean {
+  if (!min) return false;
+  if (typeof appVersion === "string" && appVersion.trim().toLowerCase().startsWith("web-")) return false;
+  const v = readAppVersion(appVersion);
+  return !v || !versionAtLeast(v.version, min);
+}
+
+/** The 426 an old native SwapUp Check gets, in a sentence its error screen shows as sent (engine.ts). */
+export function updateCheckSentence(base: string): string {
+  return `Update SwapUp Check — download it at ${base}/downloads, or use “Test in this browser”.`;
+}
+
+/** A refused join's code, as the audit keeps it: its first two characters ("AB••••") — never the whole code. */
+function maskCode(raw: unknown): string | null {
+  const s = typeof raw === "string" ? raw.replace(/[^A-Za-z0-9]/g, "").toUpperCase() : "";
+  return s ? `${s.slice(0, 2)}••••` : null;
+}
+
+/**
+ * Every refused join, audited as test_session.join_refused (SUP-262) — outside the join's
+ * transaction (it rolled back) — with why (app_too_old 426, in_use 409, done 409 for a counter
+ * check already applied, expired 404, bad_request 400), the masked code, what kind of code it
+ * is, the app's version and the address; with the org and store when the code names one. Not
+ * 410 (a resume finding its check ended) or 429 (rate limits): they are not refusals of a phone.
+ * Never throws: an audit that fails leaves the refusal as it was.
+ */
+function auditRefusedJoin(input: { code?: unknown; appVersion?: unknown }, ip: string, e: HttpError): void {
+  try {
+    const reason =
+      e.status === 426 ? "app_too_old" : e.status === 409 ? (/^Check done/.test(e.message) ? "done" : "in_use") : e.status === 404 ? "expired" : "bad_request";
+    const code = normaliseCode(input.code);
+    let kind: "session" | "demo" | "counter" | null = null;
+    let where: { org_id: string; store_id: string; id?: string } | undefined;
+    if (code) {
+      const st = standingFor(code);
+      if (st.standing) {
+        kind = code === DEMO_CODE ? "demo" : "counter";
+        where = st.target
+          ? { org_id: st.target.store.org_id, store_id: st.target.store.id }
+          : (db().prepare(`SELECT org_id, id AS store_id FROM stores WHERE counter_code = ?`).get(code) as typeof where);
+      } else {
+        where = db().prepare(`SELECT id, org_id, store_id FROM test_sessions WHERE code = ? ORDER BY created_at DESC LIMIT 1`).get(code) as typeof where;
+        if (where) kind = "session";
+      }
+    }
+    audit({
+      orgId: where?.org_id ?? null,
+      storeId: where?.store_id ?? null,
+      action: "test_session.join_refused",
+      entity: "test_session",
+      ...(where?.id ? { entityId: where.id } : {}),
+      detail: { reason, code: maskCode(input.code), kind, appVersion: typeof input.appVersion === "string" ? input.appVersion.slice(0, 40) : null, ip },
+    });
+  } catch (err) {
+    console.error("[swapup] refused join not audited:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -1104,6 +1202,12 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
   const code = normaliseCode(input.code);
   const installId = typeof input.installId === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(input.installId) ? input.installId : null;
   if (!installId) throw new HttpError(400, "The app did not send its install id — update SwapUp Check.");
+  // An old native SwapUp Check is turned away BEFORE anything is looked up or made — a standing
+  // code would otherwise open a new session and case for it (SUP-262). The browser always passes.
+  if (checkAppTooOld(input.appVersion)) {
+    const base = publicBase(origin);
+    throw new HttpError(426, updateCheckSentence(base), { reason: "app_too_old", downloads: `${base}/downloads` });
+  }
   const invalid = new HttpError(404, "That code has expired — ask the store for a new one.");
   if (!code) throw invalid;
   const st = standingFor(code);
@@ -1123,7 +1227,7 @@ function joinTx(input: { code?: unknown; device?: unknown; appVersion?: unknown;
     if (!r0) throw invalid;
     const r = expireIfDue(r0);
     if (!["waiting", "opened", "joined", "testing", "complete"].includes(r.status)) throw invalid;
-    if (r.install_id && r.install_id !== installId) throw new HttpError(409, "This code is in use on another phone — ask for a new one.");
+    if (r.install_id && r.install_id !== installId) throw new HttpError(409, IN_USE);
     const ticket = randomBytes(32).toString("base64url");
     const now = nowIso();
     const device = readDevice(input.device, input.appVersion);

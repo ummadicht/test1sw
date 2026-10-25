@@ -241,3 +241,20 @@ launch opens the sign-in screen with it). Older builds don't know a 426:
 
 So tell the stores before you set it: a tablet that says "check the Wi‑Fi" needs reinstalling from
 /downloads, not a new network.
+
+**Old SwapUp Check installs (`SWAPUP_CHECK_MIN_VERSION`, SUP-262).** The customer's phone joins with its
+`appVersion` (`0.9.3`, or `web-0.9.3` from the browser build). A NATIVE SwapUp Check older than the
+minimum — or one that sends no readable version — is refused at the join, before anything is looked
+up or made (a standing code would otherwise open a case for it): `426 {"error": "Update SwapUp Check —
+download it at <SWAPUP_PUBLIC_URL>/downloads, or use “Test in this browser”.", "reason": "app_too_old",
+"downloads": "<SWAPUP_PUBLIC_URL>/downloads"}`, which Check shows as sent. The browser build (`web-…`)
+always passes: this server serves it, so it is always current. **Unlike the Store gate it is ON by
+default**: unset or empty means `0.9.3`; `off` switches it off; a value that is not `x.y.z` keeps
+`0.9.3` and says so once in the pm2 log. A local build that reports `0.0.0` needs `off`. A 426 doesn't
+count toward the 20 refused joins per address (one old install can't lock out a store's Wi‑Fi). Every
+refused join (426, 409 in use, 404 expired, 400) is audited as `test_session.join_refused` with the
+reason, the code masked (`AB••••`), its kind, the app's version and the address, and the org and store
+when the code names one; a resume finding its check ended (410) and the rate limits (429) are not. A
+code another phone already joined answers `409 "Already connected to the customer's phone — if this is
+the phone to test, ask the advisor for a new code."`, and `/j/<code>` leads with the same words
+(`lib/server/testSessions.ts`, `lib/server/checkGate.server.test.ts`).

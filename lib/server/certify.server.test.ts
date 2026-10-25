@@ -116,6 +116,8 @@ const GIQ = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
 const dir = mkdtempSync(join(tmpdir(), "swapup-certify-"));
 process.env.SWAPUP_DB = join(dir, "test.db");
 process.env.GRADEIQ_ENABLED = "1";
+// These fixtures join as SwapUp Check builds from before 0.9.3: the join's version gate (SUP-262) is off here.
+process.env.SWAPUP_CHECK_MIN_VERSION = "off";
 process.env.GRADEIQ_BASE_URL = GIQ;
 process.env.GRADEIQ_PUBLIC_URL = GIQ;
 process.env.GRADEIQ_CLIENT = "swapmore-in";

@@ -26,6 +26,8 @@ import { namesBrand } from "../domain/testing/brand.ts";
 const dir = mkdtempSync(join(tmpdir(), "swapup-certify-camera-"));
 process.env.SWAPUP_DB = join(dir, "test.db");
 process.env.GRADEIQ_ENABLED = "0";
+// These fixtures join as SwapUp Check builds from before 0.9.3: the join's version gate (SUP-262) is off here.
+process.env.SWAPUP_CHECK_MIN_VERSION = "off";
 for (const k of Object.keys(process.env)) if (k.startsWith("PRICEIQ_") || k.startsWith("PHONECHECK_") || k.startsWith("GEMINI_")) delete process.env[k];
 
 const origLog = console.log;

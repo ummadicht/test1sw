@@ -939,13 +939,21 @@ can open.
   from another source — an attached Phonecheck report (since 2026-10-17: the screenshot is asked only
   when nothing else read the battery; the phone lets the customer skip it either way).
 - `installId`: a random id the app generates once and keeps; the session binds to the first
-  installId that joins. A different installId on the same code → `409 "This code is already
-  being used on another phone."` The same installId re-joining (app restarted) gets a fresh
-  ticket for the same session (results kept).
-- Unknown/expired code → `404 "That code is not valid any more. Ask the store for a new one."`
+  installId that joins. A different installId on the same code → `409 "Already connected to the
+  customer's phone — if this is the phone to test, ask the advisor for a new code."` (since 0.9.4;
+  `/j/<code>` leads with the same words once a phone has joined). The same installId re-joining (app
+  restarted) gets a fresh ticket for the same session (results kept).
+- **Old native builds (since 0.9.4, SUP-262):** a native SwapUp Check older than
+  `SWAPUP_CHECK_MIN_VERSION` (default `0.9.3`; `off` switches it off — README), or one that sends no
+  readable `appVersion`, gets `426 { "error": "Update SwapUp Check — download it at <server>/downloads,
+  or use “Test in this browser”.", "reason": "app_too_old", "downloads": "<server>/downloads" }` before
+  anything is looked up or made. Show `error` as sent. The browser build (`web-…`) always passes.
+- Unknown/expired code → `404 "That code has expired — ask the store for a new one."`
 - Refused joins (404/409/400) are rate-limited per IP: 20 in 10 min → `429`. Successful joins
   and re-joins don't count — the app re-joins on every resume, and a whole store shares one
-  public IP behind its Wi‑Fi.
+  public IP behind its Wi‑Fi — nor does a `426`. Every refused join (426/409/404/400) is audited
+  (`test_session.join_refused`: the reason, the code masked "AB••••", its kind, the app's version, the
+  address; the org and store when the code names one); `410` and `429` are not.
 - Once the store has **applied** the session, writes and re-joins are refused, but the old
   ticket still reads `GET /api/device/status` → `applied`; the app shows "The store has your
   results" rather than an error.
