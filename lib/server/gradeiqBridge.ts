@@ -390,7 +390,7 @@ function refreshScreen(id: string, gradeiqId: string, maxAgeMs: number): Promise
       ...prev,
       screen: screen ?? prev.screen,
       screenError: err,
-      handoffAt: screen?.handoffDone ? (prev.handoffAt ?? now) : screen ? null : prev.handoffAt,
+      handoffAt: nextHandoffAt(prev.handoffAt, screen, now),
     };
     // Written only when something changed: the customer's phone polls this every 700 ms.
     if (JSON.stringify(next) !== JSON.stringify(prev) || !r.gradeiq_screen_at) saveLive(id, next, now);
@@ -410,6 +410,21 @@ function refreshScreen(id: string, gradeiqId: string, maxAgeMs: number): Promise
   });
   mem.screen.set(id, entry);
   return entry.promise;
+}
+
+/**
+ * When the camera page finished (live().handoffAt), after one /screen read (SUP-261). STICKY once set:
+ * GradeIQ's /cosmetic save rewrites its `screen` from a copy read before the phone's handoff, so
+ * `handoffDone` can read false again a moment later (handoffAt was null on 36 of 36 production
+ * sessions) — that is not the camera un-finishing. Only an explicit retake (the capture verdict
+ * "retake" / "retaking") clears it, so the retaken pass gets its own stamp at its own handoff.
+ * An unreadable /screen (null) changes nothing.
+ */
+export function nextHandoffAt(prev: string | null, screen: GiqScreen | null, now: string): string | null {
+  if (screen?.handoffDone) return prev ?? now;
+  const verdict = screen?.capture?.verdict;
+  if (verdict === "retake" || verdict === "retaking") return null;
+  return prev;
 }
 
 /**
