@@ -1,6 +1,8 @@
 /**
  * Call 3 (postFunctional) sends SwapUp's server key when one is set, so GradeIQ
  * accepts a re-run pass over an earlier fail (SUP-66); with no key it sends none.
+ * Call 1 (createSession) carries it the same way (SUP-265), so GradeIQ knows the
+ * session is SwapUp's ("Done — back to SwapUp Store"); with no key it still works.
  *
  * Run: node --test --experimental-strip-types --no-warnings lib/server/*.test.ts
  */
@@ -14,14 +16,15 @@ const seen: { path: string; key: string | undefined; body: unknown }[] = [];
 const readBody = (req: IncomingMessage) => new Promise<string>((res) => { let s = ""; req.on("data", (c) => (s += c)); req.on("end", () => res(s)); });
 const server = createServer(async (req, res) => {
   const body = await readBody(req);
-  seen.push({ path: (req.url || "").split("?")[0], key: req.headers["x-gradeiq-server-key"] as string | undefined, body: body ? JSON.parse(body) : null });
+  const path = (req.url || "").split("?")[0];
+  seen.push({ path, key: req.headers["x-gradeiq-server-key"] as string | undefined, body: body ? JSON.parse(body) : null });
   res.writeHead(200, { "content-type": "application/json" });
-  res.end("{}");
+  res.end(req.method === "POST" && path === "/api/sessions" ? JSON.stringify({ id: "5e0d1c2b-3a4f-4e5d-8c6b-7a8f9e0d1c2b", client: "swapmore-in" }) : "{}");
 });
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 process.env.GRADEIQ_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 process.env.GRADEIQ_ENABLED = "1";
-const { postFunctional } = await import("./gradeiq.ts");
+const { postFunctional, createSession } = await import("./gradeiq.ts");
 after(() => server.close());
 
 test("postFunctional sends x-gradeiq-server-key when GRADEIQ_SERVER_KEY is set", async () => {
@@ -40,4 +43,20 @@ test("postFunctional sends no key header when none is configured", async () => {
   await postFunctional("7a2b3c4d-5e6f-4a70-9b8c-0d1e2f3a4b5c", { mic: "pass" });
   assert.equal(seen.length, 1);
   assert.equal(seen[0].key, undefined);
+});
+
+test("SUP-265: createSession carries x-gradeiq-server-key when one is configured — and still works without one", async () => {
+  delete process.env.GRADEIQ_CLIENT;
+  process.env.GRADEIQ_SERVER_KEY = "giq_server_test_key_0000000000000000";
+  seen.length = 0;
+  assert.deepEqual(await createSession({ model: "Samsung Galaxy S23 Ultra" }), { id: "5e0d1c2b-3a4f-4e5d-8c6b-7a8f9e0d1c2b", client: "swapmore-in" });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].path, "/api/sessions");
+  assert.equal(seen[0].key, "giq_server_test_key_0000000000000000");
+  assert.deepEqual(seen[0].body, { client: "swapmore-in", channel: "retail", segment: "c2b", model: "Samsung Galaxy S23 Ultra" }, "no IMEI, ever");
+  delete process.env.GRADEIQ_SERVER_KEY;
+  seen.length = 0;
+  assert.equal((await createSession()).client, "swapmore-in");
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].key, undefined, "no key configured: no header, the create as before");
 });

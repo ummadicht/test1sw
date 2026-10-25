@@ -161,13 +161,22 @@ async function call(path: string, init: { method?: "GET" | "POST"; body?: unknow
  * Call 1 — a new GradeIQ session. No IMEI, ever (paid Phonecheck lookups); the
  * model label only when the case already has one. Rejects a create whose
  * echoed tenant is not GRADEIQ_CLIENT (an unknown tenant silently becomes
- * GradeIQ's EUR "default").
+ * GradeIQ's EUR "default"). With SwapUp's server key configured the create
+ * carries it (SUP-265): only SwapUp has that key, so GradeIQ can tell a SwapUp
+ * session from its own retail desk and CounterIQ, which share the same tenant
+ * and channel, and show "Done — back to SwapUp Store" on its camera page. With
+ * no key the create works as before.
  */
 export async function createSession(input: { model?: string | null } = {}): Promise<{ id: string; client: string }> {
   const cfg = gradeiqConfig();
   const body: Record<string, string> = { client: cfg.client, channel: cfg.channel, segment: "c2b" };
   if (input.model) body.model = input.model.slice(0, 80);
-  const r = (await call("/api/sessions", { method: "POST", body, timeoutMs: cfg.createTimeoutMs })) as { id?: unknown; client?: unknown } | null;
+  const r = (await call("/api/sessions", {
+    method: "POST",
+    body,
+    timeoutMs: cfg.createTimeoutMs,
+    ...(cfg.serverKey ? { headers: { "x-gradeiq-server-key": cfg.serverKey } } : {}),
+  })) as { id?: unknown; client?: unknown } | null;
   const id = typeof r?.id === "string" ? r.id : "";
   const client = typeof r?.client === "string" ? r.client : "";
   if (!UUID.test(id)) throw new GradeiqError("shape", "GradeIQ did not return a session id.");
