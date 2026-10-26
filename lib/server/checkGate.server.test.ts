@@ -13,7 +13,7 @@
  * Run: node --test --experimental-strip-types --no-warnings lib/server/checkGate.server.test.ts
  */
 import "./testing/register.mjs";
-import { test, after } from "node:test";
+import { test, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -180,8 +180,32 @@ test("21 tries from an old app don't count toward the 20 refusals per address: t
   const ip = "10.3.3.3";
   const before = refusals().length;
   for (let i = 0; i < 21; i++) assert.equal(tryJoin(freshCode(), "0.9.0", ip), UPDATE, `try ${i + 1}`);
-  assert.equal(refusals().length, before + 21, "each one audited");
+  // 21 installs on one address: the first TOO_OLD_AUDITS_PER_IP are audited, the rest counted (review 0.9.4).
+  assert.equal(refusals().length, before + sessions.TOO_OLD_AUDITS_PER_IP, "audited up to the per-address bound");
   assert.equal(tryJoin(freshCode(), "0.9.3", ip), "joined", "the same store Wi-Fi is not locked out");
+});
+
+test("review 0.9.4: an endless loop of old-version joins writes a BOUNDED number of audit rows — one per address + install per 10 minutes, the rest counted and said on the next row", () => {
+  mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-25T10:00:00.000Z") });
+  try {
+    const before = refusals().length;
+    // One install, 500 tries: one row (the probe's loop wrote 500).
+    for (let i = 0; i < 500; i++) assert.equal(tryJoin("ZZZZZZ", "0.0.1", "203.0.113.9", "install-loop-0001"), UPDATE);
+    assert.equal(refusals().length, before + 1);
+    // A new install id on every try (it is the caller's to choose): at most TOO_OLD_AUDITS_PER_IP for the address.
+    for (let i = 0; i < 300; i++) assert.equal(tryJoin("ZZZZZZ", "0.0.1", "203.0.113.9", `install-loop-x${i}`), UPDATE);
+    assert.equal(refusals().length, before + sessions.TOO_OLD_AUDITS_PER_IP);
+    // Never a 429 for them, so the store's Wi-Fi is never locked out by an old app.
+    assert.equal(tryJoin(freshCode(), "0.9.3", "203.0.113.9"), "joined");
+    // Ten minutes on: the next row for that install says how many were counted, not audited.
+    mock.timers.tick(10 * 60_000 + 1);
+    assert.equal(tryJoin("ZZZZZZ", "0.0.1", "203.0.113.9", "install-loop-0001"), UPDATE);
+    const last = lastRefusal().detail;
+    assert.equal(last.reason, "app_too_old");
+    assert.equal(last.suppressed, 499 + 300 - (sessions.TOO_OLD_AUDITS_PER_IP - 1), JSON.stringify(last));
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("/j/<code>: openByCode says when another phone already joined the code; a standing code never is", () => {

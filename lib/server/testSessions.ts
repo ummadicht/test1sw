@@ -1112,11 +1112,57 @@ export function joinByCode(input: { code?: unknown; device?: unknown; appVersion
     // Not a guess: a resume finding its check ended (410), a busy store (429) — nor an old app
     // (426), which would otherwise lock a store's Wi-Fi out after 20 tries of one old install.
     if (e instanceof HttpError && e.status < 500 && e.status !== 410 && e.status !== 429) {
-      if (e.status !== 426) noteRefusedJoin(ip);
-      auditRefusedJoin(input, ip, e);
+      if (e.status !== 426) {
+        noteRefusedJoin(ip);
+        auditRefusedJoin(input, ip, e);
+      } else {
+        // Not counted towards the 429 (above) — so not left unbounded either: one audit row per address
+        // and install per 10 minutes, at most TOO_OLD_AUDITS_PER_IP per address, the rest counted in
+        // memory and said on the next row (review 0.9.4: an endless old-version loop must not fill the disk).
+        const n = tooOldAuditDue(ip, input.installId);
+        if (n !== null) auditRefusedJoin(input, ip, e, n);
+      }
     }
     throw e;
   }
+}
+
+/** 426s audited per address + install, and per address, in the window; the rest are only counted. */
+const TOO_OLD_WINDOW_MS = 10 * 60_000;
+export const TOO_OLD_AUDITS_PER_IP = 10;
+const TOO_OLD_KEYS_MAX = 5_000;
+const tooOldPerInstall = new Map<string, { until: number; suppressed: number }>();
+const tooOldPerIp = new Map<string, { until: number; n: number; suppressed: number }>();
+
+/**
+ * Should this 426 be audited? null = no — it is counted against the address + install (already audited
+ * in the window) or the address (TOO_OLD_AUDITS_PER_IP rows in the window). Else how many were counted,
+ * not audited, before it (said on its row as `suppressed`). Memory is bounded: past TOO_OLD_KEYS_MAX
+ * keys the expired ones go, and while none has expired a new key is not audited.
+ */
+function tooOldAuditDue(ip: string, rawInstall: unknown): number | null {
+  const now = Date.now();
+  for (const m of [tooOldPerInstall, tooOldPerIp] as Map<string, { until: number }>[])
+    if (m.size >= TOO_OLD_KEYS_MAX) for (const [k, v] of m) if (v.until <= now) m.delete(k);
+  const key = `${ip}|${typeof rawInstall === "string" ? rawInstall.slice(0, 80) : "-"}`;
+  const prevInstall = tooOldPerInstall.get(key);
+  const prevIp = tooOldPerIp.get(ip);
+  const install = prevInstall && prevInstall.until > now ? prevInstall : null;
+  const addr = prevIp && prevIp.until > now ? prevIp : null;
+  if (install) {
+    install.suppressed += 1;
+    return null;
+  }
+  if (addr && addr.n >= TOO_OLD_AUDITS_PER_IP) {
+    addr.suppressed += 1;
+    return null;
+  }
+  if ((!prevInstall && tooOldPerInstall.size >= TOO_OLD_KEYS_MAX) || (!prevIp && tooOldPerIp.size >= TOO_OLD_KEYS_MAX)) return null;
+  const counted = (prevInstall?.suppressed ?? 0) + (addr ? 0 : (prevIp?.suppressed ?? 0));
+  tooOldPerInstall.set(key, { until: now + TOO_OLD_WINDOW_MS, suppressed: 0 });
+  if (addr) addr.n += 1;
+  else tooOldPerIp.set(ip, { until: now + TOO_OLD_WINDOW_MS, n: 1, suppressed: 0 });
+  return counted;
 }
 
 /* ─────────────────────────── old apps and stray joins (SUP-262) ─────────────────────────── */
@@ -1172,9 +1218,11 @@ function maskCode(raw: unknown): string | null {
  * check already applied, expired 404, bad_request 400), the masked code, what kind of code it
  * is, the app's version and the address; with the org and store when the code names one. Not
  * 410 (a resume finding its check ended) or 429 (rate limits): they are not refusals of a phone.
+ * A 426 is audited once per address + install per 10 minutes (and at most TOO_OLD_AUDITS_PER_IP per
+ * address) — the rest counted and said as `suppressed` on the next row (tooOldAuditDue).
  * Never throws: an audit that fails leaves the refusal as it was.
  */
-function auditRefusedJoin(input: { code?: unknown; appVersion?: unknown }, ip: string, e: HttpError): void {
+function auditRefusedJoin(input: { code?: unknown; appVersion?: unknown }, ip: string, e: HttpError, suppressed = 0): void {
   try {
     const reason =
       e.status === 426 ? "app_too_old" : e.status === 409 ? (/^Check done/.test(e.message) ? "done" : "in_use") : e.status === 404 ? "expired" : "bad_request";
@@ -1199,7 +1247,15 @@ function auditRefusedJoin(input: { code?: unknown; appVersion?: unknown }, ip: s
       action: "test_session.join_refused",
       entity: "test_session",
       ...(where?.id ? { entityId: where.id } : {}),
-      detail: { reason, code: maskCode(input.code), kind, appVersion: typeof input.appVersion === "string" ? input.appVersion.slice(0, 40) : null, ip },
+      detail: {
+        reason,
+        code: maskCode(input.code),
+        kind,
+        appVersion: typeof input.appVersion === "string" ? input.appVersion.slice(0, 40) : null,
+        ip,
+        // Old-version refusals counted, not audited, since the last row for this install or address.
+        ...(suppressed > 0 ? { suppressed } : {}),
+      },
     });
   } catch (err) {
     console.error("[swapup] refused join not audited:", err instanceof Error ? err.message : err);
