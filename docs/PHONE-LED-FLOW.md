@@ -21,7 +21,9 @@ own "Take photos" fallback on older flows.
 
 **Reduced (owner, 2026-10-17: "Reduce the flow").** A step rail on every screen: **Scan · Test ·
 Done**. Nothing is asked unless no test can tell: "Is this your phone?" (the one-tap confirm below)
-only for a `family` match — an `exact` match goes straight to Scan, `none` gets the picker; the storage
+only for a `family` match — an `exact` match goes straight to Scan, `none` gets the picker (with an IMEI
+on the case the server only ever sends `exact`, from the IMEI or the store's own model — MOBILE-API §2,
+"The model at the phone"); the storage
 only when the phone couldn't measure it; no IMEI, no name or mobile, no condition questions; the battery
 screenshot only when the case has no other battery reading (an attached Phonecheck report — the join
 then leaves `battery_health` out of the plan), and it is always skippable. The numbered list below is
@@ -85,7 +87,8 @@ the full contract; where it says more is asked, this paragraph wins.
 
 `nativeStep`: identify → scan → battery → auto → actions → done (resume-safe: `identifiedAt`,
 `pairing`, `battery` records in CheckState). `POST /api/device/phase {phase}` on each step change.
-**Browser build** (iPhones / no APK): the same order where it can — Identify (no model code → picker),
+**Browser build** (iPhones / no APK): the same order where it can — Identify (an IMEI on the case: the
+model comes from it, or the store's own model, told `exact` — no picker; no IMEI and no model code → picker),
 Scan (PairingScreen on web: no brightness control → "Turn your brightness all the way up"; Wake Lock if
 available), Battery (file input via expo-image-picker web), then today's interactive tests, Done.
 
@@ -149,8 +152,10 @@ available), Battery (file input via expo-image-picker web), then today's interac
 app scans it, and the camera page photographs the phone and sweeps its screen in one go ("Take photos"
 opens the same page from here; "Go on without the camera" (`grading.canRelease`) replaces the
 customer's skip). Where the camera couldn't decide, **Check the phone** (`TestSessionView.certify`,
-MOBILE-API §8b) opens inside this step: Body and Liquid indicator at once, Screen once the phone's
-tests are done and it shows the colours, one tap each, by name → 4 **The answer, by itself**: when
+MOBILE-API §8b) opens inside this step: Screen, Body and Liquid indicator at once — the advisor's own
+look, one tap each, by name; no colour loop on the customer's phone since 0.9.4 (a partial screen sweep
+names what it saw on the Screen row, `notes.screen`; a severe mark is tapped by itself, never in "All
+fine") → 4 **The answer, by itself**: when
 the tests and the camera grade (and those taps) are in, the server applies the session with no
 "Apply to case" tap (`TestSessionView.autoApply`, MOBILE-API §3 — Apply's gates unchanged; a refusal
 shows its one-line reason and a Retry; "Apply the results so far" stays for a phone that stopped

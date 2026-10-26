@@ -126,7 +126,7 @@ Scuffs · Dents · Back cracked · Bent), the **liquid indicator** (Clean · Tri
 | PV10 | a final camera grade rated the front, back or frame low while the grade is Superb or Good (cleared when the matching row is certified: front → screen; back, frame → body) | provisional |
 | PV11 | the camera's LCD sweep failed unconfirmed while the display test passed (cleared when the screen is certified) | provisional |
 | PV12 | the Phonecheck report was **read by AI** from an uploaded PDF / photo — "check the figures" | provisional |
-| PV13 | the screen was certified OK / Scratches **without** the test colours on the customer's phone (an app before 0.8.0, or tapped before they showed) | provisional |
+| PV13 | **retired in 0.9.4** — was: the screen certified without the test colours. Since SUP-260 there is no colour loop to clear it, so it is disclosed instead (DS11) | — |
 | DS1 | swollen battery — do not charge | disclosure |
 | DS2 | a part isn't original (Phonecheck Parts, or the camera suspects aftermarket) | disclosure |
 | DS3 | activation lock on — the customer signs out before hand-over (not a test failure) | disclosure |
@@ -137,6 +137,7 @@ Scuffs · Dents · Back cracked · Bent), the **liquid indicator** (Clean · Tri
 | DS8 | Phonecheck reads the phone as another model on file (the case is kept) | disclosure |
 | DS9 | the liquid indicator couldn't be seen — "not checked", by whom | disclosure |
 | DS10 | a FINAL camera confirmed worse than the advisor certified (the camera's finding stands — not where a recorded reason overruled it, DS4), or saw a bent frame / cracked back the advisor then checked by eye | disclosure |
+| DS11 | the screen was certified OK / Scratches by the advisor's look alone — no camera sweep checked every colour, no test colours shown ("<name> checked the screen by eye.") | disclosure |
 
 Owner decisions still open (spec §9): the one "scratched" bucket maps to Good (the refurbished
 market splits scratches by count); battery under 80 % is "Needs repair", not a lower grade.

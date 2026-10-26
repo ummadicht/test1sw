@@ -449,10 +449,11 @@ would be the next blocker once colours are captured (its display check returns `
   check's "yes" still counts (it can only make the phone worse).
 - **The advisor certifies, by name, one tap per row** — `{action:"certify"}` on the case (MOBILE-API
   §8b): screen (the advisor's own look; no colour loop since 0.9.4), body, liquid indicator. It moves the faults,
-  the condition and the display test; the grade reads it (`docs/GRADING.md`, rules PV1/PV13/DS9/DS10).
-- **The phone shows the colours for it:** `GET /api/device/status` says `colours: true` once its tests
-  are done and the screen is still to certify (no camera sweep checked it); the phone posts phase
-  `colours` while it shows them, so the certification records `withColours`.
+  the condition and the display test; the grade reads it (`docs/GRADING.md`, rules PV1/DS9/DS10/DS11).
+- **The phone showed the colours for it (0.8.0–0.9.3, retired in 0.9.4):** `GET /api/device/status`
+  said `colours: true` once its tests were done and the screen was still to certify; since 0.9.4 it
+  always says `false` — after the tests the phone goes back to the advisor with the report and the
+  offer (owner, 2026-10-25). A partial sweep's mark is named on the Screen row instead (`lcd.partialMark`).
 - **A camera override never erases a sweep that ran** (`mapCamera`), and `markLcdOverride` no longer
   pre-marks the case — Apply decides.
 - **The AI being off is said:** the snapshot keeps the display check's `source`; frames with

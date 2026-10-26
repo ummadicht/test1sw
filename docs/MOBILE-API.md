@@ -184,10 +184,18 @@ synchronously (≤ 10 s) and answers with the whole `CaseView`. The same IMEI sa
 (an IMEI the case had before is answered from the case). An IMEI that fails its check digit is saved as
 before (`imeiCheck: "invalid"`) but not resolved — a misread is never paid for. GradeIQ off
 (`GRADEIQ_ENABLED=0`), no `GRADEIQ_SERVER_KEY`, or no answer in 10 s → the type code's model only and
-`blacklist: "unknown"`, with no retry. The model comes from the model number, then the type code, then
-GSMA's own name (Apple's carries no model number: "Apple iPhone 17 Pro Max (A3257)" is read as "Apple
-iPhone 17 Pro Max" and mapped by the type code's explicit rules); `imeiLookup` shows the catalogue's
-brand and model when one mapped — never a codename ("DM3") or Apple's "(A####)". The model is set when
+`blacklist: "unknown"`, with no retry. The model comes from the model number, then GSMA's own name
+(Phonecheck's — the owner's "model derived from Phonecheck"; Apple's carries no model number: "Apple
+iPhone 17 Pro Max (A3257)" is read as "Apple iPhone 17 Pro Max" and mapped by the type code's explicit
+rules), then the offline type code. Only a REAL lookup's name is read (`source` gsma / esn / station /
+provider) — never GradeIQ's own offline list (`tac`) or its made-up seed answers (`stub`), and never a
+codename ("DM3"). GSMA naming another phone than the type code: GSMA's is used and both are said (a
+warning below); GSMA naming a phone NOT on the list where the type code names one that is: neither is
+used, both are said. A name that names no phone — a brand alone ("Samsung" on 9,559 TACs, "Apple"), a
+series ("Samsung Galaxy", "Oppo Reno") — is no model, never "not on SwapUp's list"; nor is a plain name
+whose 5G phone is on the list ("Samsung Galaxy A16") or "Galaxy S26 Pro" (the S26+ on file, until the
+owner decides). `imeiLookup` shows the catalogue's brand and model when one mapped — never a codename
+or Apple's "(A####)", never a stub's name. The model is set when
 the case has none, one an earlier IMEI set, or only the customer's pick (a claim, SUP-258) — an IMEI
 naming a phone SwapUp doesn't list then takes the pick off; staff's model, the phone's code and a
 Phonecheck report stand (a warning says so). Never the storage. A kept answer is read against TODAY's
@@ -214,8 +222,12 @@ CaseView += {
     // "This IMEI is already on trade-in SU-AND-00031."
     // "The IMEI says Samsung Galaxy S23 Ultra; the case has Samsung Galaxy S23 — check Settings › About phone."
     // "The IMEI says Apple iPhone 13 Mini — not on SwapUp's list, so it can't be priced here yet." (SUP-258:
-    //   then also the mismatch line above when the case has a model; with none, the answer's `swap.why` is
-    //   that sentence and the customer reads CANT_PRICE — never another phone's price)
+    //   no model on the case — the answer's `swap.why` is that sentence, its one ask is `no_price` "Can't be
+    //   priced here" (no model to choose) and the customer reads CANT_PRICE — never another phone's price)
+    // "The IMEI says Apple iPhone 13 Mini, which isn't on SwapUp's list; the case has Apple iPhone 13 — check
+    //   Settings › About phone." (staff chose a model anyway: said once, never "can't be priced" beside a price)
+    // "The IMEI's type code says Apple iPhone 15 Pro; GSMA says Apple iPhone 15 Pro Max — check Settings ›
+    //   About phone." (the two sources name different phones)
     // "The IMEI doesn't name a model — choose it on the case." (an IMEI looked up, no model on the case)
     // "IMEI 2 (35…) is reported lost or stolen (GSMA)."  /  "IMEI 35…, saved on this case before, is
     // reported lost or stolen (GSMA)." — the blacklisted number when it isn't in the IMEI 1 slot
@@ -252,9 +264,9 @@ confirms a model the IMEI named:
 |---|---|---|
 | a model the IMEI set, or any model equal to the IMEI's | that model | that model, `exact`; a phone code naming it too is upgraded to `exact` ("… The IMEI agrees."), so a US SM-S918U is not asked "Is this your phone?" |
 | no model, or only the customer's pick | a model on the list | that model, `exact` |
-| no model, or only the customer's pick | a phone not on the list | `exact`, `modelId: null`, `label` = the IMEI's name, `reason` "The IMEI says … — not on SwapUp's list, so it can't be priced here yet." |
-| no model, or only the customer's pick | nothing (unknown type code, or either of two phones) | the phone's own exact/family code; with none, `exact` `"Your phone"` — the advisor chooses the model on the case |
-| a model staff, the phone or Phonecheck set that the IMEI doesn't name | — | unchanged: the phone's own answer |
+| no model, or only the customer's pick | a phone not on the list | `exact`, `modelId: null`, `label` = the IMEI's name, `reason` "The IMEI says … — not on SwapUp's list, so it can't be priced here yet." — except when only the offline type code says so and the phone's own code is an EXACT match: the phone's answer (Apply uses the code and flags it) |
+| no model | nothing (unknown type code, a brand alone, a series, or more than one phone) | the phone's own exact/family code; with none, `exact` `"Your phone"` — the advisor chooses the model on the case |
+| a model staff, the phone, Phonecheck or a pick set that the IMEI doesn't decide | — | the case's model, `exact` ("The store has this phone as the X.") — no picker while the store has the IMEI; a phone whose own code is exact keeps its own answer |
 
 SwapUp Check 0.9.3 skips Identify on any `exact` with a label, so this needs no app release. A case
 with no IMEI joins exactly as 0.8.0 (counter code, the demo code, "scan at hand-over"); an IMEI saved
@@ -265,7 +277,10 @@ that disagrees is a flag in `camera.flags`, never the case's model (`Model: phon
 Galaxy S23; the IMEI says Samsung Galaxy S23 Ultra — check Settings › About phone.`, `Model: customer
 picked Apple iPhone 15 Pro; the IMEI says Apple iPhone 17 Pro Max — the pick is not used.`); for a
 phone not on the list nothing becomes the case's model and the code or pick is flagged as not used.
-A code that agrees makes `modelSource: "phone"`; otherwise the model is `modelSource: "imei"`.
+A code that agrees makes `modelSource: "phone"`; otherwise the model is `modelSource: "imei"`. Only a
+phone whose OWN code named nothing settles the IMEI model's storage from its reading — a code naming
+another model never does. A family code (a regional version nobody confirmed) never overwrites the
+store's own model at Apply: `Model: phone code looks like … ; the case has … — check Settings › About phone.`
 
 ## 3. Test sessions (store side)
 
@@ -364,7 +379,7 @@ type CertifyBlock = {
   rows: Record<"screen"|"body"|"liquid", { value: string; label: string; by: string; at: string; withColours: boolean } | null>;   // certified so far (the case's)
   choices: Record<"screen"|"body"|"liquid", { value: string; label: string }[]>;   // each row's chips, word for word, in order
   colours: "showing" | "waiting" | "old_app" | "off";   // always "off" since 0.9.4 (SUP-260: no colour loop after the tests); the other values are kept for the 0.9.x apps
-  notes: { screen: string | null };   // under the Screen row when the card asks for it and the sweep didn't check every colour: "Screen not fully camera-checked — look at it." (a sweep ran, missed colours or its reader was off) / "Screen not camera-checked — look at it." (no sweep); null otherwise
+  notes: { screen: string | null };   // under the Screen row when the card asks for it and the sweep didn't check every colour: the mark a partial sweep saw, named ("Screen not fully camera-checked — it saw "…" (severe, 97%, on white); black, green not captured. Look at it."), else "Screen not fully camera-checked — look at it." (a sweep ran, missed colours or its reader was off) / "Screen not camera-checked — look at it." (no sweep); null otherwise
 };
 type DiagnosticSummary = {
   model: { modelId: string|null; label: string|null; variant: string|null; match: "exact"|"family"|"none"; why: string };
@@ -732,9 +747,10 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
 | Kind | Title | Text | When |
 | --- | --- | --- | --- |
 | `blocked` | "Check this is the right phone" | `quoteBlocked` | the camera says this may not be the phone on the case |
-| `model` | "Which phone is it?" | "The test couldn't tell — choose it on the full case." (no test was applied to the case: "Choose it on the full case.") | no model on the case |
+| `model` | "Which phone is it?" | "The test couldn't tell — choose it on the full case." (no test was applied to the case: "Choose it on the full case.") | no model on the case — and the IMEI doesn't name a phone SwapUp doesn't list (then the `no_price` "Can't be priced here" below, with nothing to choose) |
 | `storage` | "Which storage is it?" | "The phone couldn't measure it — see Settings › About phone." — only when a test ran and the phone read nothing. No test applied (a desk-only case), or the phone measured a size on the list that is no longer on the case: "See Settings › About phone › Storage." The phone measured a size that ISN'T on the model's list (`measuredStorage`, e.g. a 1TB Ultra on file as 256/512GB): "Phone measures 1TB, not on file — no trade-in price for that size." | a model, no storage. `options`: the what-if trade-in for each size, smallest size first, priced the way the trade-in itself will be (PriceIQ less defects, else the rate card — so the chip and the answer agree) (`tradeIn: null` when nothing prices that size, or none could be asked yet — e.g. the condition is incomplete). `note` is the first priced chip's market-data note (its age over 14 days, or "PriceIQ unreachable, last answer …"), else null — show it under the chips. **`options: []` when the phone measured an off-list size:** every listed size is one the phone has ruled out, so none is offered (and no what-if prices are asked) — show the text only: no button, no entry, never a guessed size. |
-| `no_price` | "No market price yet" | `quote.reason` (the specific why: "This phone isn't on the rate card yet.", PriceIQ's own why, or "No rate card is active yet.") ?? "No market price yet." | model + storage, not blocked, the quote is unpriced or errored. **Text only** — no button, no sheet: nothing is typed in. Swap up stays refused with the same reason; Repair and "Customer walked away" stay choosable. (0.9.0 sent `partner_quote` here; installed apps drop the kind they don't know.) |
+| `no_price` | "No market price yet" | `quote.reason` (the specific why: "This phone isn't on the rate card yet.", PriceIQ's own why, or "No rate card is active yet.") ?? "No market price yet." | model + storage, not blocked, the quote is unpriced or errored — or (0.9.4) a model with NO size chosen whose every size has a final no-price (not on the card, no card): no "Which storage is it?", since no answer would price it; the first size's why. **Text only** — no button, no sheet: nothing is typed in. Swap up stays refused with the same reason; Repair and "Customer walked away" stay choosable. (0.9.0 sent `partner_quote` here; installed apps drop the kind they don't know.) |
+| `no_price` | "Can't be priced here" | "The IMEI says Apple iPhone 13 Mini — not on SwapUp's list, so it can't be priced here yet." | (0.9.4) no model because the IMEI names a phone SwapUp doesn't list: the answer ends there — no `model` ask, no Choose-the-model control (the nearest listed model would be another phone's price); the customer reads CANT_PRICE |
 | `repair_quote` | "The repair needs a quote" | the first `repair.notes` entry, or `repairNotServiced` (fallback "No book price — enter the service centre's quote."); no fault recorded but a defect in the condition → `repairNotServiced`, else "No fault recorded (…) — enter the service centre's quote." | a model, something to repair, and the book can't price it (`needs_inspection` / `unpriced` / brand not serviced / a defect no fault records — SUP-96) |
 | `new_phone` | "Choose the new phone" | "No catalogue match — choose one to see the bonus." (the catalogue does have one — staff cleared the suggestion, or none ran on a desk-only case: "Choose the new phone to see the bonus.") | a model and no new phone (the suggestion found none: e.g. an iPhone at a Samsung centre) |
 
@@ -748,7 +764,8 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
 - **`repair.detail`:** covered → "Covered by warranty" / "Covered by Care+"; a manual quote →
   `Quote: ${reason}`; a book estimate → every line label joined with " + ", then "+ labour" if
   labour > 0, "+ GST" if GST > 0, "+ Care+ fee" if that fee > 0 (e.g. "Display assembly + labour + GST").
-- **`repair.why`** (only when `amount` is null): "Nothing to repair."; "Choose the phone first.";
+- **`repair.why`** (only when `amount` is null): "Nothing to repair."; "Choose the phone first." (an
+  IMEI naming a phone SwapUp doesn't list: that sentence);
   no fault recorded but the condition has a defect → `repairNotServiced` when the centre doesn't
   repair the brand, else "No fault recorded (doesn't switch on) — enter the service centre's quote."
   (the staff refurb panel's words); otherwise the repair note, or `repairNotServiced`, else "No book
@@ -764,8 +781,10 @@ is "This case is closed.". A partner viewing a case gets `offer: null` (and `ref
   and the last good answer priced it; that alone when the data is fresh); expired on an open case →
   "Quote expired — re-quoting." (every quote is the system's, so it is; a closed case's quote running out
   after the lock is no news: no note).
-- **`swap.why`**, in order: `quoteBlocked`; "Choose the phone first."; "Tap the storage to see the
-  trade-in." (the phone measured an off-list size: the storage ask's text — there is nothing to tap); `quote.reason` (fallback "No market price yet."); the first
+- **`swap.why`**, in order: `quoteBlocked`; "Choose the phone first." (an IMEI naming a phone SwapUp
+  doesn't list: that sentence); "Tap the storage to see the trade-in." (the phone measured an off-list
+  size: the storage ask's text — there is nothing to tap; no size priced at all: the first size's
+  no-price why); `quote.reason` (fallback "No market price yet."); the first
   `conditionProblems` entry; "Record the condition." (no condition); "No trade-in price
   yet."
 - **`bonusWhy`:** no new phone → "Choose the new phone to see the bonus."; a new phone but no bonus →
@@ -924,6 +943,8 @@ can open.
   — SwapUp's `matchModel` on the phone's own model code ("Samsung Galaxy S22", "128GB"), for the
   Identify card. `reason` is the matcher's explanation. Never a price. `match: "exact"` → nothing is
   asked; `"family"` (a regional version) → the one-tap "Is this your phone?"; `"none"` → the picker.
+  With an IMEI on the case the server tells the IMEI's model or the store's own as `exact` (or "Your
+  phone" when there is neither) — never the picker (§2, "The model at the phone").
   `variants` (since 2026-10-17, the answer screen): the matched model's storage sizes, e.g.
   `["256GB","512GB"]` — always present, `[]` when no model matched (an older server sends none: read
   that as `[]`), and `[]` whenever the phone reported its disk size — even a size that isn't on the
@@ -1302,7 +1323,8 @@ type AssessmentView = {
                   source: "gemini"|"stub"|null /* stub = its AI reader was off or failed; the frames are still kept */ } | null;
   lcd: { cameraChecked: boolean; verdict: "pass"|"fail"|"unknown"|null; reason: string|null;
          captured?: number; requested?: number;   // colours photographed, of how many asked
-         aiOff?: true };                           // frames in, reader off: reason "captured N of M colours, AI reader off — check by eye"
+         aiOff?: true;                             // frames in, reader off: reason "captured N of M colours, AI reader off — check by eye"
+         partialMark?: { label; severity; confidence; pattern; missing: string[]; severe: boolean } | null };   // 0.9.4: a partial sweep's worst mark — named, never a fault or a floor
   obstruction: { present: boolean; type: string; note: string } | null;   // a case on the phone → grade not used
   oem: { verdict: string; confidence: number|null; evidence: string[] } | null;
   identity: { verdict: "match"|"mismatch"|"unverified"; reasons: string[]; device: { make, model, match, reason } | null };
@@ -1373,10 +1395,14 @@ the camera saw that isn't on the case. Since 0.9.4 (SUP-260) the Screen row is t
 the server no longer answers `409` "Wait for the test colours …" — and **a sweep that didn't see
 every colour never adds `display_lines` or the `lines_or_spots` floor** (`lib/domain/gradeiqMap.ts`):
 the camera's record says "Screen not fully camera-checked — look at it." (`lcd.doubt` "the screen
-sweep didn't see every colour" for its fail, which the report's PV11 reads), and the advisor's own
-Screen tap decides — "All fine" then records the screen OK. A COMPLETE sweep's confirmed fail stays
-the fault and the floor (SUP-5). A screen certified without the colours keeps the report's grade
-"· provisional" (PV13) — honest: it rests on the advisor's look.
+sweep didn't see every colour" for its fail, which the report's PV11 reads) — and when that partial
+sweep still saw a mark, it is NAMED: `lcd.partialMark` and the sentence "Screen not fully
+camera-checked — it saw "Vertical green line across the panel" (severe, 97%, on white); black, green
+not captured. Look at it." (flags and `notes.screen`). The advisor's own Screen tap decides — "All
+fine" then records the screen OK, except after a SEVERE mark: "All fine" leaves the Screen row
+untapped, for a tap of its own. A COMPLETE sweep's confirmed fail stays the fault and the floor
+(SUP-5). A screen certified without the colours is disclosed on the report — "<name> checked the
+screen by eye." (DS11) — never "· provisional" (PV13 retired in 0.9.4: no colour loop can clear it).
 
 `TestSessionView.certify` **and `CaseView.certify`** (staff only; the same block from the same code,
 `certifyBlock` in `lib/server/cases.ts`, so the answer screen opened from Home shows the card too)
