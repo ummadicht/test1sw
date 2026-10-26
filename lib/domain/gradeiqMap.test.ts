@@ -7,6 +7,7 @@ import {
   finality,
   isConfirmed,
   mapCamera,
+  partialMarkNote,
   identityOf,
   identityBlock,
   worseDisplay,
@@ -693,7 +694,9 @@ test("SUP-260: a sweep that missed colours (4 of 6, a moderate 'fail') adds no d
   const partial = mapCamera(snap({}, {}, { displayCheck: sweep(["black", "green"]) }), FINAL);
   assert.deepEqual(partial.faults, [], "no display_lines");
   assert.equal(partial.floor.screen, "flawless", "no lines_or_spots floor under the advisor's tap");
-  assert.ok(partial.flags.includes("Screen not fully camera-checked — look at it."), partial.flags.join(" | "));
+  // What it DID see is named (review 0.9.4) — never dropped, never a fault.
+  assert.ok(partial.flags.includes('Screen not fully camera-checked — it saw "Dark area on left" (moderate, 80%, on white); black, green not captured. Look at it.'), partial.flags.join(" | "));
+  assert.deepEqual(partial.lcd.partialMark, { label: "Dark area on left", severity: "moderate", confidence: 0.8, pattern: "white", missing: ["black", "green"], severe: false });
   assert.equal(partial.lcd.cameraChecked, false);
   assert.equal(partial.lcd.confirmed, false);
   assert.equal(partial.lcd.doubt, "the screen sweep didn't see every colour");
@@ -722,4 +725,19 @@ test("SUP-260: a sweep that missed colours (4 of 6, a moderate 'fail') adds no d
   const minor = mapCamera(snap({}, {}, { displayCheck: { ...sweep([]), findings: [{ type: "speck", label: "faint speck", confidence: 0.8, pattern: "white", severity: "minor" }] } }), FINAL);
   assert.deepEqual(minor.faults, []);
   assert.match(minor.flags.join(" | "), /The screen sweep saw only minor marks \(faint speck\) — check by eye\./);
+});
+
+test("review 0.9.4: a SEVERE mark on a partial sweep (4 of 6) is named — label, severity, %, colour and the colours missed — still no fault and no floor; held out of 'All fine'", () => {
+  const dc = { ...sweep(["black", "green"]), confidence: 0.97, findings: [
+    { type: "speck", label: "faint speck", confidence: 0.6, pattern: "red", severity: "minor" },
+    { type: "line", label: "Vertical green line across the panel", confidence: 0.97, pattern: "white", severity: "severe" },
+  ] };
+  const m = mapCamera(snap({}, {}, { displayCheck: dc }), FINAL);
+  assert.deepEqual([m.faults, m.suggested, m.floor.screen], [[], [], "flawless"], "the owner's rule: a partial sweep is never the fault");
+  const note = 'Screen not fully camera-checked — it saw "Vertical green line across the panel" (severe, 97%, on white); black, green not captured. Look at it.';
+  assert.ok(m.flags.includes(note), m.flags.join(" | "));
+  assert.equal(partialMarkNote(m.lcd.partialMark), note);
+  assert.equal(m.lcd.partialMark?.severe, true);
+  // A complete sweep's fail carries no partial mark: it is the fault itself.
+  assert.equal(mapCamera(snap({}, {}, { displayCheck: { ...dc, captures: ALL6.map((p) => ({ pattern: p, photo: `/api/uploads/x-disp-${p}.jpg` })), missing: [] } }), FINAL).lcd.partialMark, undefined);
 });

@@ -452,7 +452,9 @@ test("SUP-260 (a): SU-AND-00048's partial sweep, tests done — no colour loop, 
     assert.equal(sessions.deviceStatus(t.ticket).colours, false, "the phone is never asked for the test colours");
     const v = (await sessions.getTestSession(adv, t.sessionId)).session;
     assert.equal(v.certify?.colours, "off");
-    assert.deepEqual(v.certify?.notes, { screen: "Screen not fully camera-checked — look at it." });
+    // What the partial sweep saw is named on the Screen row (review 0.9.4) — the advisor's look decides.
+    const NOTE = 'Screen not fully camera-checked — it saw "Dark area on left" (moderate, 80%, on white); black, green not captured. Look at it.';
+    assert.deepEqual(v.certify?.notes, { screen: NOTE });
     assert.ok(v.certify?.needed.includes("screen"));
     assert.equal(v.autoApply?.state, "waiting", "the advisor's look, not a colour loop");
     assert.equal((v.autoApply as { for?: string }).for, "certify");
@@ -467,12 +469,35 @@ test("SUP-260 (a): SU-AND-00048's partial sweep, tests done — no colour loop, 
     assert.equal(c.condition?.screen, "flawless");
     assert.equal(c.camera?.floor.screen, "flawless", "no lines_or_spots floor");
     assert.equal(c.camera?.lcd.doubt, "the screen sweep didn't see every colour");
-    assert.ok(c.camera?.flags.includes("Screen not fully camera-checked — look at it."), c.camera?.flags.join(" | "));
+    assert.ok(c.camera?.flags.includes(NOTE), c.camera?.flags.join(" | "));
     assert.equal(c.quote?.status, "priced");
     assert.ok(!(c.quote?.lines ?? []).some((l) => l.bp === 3500), `no −35% lines deduction: ${JSON.stringify(c.quote?.lines)}`);
     assert.ok(c.offer?.swap.tradeIn && c.offer.swap.tradeIn > 30000, String(c.offer?.swap.tradeIn));
     // The answer's format and its ONE grade are unchanged: the report's grade is the answer's.
     assert.ok(c.grading?.label, "one grade on the case");
+  });
+});
+
+test("review 0.9.4: a SEVERE mark on a partial sweep is named on the card and in the flags; \"All fine\" leaves the Screen untapped (no display_lines, no floor) — the advisor's own Screen tap decides, then the answer opens", async () => {
+  const dc = { ...sweepCheck(["black", "green"]), confidence: 0.97, findings: [{ type: "line", label: "Vertical green line across the panel", confidence: 0.97, pattern: "white", severity: "severe" }] };
+  const t = sweptPhone(dc);
+  await withCamera(async () => {
+    const NOTE = 'Screen not fully camera-checked — it saw "Vertical green line across the panel" (severe, 97%, on white); black, green not captured. Look at it.';
+    const v = (await sessions.getTestSession(adv, t.sessionId)).session;
+    assert.deepEqual(v.certify?.notes, { screen: NOTE }, "the mark is named before the Screen tap");
+    const fine = await certify(t.caseId, { allFine: true, testSessionId: t.sessionId });
+    assert.equal(fine.status, 200, fine.data.error);
+    assert.equal(fine.data.certification.screen ?? null, null, "a severe mark is never answered 'fine' in one tap");
+    assert.equal(fine.data.certification.body?.value, "like_new", "the other rows are tapped");
+    assert.equal(sessionStatus(t.sessionId), "complete", "still waiting for the advisor's Screen");
+    // The advisor looks: the line is there.
+    const lines = await certify(t.caseId, { row: "screen", value: "lines", testSessionId: t.sessionId });
+    assert.equal(lines.status, 200, lines.data.error);
+    assert.equal(await untilApplied(t.sessionId, () => sessions.deviceStatus(t.ticket)), "applied");
+    const c = cases.getCase(adv, t.caseId);
+    assert.equal(c.condition?.screen, "lines_or_spots", "the advisor's own look");
+    assert.ok(c.camera?.flags.includes(NOTE), c.camera?.flags.join(" | "));
+    assert.equal(c.camera?.floor.screen, "flawless", "the camera's partial sweep is still no floor");
   });
 });
 

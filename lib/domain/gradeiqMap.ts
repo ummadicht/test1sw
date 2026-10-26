@@ -447,7 +447,17 @@ export type LcdCheck = {
   requested?: number;
   /** The colours were photographed but GradeIQ's AI reader was off or its call failed: a person checks the frames. */
   aiOff?: boolean;
+  /**
+   * A sweep that missed colours but still reported a mark (its verdict "fail"): the worst mark it saw,
+   * named for the advisor before their Screen tap — never a fault or a floor (SUP-260). `severe` = a
+   * severe mark (a line across the panel): "All fine" then leaves the Screen row for the advisor's own
+   * tap. A moderate one (SU-AND-00048's "Dark area on left") is named and "All fine" still answers it,
+   * as the owner's flow has it. Absent before 0.9.4, and on a complete sweep (its fail is the fault).
+   */
+  partialMark?: PartialMark | null;
 };
+
+export type PartialMark = { label: string; severity: string | null; confidence: number | null; pattern: string | null; missing: string[]; severe: boolean };
 
 export type CameraMapping = {
   /** The cosmetic grade is final, so its confirmed findings feed the case. */
@@ -646,8 +656,12 @@ export function mapCamera(s: GradeiqSnapshot | null, fin: Finality, opts: { lcdO
     // lines_or_spots floor. A sweep that missed colours puts no screen fault on the case and no floor
     // under the advisor's Screen tap: the advisor looks, and their own tap decides ("All fine" then
     // records the screen fine).
-    if (incomplete) flags.push(SCREEN_PARTLY_CHECKED);
-    else if (dc.verdict === "fail") {
+    // What it DID see is kept: the worst mark, named on the card and in the flags (review 0.9.4).
+    if (incomplete) {
+      const mark = dc.verdict === "fail" ? worstMark(dc) : null;
+      if (mark) lcd = { ...lcd, partialMark: mark };
+      flags.push(partialMarkNote(mark) ?? SCREEN_PARTLY_CHECKED);
+    } else if (dc.verdict === "fail") {
       if (displayFailConfirmed(dc)) {
         addFault(outFaults, {
           id: "display_lines",
@@ -686,6 +700,36 @@ export const SCREEN_PARTLY_CHECKED = "Screen not fully camera-checked — look a
 export const SCREEN_NOT_CHECKED = "Screen not camera-checked — look at it.";
 /** Why an incomplete sweep's "fail" isn't confirmed (lcd.doubt — the grade's PV11 reads it). */
 export const SWEEP_INCOMPLETE_DOUBT = "the screen sweep didn't see every colour";
+
+const SEVERITY_RANK: Record<string, number> = { severe: 3, moderate: 2, minor: 1 };
+
+/** The worst mark a sweep reported (severity, then confidence); null when it listed none. */
+function worstMark(dc: GiqDisplayCheck): PartialMark | null {
+  const f = [...dc.findings].sort(
+    (a, b) => (SEVERITY_RANK[b.severity ?? ""] ?? 0) - (SEVERITY_RANK[a.severity ?? ""] ?? 0) || (b.confidence ?? 0) - (a.confidence ?? 0)
+  )[0];
+  if (!f?.label) return null;
+  return {
+    label: f.label,
+    severity: f.severity ?? null,
+    confidence: f.confidence ?? dc.confidence ?? null,
+    pattern: f.pattern ?? null,
+    missing: [...dc.missing],
+    severe: f.severity === "severe",
+  };
+}
+
+/**
+ * The sentence for a partial sweep that saw a mark — on the Screen row ("Check the phone" notes.screen)
+ * and in the camera's flags: "Screen not fully camera-checked — it saw "Vertical green line across the
+ * panel" (severe, 97%, on white); black, green not captured. Look at it." null without a mark.
+ */
+export function partialMarkNote(mark: PartialMark | null | undefined): string | null {
+  if (!mark) return null;
+  const how = [mark.severity, mark.confidence !== null ? pct(mark.confidence) : null, mark.pattern ? `on ${mark.pattern}` : null].filter(Boolean).join(", ");
+  const missed = mark.missing.length ? `; ${mark.missing.join(", ")} not captured` : "";
+  return `Screen not fully camera-checked — it saw "${mark.label}"${how ? ` (${how})` : ""}${missed}. Look at it.`;
+}
 
 /**
  * A camera screen-sweep "fail" that may go on the case. GradeIQ reports "fail"

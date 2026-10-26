@@ -47,6 +47,7 @@ import {
   CAMERA_REASON_MIN,
   SCREEN_NOT_CHECKED,
   SCREEN_PARTLY_CHECKED,
+  partialMarkNote,
   faultsAfterConditionEdit,
   identityBlock,
   reconcileFaultSources,
@@ -229,11 +230,15 @@ export function certificationView(raw: string | null | undefined): Certification
  *                  for the 0.9.x apps, which read "showing" / "waiting" / "old_app" / "off" and
  *                  never hold the Screen row on "off" (swapup-mobile flow.ts)
  *   notes.screen   under the Screen row, when the card asks for it and the camera's sweep
- *                  didn't check every colour: "Screen not fully camera-checked — look at it."
- *                  (a sweep ran but missed colours, or its reader was off) or "Screen not
+ *                  didn't check every colour: what the partial sweep still SAW, named ("Screen
+ *                  not fully camera-checked — it saw "Vertical green line…" (severe, 97%, on
+ *                  white); black, green not captured. Look at it." — gradeiqMap.ts
+ *                  partialMarkNote), else "Screen not fully camera-checked — look at it." (a
+ *                  sweep ran but missed colours, or its reader was off) or "Screen not
  *                  camera-checked — look at it." (no sweep ran); null otherwise. The advisor's
  *                  own Screen tap decides — an incomplete sweep never puts a screen fault on
- *                  the case (lib/domain/gradeiqMap.ts, SUP-260)
+ *                  the case (lib/domain/gradeiqMap.ts, SUP-260); a severe mark it saw holds
+ *                  the Screen row out of "All fine" (allFineTaps)
  *   testSessionId  the session the taps are made against (send it back with each tap)
  *   canEdit        false once the case is past the counter: shown, not tappable
  */
@@ -257,7 +262,7 @@ export function certifyBlock(
   c: { status: string; camera_check: string | null; certification: string | null; faults?: string | null },
   s: (GiqRow & { phone_phase_at?: string | null }) | null,
   ce?: ReturnType<typeof cameraEvidence>
-): { block: CertifyBlock } {
+): { block: CertifyBlock; screenHeld: boolean } {
   const cert = certificationView(c.certification);
   const onCase = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   const caseFaults = parseJson<string[]>(c.faults ?? null, []);
@@ -287,8 +292,11 @@ export function certifyBlock(
   const rows = Object.fromEntries(CERT_ROWS.map((row) => [row, cert[row] ?? null])) as CertifyBlock["rows"];
   const atCounter = EDITABLE.includes(c.status as CaseStatus);
   // The Screen row's note: the camera's sweep didn't check every colour, so the advisor looks.
-  const screenNote = needed.includes("screen") && !lcd?.cameraChecked ? (lcd && lcd.verdict !== null ? SCREEN_PARTLY_CHECKED : SCREEN_NOT_CHECKED) : null;
+  const screenNote =
+    needed.includes("screen") && !lcd?.cameraChecked ? (lcd && lcd.verdict !== null ? (partialMarkNote(lcd.partialMark) ?? SCREEN_PARTLY_CHECKED) : SCREEN_NOT_CHECKED) : null;
   return {
+    // A partial sweep that saw a SEVERE mark: "All fine" leaves the Screen to the advisor's own tap.
+    screenHeld: needed.includes("screen") && !lcd?.cameraChecked && !!lcd?.partialMark?.severe,
     block: {
       needed,
       rows,
@@ -1052,8 +1060,10 @@ export function allFineTaps(
   c: { status: string; camera_check: string | null; certification: string | null; faults?: string | null },
   s: (GiqRow & { phone_phase_at?: string | null }) | null
 ): { row: CertRow; value: string }[] {
-  const { needed, rows } = certifyBlock(c, s).block;
-  return ALL_FINE.filter((t) => !rows[t.row] && (t.row !== "liquid" || needed.includes("liquid")));
+  const { block, screenHeld } = certifyBlock(c, s);
+  const { needed, rows } = block;
+  // A severe mark the partial screen sweep saw is never answered "fine" in one tap: the Screen is tapped by itself.
+  return ALL_FINE.filter((t) => !rows[t.row] && (t.row !== "liquid" || needed.includes("liquid")) && (t.row !== "screen" || !screenHeld));
 }
 
 /**
