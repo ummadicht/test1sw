@@ -295,13 +295,17 @@ test("C3: only the screen certified → the body is still to check (PV1 names it
   assert.deepEqual(g.provisional.map((p) => p.text), ["Body not camera-graded or certified."]);
 });
 
-test("C4: certified without the test colours → provisional PV13; Lines or spots → needs repair on the advisor's check", () => {
+test("C4: certified without the test colours → disclosed DS11 'checked by eye', never provisional (PV13 retired, review 0.9.4); Lines or spots → needs repair on the advisor's check", () => {
   const g = grade(input({ certification: certified({ screen: ["ok", false], body: ["like_new"] }) }));
   assert.equal(g.status, "graded");
-  assert.equal(g.provisional.find((p) => p.code === "PV13")?.text, "Screen certified by Asha K. without the test colours.");
-  // The camera's sweep already checked the colours (only its cosmetic grade isn't final): no PV13 — nothing rests on the look alone.
+  // Since SUP-260 no colour loop exists to clear it: the advisor's look is how the screen was checked — said, not doubted.
+  assert.ok(!g.provisional.some((p) => p.code === "PV13"), JSON.stringify(g.provisional));
+  assert.equal(g.disclosures.find((p) => p.code === "DS11")?.text, "Asha K. checked the screen by eye.");
+  // The camera's sweep already checked the colours (only its cosmetic grade isn't final): no DS11 — nothing rests on the look alone.
   const swept = grade(input({ camera: { ...FAILED, status: "provisional", lcd: { cameraChecked: true, verdict: "pass", reason: null, confirmed: true } }, certification: certified({ screen: ["ok", false], body: ["like_new"] }) }));
-  assert.ok(!swept.provisional.some((p) => p.code === "PV13"), JSON.stringify(swept.provisional));
+  assert.ok(!swept.disclosures.some((p) => p.code === "DS11"), JSON.stringify(swept.disclosures));
+  // Certified on the test colours (an older build mid-loop): nothing to say.
+  assert.ok(!grade(input({ certification: certified({ screen: ["ok", true], body: ["like_new"] }) })).disclosures.some((p) => p.code === "DS11"));
   const lines = grade(input({ certification: certified({ screen: ["lines"] }), faults: ["display_lines"], condition: { ...COND, screen: "lines_or_spots" } }));
   assert.equal(lines.status, "needs_repair");
   assert.ok(lines.reasons.some((r) => r.code === "NR1" && /Display \/ dead pixels failed on Asha K\.'s check by eye/.test(r.text)), JSON.stringify(lines.reasons));

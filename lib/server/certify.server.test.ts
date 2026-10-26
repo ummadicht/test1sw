@@ -301,10 +301,11 @@ test("Apply: the camera's failed grade doesn't block it; what was certified stan
   assert.equal(c.grading?.status, "graded");
   assert.equal(c.grading?.label, "Good (B) · provisional");
   const live = gr.gradingReportFor(adv, caseId).live!;
-  // The battery wasn't read (its reader is off), and the screen rests on a look without the test colours
-  // (PV13 — honest: the sweep saw 2 of 6 colours and the phone is no longer asked to show them).
-  assert.deepEqual(live.provisional.map((p) => p.code), ["PV5", "PV13"]);
-  assert.equal(live.provisional.find((p) => p.code === "PV13")?.text, "Screen certified by Rahul Desai without the test colours.");
+  // Provisional only for the battery (its reader is off). The screen rests on the advisor's look — the sweep
+  // saw 2 of 6 colours and no colour loop exists since SUP-260 — which is disclosed (DS11), never a
+  // provisional nobody can clear (PV13 retired, review 0.9.4).
+  assert.deepEqual(live.provisional.map((p) => p.code), ["PV5"]);
+  assert.equal(live.disclosures.find((p) => p.code === "DS11")?.text, "Rahul Desai checked the screen by eye.");
   const display = live.tests.find((t) => t.id === "display")!;
   assert.equal(display.result, "passed");
   assert.deepEqual(display.sources.map((s) => [s.source, s.by, s.colours ?? false]), [["advisor", "Rahul Desai", false]]);

@@ -509,10 +509,9 @@ export function grade(input: GradingInput): Grading {
     const doubt = camera.lcd.doubt ?? "the screen sweep wasn't sure";
     provisional.push({ code: "PV11", text: `${cap(doubt)}; display test passed — check by eye.` });
   }
-  // A clean screen certified without the test colours on the customer's phone is a look at a dark or busy screen —
-  // when the display rests on that look alone: a camera sweep that checked the colours already covers it.
-  if (advisor && cert?.screen && !cert.screen.withColours && advisor.results.display.outcome === "pass" && camera?.lcd.cameraChecked !== true)
-    provisional.push({ code: "PV13", text: `Screen certified by ${cert.screen.by} without the test colours.` });
+  // PV13 is retired (review 0.9.4): since SUP-260 nothing shows the test colours after the tests, so a
+  // screen certified without them can never be made otherwise — it is the advisor's look the owner chose,
+  // disclosed below (DS11), never a provisional grade nobody can clear.
 
   /* — disclosures — */
   if (input.pcFacts?.parts === "not_genuine") disclosures.push({ code: "DS2", text: "Phonecheck reports a part that isn't original." });
@@ -531,6 +530,10 @@ export function grade(input: GradingInput): Grading {
   }
   if (input.browserRun) disclosures.push({ code: "DS7", text: BROWSER_NOTE });
   if (cert?.liquid?.value === "cant_see") disclosures.push({ code: "DS9", text: `Liquid indicator not checked — ${cert.liquid.by} couldn't see it.` });
+  // A clean screen whose display rests on the advisor's look alone (no camera sweep checked every colour,
+  // no test colours shown): said, by name — it is how the screen was checked, not a doubt about the grade.
+  if (advisor && cert?.screen && !cert.screen.withColours && advisor.results.display.outcome === "pass" && camera?.lcd.cameraChecked !== true)
+    disclosures.push({ code: "DS11", text: `${cert.screen.by} checked the screen by eye.` });
   // The advisor recorded better than the camera CONFIRMED: the camera's finding stands (certifyRow kept the floor) —
   // unless a recorded reason overruled it (DS4 says so), when the advisor's look is what was priced.
   const floor0 = camera?.floor ? standingFloor({ floor: camera.floor, overrides: camera.overrides }) : undefined;
