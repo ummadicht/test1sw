@@ -587,10 +587,13 @@ test("SUP-258: an IMEI naming a phone SwapUp doesn't list — exact with no mode
   assert.equal(after.device, null, "the pick never becomes the case's model");
   assert.ok(after.camera?.flags.includes("Model: customer picked Apple iPhone 13; the IMEI says Apple iPhone 13 Mini, not on SwapUp's list — the pick is not used."), after.camera?.flags.join(" | "));
   assert.equal(customerText(c.id), CANT_PRICE);
-  assert.deepEqual(after.offer?.asks.map((a) => [a.kind, a.text]), [["model", SAYS]]);
-  // Staff choose a model anyway (they found the IMEI was another phone's): that model is priced, and the warning says the IMEI disagrees.
+  // The answer ends there (review 0.9.4): no "Which phone is it?" and no Choose-the-model control.
+  assert.deepEqual(after.offer?.asks.map((a) => [a.kind, a.title, a.text]), [["no_price", "Can't be priced here", SAYS]]);
+  assert.equal(after.offer?.headline, "Can't be priced here");
+  // Staff choose a model anyway (they found the IMEI was another phone's): that model is priced, and the ONE
+  // warning says the IMEI disagrees — never "can't be priced here" beside a price.
   const chosen = await cases.updateCase(adv, c.id, { modelId: "iphone-13" });
-  assert.deepEqual(chosen.imeiWarnings, [SAYS, "The IMEI says Apple iPhone 13 Mini; the case has Apple iPhone 13 — check Settings › About phone."]);
+  assert.deepEqual(chosen.imeiWarnings, ["The IMEI says Apple iPhone 13 Mini, which isn't on SwapUp's list; the case has Apple iPhone 13 — check Settings › About phone."]);
 });
 
 test("SUP-258: a US Samsung (SM-S918U, SwapUp Check 0.9.3) whose IMEI names the S23 Ultra — exact, 'The IMEI agrees.', never 'Is this your phone?'; GSMA's codename is never shown", async () => {

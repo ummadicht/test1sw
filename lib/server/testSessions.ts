@@ -548,7 +548,7 @@ export async function applyTestSession(u: SessionUser, id: string, opts: { auto?
   // for the advisor, never the case's model — and its match is then not used for the storage either
   // (it would be the other model's sizes). A phone the IMEI names that SwapUp doesn't list leaves
   // the case with NO model: nothing is priced as another phone.
-  const decided = imeiDecision(c.id, refs);
+  const decided = imeiDecision(c.id, refs, s.model);
   let match: typeof s.model = s.model;
   let modelSource: "imei" | "phone" | "customer" | null = null;
   let imeiModelJoined = false;
@@ -562,7 +562,9 @@ export async function applyTestSession(u: SessionUser, id: string, opts: { auto?
     patch.modelId = m.id;
     // The phone's own code naming it too makes the model the phone's (it confirms the IMEI).
     modelSource = match.modelId === m.id ? "phone" : "imei";
-    imeiModelJoined = !match.modelId;
+    // Only a phone whose OWN code named nothing settles the IMEI model's storage from its reading: a
+    // phone whose code named another model is the phone the IMEI contradicts (review 0.9.4).
+    imeiModelJoined = !s.model.modelId;
   } else if (decided?.kind === "unlisted") {
     const not = `the IMEI says ${decided.label}, not on SwapUp's list`;
     if (s.model.modelId) identityFlags.push(`Model: phone code says ${s.model.label ?? "another model"}; ${not} — not used.`);
@@ -570,7 +572,15 @@ export async function applyTestSession(u: SessionUser, id: string, opts: { auto?
     match = noMatch(s.model);
     // A customer's earlier pick on the case was a claim the IMEI contradicts: it comes off.
     if (c.device && c.modelSource === "customer") patch.modelId = null;
+  } else if (s.model.modelId && s.model.match !== "exact" && c.imei && c.device && c.modelSource !== "customer" && c.device.modelId !== s.model.modelId) {
+    // The store has the IMEI and a model of its own, and was told it at the join (caseModelForJoin) —
+    // the phone's code only LOOKS like another model (a family match nobody confirmed): said, not used.
+    identityFlags.push(`Model: phone code looks like ${s.model.label ?? "another model"}; the case has ${c.device.brand} ${c.device.model} — check Settings › About phone.`);
+    match = noMatch(s.model);
   } else if (s.model.modelId) {
+    // The type code alone named a phone SwapUp doesn't list; the phone's exact code names this one.
+    if (decided?.kind === "code")
+      identityFlags.push(`Model: the IMEI's type code says ${decided.label}, not on SwapUp's list; the phone's code says ${s.model.label ?? "a model on the list"} — the code is used.`);
     patch.modelId = s.model.modelId;
     modelSource = "phone";
     // The phone's code matched, but the customer picked another model (or said "No"
@@ -591,6 +601,9 @@ export async function applyTestSession(u: SessionUser, id: string, opts: { auto?
       identityFlags.push(
         `Model: customer picked ${picked.brand} ${picked.model}; code unknown — check before pricing.`
       );
+  } else if (picked && c.device && c.device.modelId !== picked.id) {
+    // The case has a model of its own (staff's, Phonecheck's): the pick is not used — and said, never dropped quietly.
+    identityFlags.push(`Model: customer picked ${named(picked)}; the case has ${c.device.brand} ${c.device.model} — the pick is not used.`);
   }
   // Storage (lib/domain/phoneLed.ts storageFromTest): the phone's measurement, else
   // the model's only size, else the customer's own pick — a claim, flagged here and
@@ -603,14 +616,16 @@ export async function applyTestSession(u: SessionUser, id: string, opts: { auto?
   const measuredNow = storageVariant(v.device?.totalDiskBytes);
   // A pick the IMEI contradicts is not used for the storage either.
   const pickUsed = !!picked && !!pick && (decided?.kind === "listed" ? picked.id === decided.model.id : decided?.kind !== "unlisted");
+  // The phone's exact code over a type-code name ("code") decides nothing about the IMEI's own model.
+  const ruled = decided?.kind === "code" ? null : decided;
   const claim = pickUsed ? { modelId: picked!.id, variant: pick!.variant ?? null } : null;
   // The join told the phone the IMEI's model (caseModelForJoin) because its own code named
   // nothing, and nobody picked: the phone's reading settles THAT model's storage. The case's own
   // size counts only for that same model (a contradicted pick's size is another phone's).
-  const imeiId = decided?.kind === "listed" ? decided.model.id : null;
-  const sameModel = !decided || (imeiId !== null && c.device?.modelId === imeiId);
+  const imeiId = ruled?.kind === "listed" ? ruled.model.id : null;
+  const sameModel = !ruled || (imeiId !== null && c.device?.modelId === imeiId);
   const caseModel = {
-    caseModelId: decided?.kind === "unlisted" ? null : (imeiId ?? c.device?.modelId ?? null),
+    caseModelId: ruled?.kind === "unlisted" ? null : (imeiId ?? c.device?.modelId ?? null),
     caseVariant: sameModel ? (c.device?.variant ?? null) : null,
     caseModelJoined: imeiModelJoined && !claim,
   };
@@ -1282,8 +1297,12 @@ function sessionIdentity(caseId: string, device: DeviceReport | null, summary: D
   return identityForJoin(match, refs.find((m) => m.id === match.modelId)?.variants ?? [], measured ?? settledOnCase(caseId, match.modelId));
 }
 
-/** What the case's IMEI decides about its model, when it does (imeiDecision). */
-type ImeiDecision = { kind: "listed"; model: TradeModelRef } | { kind: "unlisted"; label: string };
+/**
+ * What the case's IMEI decides about its model, when it does (imeiDecision). `code`: the offline type
+ * code alone names a phone SwapUp doesn't list, and the phone's own exact maker code names one that
+ * is — the code is used, and Apply says the IMEI disagreed (never "can't be priced" on a TAC name alone).
+ */
+type ImeiDecision = { kind: "listed"; model: TradeModelRef } | { kind: "unlisted"; label: string } | { kind: "code"; label: string };
 
 /**
  * Does the case's IMEI decide its model, and as what? (owner, 2026-10-25: "create session whatever
@@ -1292,12 +1311,16 @@ type ImeiDecision = { kind: "listed"; model: TradeModelRef } | { kind: "unlisted
  *   listed    the case's model is one the IMEI set, or equals the one it names; or the case has no
  *             model / only the customer's pick, and the IMEI names a model on SwapUp's list
  *   unlisted  the case has no model / only the customer's pick, and the IMEI names a phone SwapUp
- *             doesn't list — it can't be priced here, never as another phone
- *   null      no IMEI; an IMEI that names nothing (or either of two phones); or a model staff, the
- *             phone's own code or a Phonecheck report put on the case that the IMEI doesn't name —
- *             those stand, and the IMEI's word is a warning on the case (imeiWarnings)
+ *             doesn't list — it can't be priced here, never as another phone. GSMA's name (a real
+ *             lookup) decides; the offline type code's name alone does too, unless…
+ *   code      …the phone's own EXACT maker code names a model on the list: the code is used (a TAC
+ *             name is never final over it — "Galaxy S26 Pro" is the S26+ on file; review 0.9.4)
+ *   null      no IMEI; an IMEI that names nothing (a brand alone, a series, or more than one phone);
+ *             or a model staff, the phone's own code or a Phonecheck report put on the case that the
+ *             IMEI doesn't name — those stand, and the IMEI's word is a warning (imeiWarnings)
+ * `phone`: the phone's own match on its model code, when one has joined.
  */
-function imeiDecision(caseId: string, refs: TradeModelRef[]): ImeiDecision | null {
+function imeiDecision(caseId: string, refs: TradeModelRef[], phone?: Pick<ModelMatch, "modelId" | "match"> | null): ImeiDecision | null {
   const row = db().prepare(`SELECT model_id, model_source, imei, imei_lookup FROM cases WHERE id = ?`).get(caseId) as
     | { model_id: string | null; model_source: string | null; imei: string | null; imei_lookup: string | null }
     | undefined;
@@ -1311,7 +1334,10 @@ function imeiDecision(caseId: string, refs: TradeModelRef[]): ImeiDecision | nul
   if (said.kind === "listed" && row.model_id === said.modelId) return listed(row.model_id);
   if (row.model_id && row.model_source !== "customer") return null;
   if (said.kind === "listed") return listed(said.modelId);
-  if (said.kind === "unlisted") return { kind: "unlisted", label: said.label };
+  if (said.kind === "unlisted") {
+    if (said.from === "tac" && phone?.match === "exact" && phone.modelId) return { kind: "code", label: said.label };
+    return { kind: "unlisted", label: said.label };
+  }
   return null;
 }
 
@@ -1325,11 +1351,14 @@ function imeiDecision(caseId: string, refs: TradeModelRef[]): ImeiDecision | nul
  *                                          too is upgraded to exact ("… The IMEI agrees."), so a US
  *                                          SM-S918U is not asked "Is this your phone?"
  *   the IMEI names a phone not on the list exact, no model id, the IMEI's name: nothing to pick, and
- *                                          the trade-in says it can't be priced here
- *   the IMEI names nothing                 the phone's own exact/family code, else exact "Your phone":
+ *                                          the trade-in says it can't be priced here (a type-code name
+ *                                          alone, against the phone's exact code: the phone's answer)
+ *   a model on the case the IMEI doesn't   staff's, the phone's earlier code's, Phonecheck's or a pick:
+ *   decide                                 that model, exact ("The store has this phone as the X.") —
+ *                                          unless the phone's own code is exact, which Apply then uses
+ *   no model, and the IMEI names nothing   the phone's own exact/family code, else exact "Your phone":
  *                                          the advisor chooses the model on the case
- *   staff's / Phonecheck's model the IMEI  unchanged: the phone's own answer
- *   doesn't name
+ * No picker while the store has the IMEI (owner, 2026-10-25; review 0.9.4).
  *
  * A case with NO IMEI joins exactly as 0.8.0: the phone's own answer (a counter code, the demo code,
  * "scan at hand-over" — an IMEI saved later reaches the phone through deviceStatus's identity). Apply
@@ -1341,7 +1370,8 @@ function caseModelForJoin(phone: ModelMatch, caseId: string, refs: TradeModelRef
     | { model_id: string | null; variant: string | null; model_source: string | null; imei: string | null }
     | undefined;
   if (!row?.imei) return phone;
-  const d = imeiDecision(caseId, refs);
+  const d = imeiDecision(caseId, refs, phone);
+  if (d?.kind === "code") return phone;
   if (d?.kind === "listed") {
     const m = d.model;
     if (phone.modelId === m.id) return { ...phone, match: "exact", why: `${phone.why.trim()} The IMEI agrees.` };
@@ -1350,8 +1380,17 @@ function caseModelForJoin(phone: ModelMatch, caseId: string, refs: TradeModelRef
     return { modelId: m.id, label: `${m.brand} ${m.model}`, variant, match: "exact", why: `The store has this phone as the ${m.model} (from its IMEI).` };
   }
   if (d?.kind === "unlisted") return { modelId: null, label: d.label, variant: null, match: "exact", why: imeiUnlistedSentence(d.label) };
-  // A model staff, the phone's code or Phonecheck put on the case stands, as before: the phone's own answer.
-  if (row.model_id && row.model_source !== "customer") return phone;
+  // A model already on the case (staff's, Phonecheck's, an earlier code's, a pick) that the IMEI doesn't
+  // decide stands — told to the phone as the store's, so the customer is never asked "Which phone is
+  // this?" for a phone the store has. The phone's own exact code is its own answer (Apply uses it).
+  const onCase = row.model_id ? refs.find((m) => m.id === row.model_id) : undefined;
+  if (onCase) {
+    if (phone.match === "exact" && phone.modelId) return phone;
+    if (phone.modelId === onCase.id) return { ...phone, match: "exact", why: `${phone.why.trim()} The store has it as the ${onCase.model}.` };
+    const size = measured ?? row.variant;
+    const variant = size && onCase.variants.includes(size) ? size : null;
+    return { modelId: onCase.id, label: `${onCase.brand} ${onCase.model}`, variant, match: "exact", why: `The store has this phone as the ${onCase.model}.` };
+  }
   // The IMEI names no model: the phone's own code decides; with none, nothing is asked of the customer.
   if (phone.match !== "none") return phone;
   return { modelId: null, label: "Your phone", variant: null, match: "exact", why: "The store has this phone's IMEI; the advisor chooses the model." };

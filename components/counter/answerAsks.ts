@@ -70,6 +70,9 @@ export function autoRequoteKey(v: RequoteView): string | null {
   const priceable = !!v.condition && !v.conditionProblems.length && !v.quoteBlocked;
   const chips = v.offer.asks.find((a) => a.kind === "storage");
   if (priceable && chips?.kind === "storage" && chips.options.length > 0 && chips.options.every((o) => o.tradeIn === null)) return `${v.id} chips`;
+  // No size chosen and no size priced at all: the answer says so instead of the chips (offer.ts) — the
+  // same quiet re-quote, in case a card uploaded since prices them. (No quote yet, so not the one above.)
+  if (priceable && !q && v.offer.asks.some((a) => a.kind === "no_price")) return `${v.id} chips`;
   return null;
 }
 

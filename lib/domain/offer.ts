@@ -219,6 +219,8 @@ const ASK_TITLE = {
   model: "Which phone is it?",
   storage: "Which storage is it?",
   no_price: "No market price yet",
+  // The IMEI names a phone SwapUp doesn't list (SUP-258): a "no_price" ask — nothing to choose.
+  unlisted: "Can't be priced here",
   repair_quote: "The repair needs a quote",
   new_phone: "Choose the new phone",
 } as const;
@@ -357,7 +359,9 @@ export function buildOffer(i: OfferInput): Offer {
   // quote first — recording a fault never prices a brand this centre doesn't repair — then the defect
   // no fault says, then the estimate's note.
   const unpricedWhy = unrecorded ? (i.repairNotServiced ?? noFaultRecorded(unrecorded)) : (repairNote ?? NO_REPAIR_PRICE);
-  const repairWhy = repairAmount !== null ? null : nothingToRepair ? NOTHING_TO_REPAIR : !device ? CHOOSE_PHONE : unpricedWhy;
+  // No model because the IMEI names a phone SwapUp doesn't list: that sentence, never "Choose the phone first".
+  const imeiUnlisted = !device && i.imeiUnlisted ? i.imeiUnlisted : null;
+  const repairWhy = repairAmount !== null ? null : nothingToRepair ? NOTHING_TO_REPAIR : !device ? (imeiUnlisted ?? CHOOSE_PHONE) : unpricedWhy;
 
   // ── Trade-in + bonus ──
   const q = i.quote;
@@ -373,7 +377,11 @@ export function buildOffer(i: OfferInput): Offer {
   // The phone measured a size that isn't on the model's list: say so, never a chip for another size.
   const measured = i.measuredStorage ?? null;
   const unlisted = device && !variant && measured && !device.variants.includes(measured) ? measuredUnlisted(measured) : null;
-  const imeiUnlisted = !device && i.imeiUnlisted ? i.imeiUnlisted : null;
+  // No size is chosen and EVERY size has a final "no price" (a model on the list with no card row — the
+  // 13 iPhones of SUP-259): no size question, since no answer prices it — the no-price sentence instead.
+  const sizesNoPrice =
+    !!device && !variant && !unlisted && !!i.storageQuotes?.length && i.storageQuotes.every((s) => s.amount === null && finalNoPrice(s));
+  const sizesWhy = sizesNoPrice ? (noPriceWhy(i.storageQuotes![0].reason) ?? NO_MARKET_PRICE) : null;
   const swapWhy =
     tradeIn !== null
       ? null
@@ -381,7 +389,7 @@ export function buildOffer(i: OfferInput): Offer {
         (!device
           ? (imeiUnlisted ?? CHOOSE_PHONE)
           : !variant
-            ? (unlisted ?? TAP_STORAGE)
+            ? (unlisted ?? sizesWhy ?? TAP_STORAGE)
             : q && q.status !== "priced"
               ? (noPriceWhy(q.reason) ?? (open ? REQUOTE_FOR_WHY : null))
               : (i.conditionProblems[0] ?? (!i.hasCondition ? NO_CONDITION : NO_TRADE_IN))));
@@ -392,11 +400,7 @@ export function buildOffer(i: OfferInput): Offer {
   const cantPrice =
     open &&
     !i.quoteBlocked &&
-    (!device
-      ? !!imeiUnlisted
-      : variant
-        ? !!q && q.status !== "priced" && !i.quoteExpired && finalNoPrice(q)
-        : !unlisted && !!i.storageQuotes?.length && i.storageQuotes.every((s) => s.amount === null && finalNoPrice(s)));
+    (!device ? !!imeiUnlisted : variant ? !!q && q.status !== "priced" && !i.quoteExpired && finalNoPrice(q) : sizesNoPrice);
   const up = i.upgrade;
   const b = up ? i.bonus : null;
   const bonus = b ? (b.override?.amount ?? b.amount) : null;
@@ -428,8 +432,12 @@ export function buildOffer(i: OfferInput): Offer {
   const asks: OfferAsk[] = [];
   if (open) {
     if (i.quoteBlocked) asks.push({ kind: "blocked", title: ASK_TITLE.blocked, text: i.quoteBlocked });
-    if (!device) asks.push({ kind: "model", title: ASK_TITLE.model, text: imeiUnlisted ?? (i.tested === false ? MODEL_TEXT_UNTESTED : MODEL_TEXT) });
-    if (device && !variant) {
+    // The IMEI names a phone SwapUp doesn't list: the answer ends there — no "Which phone is it?" and
+    // no Choose-the-model control (the nearest listed model would be another phone's price).
+    if (!device && imeiUnlisted) asks.push({ kind: "no_price", title: ASK_TITLE.unlisted, text: imeiUnlisted });
+    else if (!device) asks.push({ kind: "model", title: ASK_TITLE.model, text: i.tested === false ? MODEL_TEXT_UNTESTED : MODEL_TEXT });
+    if (device && !variant && sizesWhy) asks.push({ kind: "no_price", title: ASK_TITLE.no_price, text: sizesWhy });
+    else if (device && !variant) {
       if (unlisted) asks.push({ kind: "storage", title: ASK_TITLE.storage, text: unlisted, options: [], note: null });
       else {
         const options: StorageOption[] = i.storageQuotes?.length

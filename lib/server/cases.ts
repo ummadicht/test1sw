@@ -67,10 +67,11 @@ import {
   resolveImei,
   tradeModelRefs,
   withLookup,
+  withTacName,
   type KymEarly,
   type StoredImeiLookup,
 } from "./imeiResolve";
-import { imeiModelNow } from "../domain/tac";
+import { imeiModelNow, imeiSourcesDisagree } from "../domain/tac";
 
 /* ─────────────────────────── types ─────────────────────────── */
 
@@ -723,15 +724,19 @@ function imeiWarnings(c: CaseRow, tm: TradeModel | null): string[] {
   // What the IMEI names, read against today's list (a model added since is named now). Another model
   // than the one on the case (staff's, or the phone's code) is said, not changed; a phone SwapUp doesn't
   // list is said as such — it can't be priced here, and never as another phone (SUP-258).
-  const kept = lookupFor(c.imei_lookup, c.imei);
-  const said = caseImeiModel(c);
+  const kept = withTacName(lookupFor(c.imei_lookup, c.imei));
+  const refs = tradeModelRefs();
+  const said = caseImeiModel(c, refs);
+  // GSMA's own name and the type code name different phones: both are said (GSMA's decided, or neither).
+  const split = imeiSourcesDisagree(kept, refs);
+  if (split) out.push(`The IMEI's type code says ${split.tac}; GSMA says ${split.gsma} — check Settings › About phone.`);
   if (said.kind === "listed" && tm && said.modelId !== tm.id) {
     const other = getTradeModel(said.modelId);
     if (other) out.push(`The IMEI says ${other.brand} ${other.model}; the case has ${tm.brand} ${tm.model} — check Settings › About phone.`);
   } else if (said.kind === "unlisted") {
-    out.push(imeiUnlistedSentence(said.label));
-    if (tm) out.push(`The IMEI says ${said.label}; the case has ${tm.brand} ${tm.model} — check Settings › About phone.`);
-  } else if (kept && !tm && (said.kind === "none" || said.kind === "ambiguous")) {
+    // With a model on the case it IS priced: said once, without "can't be priced here".
+    out.push(tm ? `The IMEI says ${said.label}, which isn't on SwapUp's list; the case has ${tm.brand} ${tm.model} — check Settings › About phone.` : imeiUnlistedSentence(said.label));
+  } else if (kept && !tm && !split && (said.kind === "none" || said.kind === "ambiguous")) {
     out.push(IMEI_NAMES_NO_MODEL);
   }
   return out;
@@ -1273,7 +1278,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   // own model, the phone's code and a Phonecheck report stand (imeiWarnings says when they disagree).
   let imeiModel: string | null | undefined;
   if (patch.modelId === undefined && resolved) {
-    const said = imeiModelNow(resolved.rec, tradeModelRefs());
+    const said = imeiModelNow(withTacName(resolved.rec), tradeModelRefs());
     const claim = c.model_source === "customer";
     if (said.kind === "listed") {
       if (!c.model_id || claim || (c.model_source === "imei" && said.modelId !== c.model_id)) imeiModel = said.modelId;

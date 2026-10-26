@@ -481,7 +481,13 @@ test("SUP-258: no model because the IMEI names a phone SwapUp doesn't list — s
   assert.deepEqual(customerAnswer(o.answer), CANT, "nothing at the counter will price it: final, never 'working out' all visit");
   assert.equal(o.swap.why, SAYS);
   assert.equal(o.swap.tradeIn, null, "never another phone's price");
-  assert.deepEqual(o.asks, [{ kind: "model", title: "Which phone is it?", text: SAYS }]);
+  // The answer ends there (review 0.9.4): no "Which phone is it?", no Choose-the-model control — the
+  // nearest listed model would be another phone's price. Text only, as every "no price" is.
+  assert.deepEqual(o.asks, [{ kind: "no_price", title: "Can't be priced here", text: SAYS }]);
+  assert.equal(o.headline, "Can't be priced here");
+  assert.equal(o.reason, SAYS);
+  assert.ok(!o.asks.some((a) => a.kind === "model"));
+  assert.equal(o.repair.why, SAYS, "the repair tile says the same, not 'Choose the phone first.'");
   assert.equal(o.actions.swap, SAYS);
   // Without it: the plain "choose the phone" — and the customer is told the advisor is working it out.
   const plain = buildOffer(priced(none));
@@ -842,4 +848,27 @@ test("a bonus the campaign's ₹ cap set says so to staff; the line is the same 
 test("a test programme: the answer carries test: true", () => {
   assert.equal(buildOffer(priced({ testProgramme: true })).answer.test, true);
   assert.equal(buildOffer(priced()).answer.test, false);
+});
+
+test("review 0.9.4: a model on the list with no card row for ANY size and no size measured — no 'Which storage is it?', the no-price sentence leads (the customer is told CANT_PRICE)", () => {
+  const NOT_ON = "This phone isn't on the rate card yet.";
+  const sizes = ["256GB", "512GB", "1TB", "2TB"];
+  const o = buildOffer(
+    storageUnknown({
+      device: { label: "Apple iPhone 17 Pro Max", variant: null, variants: sizes },
+      storageQuotes: sizes.map((variant) => ({ variant, amount: null, reason: NOT_ON })),
+      tested: true,
+      measuredStorage: null,
+    })
+  );
+  assert.deepEqual(customerAnswer(o.answer), { ready: false, final: false, text: "This phone can't be priced for trade-in here yet — the advisor will explain.", test: false });
+  assert.ok(!o.asks.some((a) => a.kind === "storage"), JSON.stringify(o.asks));
+  assert.deepEqual(o.asks[0], { kind: "no_price", title: "No market price yet", text: NOT_ON });
+  assert.equal(o.headline, "No market price yet");
+  assert.equal(o.swap.why, NOT_ON, "never 'Tap the storage to see the trade-in.'");
+  // One size priced: the chips are the answer again.
+  const one = buildOffer(storageUnknown({ storageQuotes: [{ variant: "256GB", amount: 18_800, reason: null }, { variant: "512GB", amount: null, reason: NOT_ON }] }));
+  assert.equal(one.asks[0].kind, "storage");
+  // No size asked yet (no quotes): the chips, as before — a re-quote may price them.
+  assert.equal(buildOffer(storageUnknown({ storageQuotes: null })).asks[0].kind, "storage");
 });

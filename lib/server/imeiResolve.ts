@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { HttpError } from "./auth";
 import { db, parseJson } from "./db";
 import { GradeiqError, gradeiqConfig, lookupImei, readImeiScreen, type ImeiLookup } from "./gradeiq";
-import { gsmaModelName, imeiModelNow, modelForTacName, tacModel, type ImeiModelNow, type TacDb } from "../domain/tac";
+import { gsmaLookupName, gsmaModelName, imeiModelNow, isRealLookup, modelForTacName, tacLookup, tacModel, type ImeiModelNow, type TacDb } from "../domain/tac";
 import { kymEarlyStop, luhnValid, type KymStatus } from "../domain/imei";
 import { matchModel, type DeviceReport, type TradeModelRef } from "../domain/diagnostics";
 
@@ -14,14 +14,19 @@ import { matchModel, type DeviceReport, type TradeModelRef } from "../domain/dia
  *   1. the model, free: its TAC on the offline list (lib/domain/tac.ts) → a trade model;
  *   2. GradeIQ's IMEI lookup, paid, once (call A, lib/server/gradeiq.ts lookupImei): make,
  *      model, model number and the GSMA blacklist. A Samsung model number is matched like the
- *      phone's own code (matchModel: exact, then family) and wins over the TAC; with neither, GSMA's
- *      own name (Apple's carries no model number: "Apple iPhone 17 Pro Max (A3257)") is mapped by
- *      the TAC list's explicit rules (tac.ts gsmaModelName, modelForTacName).
+ *      phone's own code (matchModel: exact, then family) and wins over everything; then GSMA's own
+ *      name (Apple's carries no model number: "Apple iPhone 17 Pro Max (A3257)"), mapped by the TAC
+ *      list's explicit rules (tac.ts gsmaModelName, modelForTacName), wins over the type code — the
+ *      owner's "model derived from Phonecheck" — and the record says what the type code said. GSMA
+ *      naming a phone NOT on the list where the type code names one that is: ambiguous, both said
+ *      (GSMA's name may be a codename). Only a REAL lookup's name is read (tac.ts isRealLookup) —
+ *      never GradeIQ's own offline list ("tac") or its made-up seed answers ("stub").
  *
  * What staff read is the catalogue's brand and model when one mapped — never GSMA's codename
- * ("DM3") or Apple's "(A####)". The record keeps `modelKind` (listed / unlisted / ambiguous / none)
- * and the TAC list's own name, so an answer kept from before a model joined the list is re-mapped
- * against today's list for free (tac.ts imeiModelNow, caseImeiModel) — never looked up again.
+ * ("DM3") or Apple's "(A####)". The record keeps `modelKind` (listed / unlisted / ambiguous / none),
+ * GSMA's own name (`gsmaName`) and the TAC list's (`tacName`), so an answer kept from before a model
+ * joined the list is re-mapped against today's list for free (tac.ts imeiModelNow, caseImeiModel) —
+ * never looked up again.
  *
  * The answer is kept per IMEI in cases.imei_lookup (a short list), so saving the same IMEI again
  * never asks GradeIQ again — whatever it answered, a timeout included (no background retry).
@@ -69,6 +74,8 @@ export type StoredImeiLookup = ImeiLookup & {
   modelKind?: ImeiModelNow["kind"];
   /** The offline TAC list's name for it ("Apple Iphone 17 Pro Max"), for re-mapping. Absent before 0.9.4. */
   tacName?: string | null;
+  /** A real lookup's own name, in the TAC list's form ("Apple iPhone 15 Pro Max"); null = none or not a real lookup. Absent before 0.9.4. */
+  gsmaName?: string | null;
 };
 
 /** What the advisor is told — and staff read in place of a price — for an IMEI naming a phone SwapUp doesn't list. */
@@ -82,7 +89,17 @@ export const IMEI_NAMES_NO_MODEL = "The IMEI doesn't name a model — choose it 
  * answer that names nothing.
  */
 export function caseImeiModel(c: { imei: string | null; imei_lookup?: string | null }, refs: TradeModelRef[] = tradeModelRefs()): ImeiModelNow {
-  return imeiModelNow(lookupFor(c.imei_lookup, c.imei), refs);
+  return imeiModelNow(withTacName(lookupFor(c.imei_lookup, c.imei)), refs);
+}
+
+/**
+ * A kept answer with the offline TAC list's name on it: an answer kept before 0.9.4 has none, so it is
+ * read from the list now (free, offline) — its own brand and model are then only read when they came
+ * from a real lookup (tac.ts lookupNameOf).
+ */
+export function withTacName<T extends StoredImeiLookup | null>(l: T): T {
+  if (!l || l.tacName !== undefined) return l;
+  return { ...l, tacName: tacLookup(l.imei, tacDb())?.name ?? null };
 }
 
 /** "Apple iPhone 17 Pro Max" → "iPhone 17 Pro Max" beside brand "Apple", as the catalogue writes models; "OnePlus 12" stays whole. */
@@ -173,22 +190,31 @@ export async function resolveImei(imei: string, refs: TradeModelRef[], at: strin
   // A Samsung model number is the maker's own code: the same match the phone's code gets.
   const code = found?.modelNumber ? matchModel({ modelCode: found.modelNumber, modelName: null } as unknown as DeviceReport, refs) : null;
   const byCode = code?.modelId ? code : null;
-  // GSMA's own name, "(A####)" dropped — mapped like a TAC name, only when neither the model number
-  // nor the TAC named a model (an Apple answer carries no model number).
-  const gsmaName = gsmaModelName(found?.brand, found?.model);
-  const byName = !byCode && !tac.modelId && gsmaName ? modelForTacName(gsmaName, refs) : null;
-  const modelId = byCode?.modelId ?? tac.modelId ?? (byName?.kind === "mapped" ? byName.modelId : null);
+  // GSMA's own name, "(A####)" dropped — only a REAL lookup's (never GradeIQ's offline list or its stub).
+  const real = !!found && isRealLookup(found.source);
+  const gsmaName = found ? gsmaLookupName(found.brand, found.model, found.source) : null;
+  const byName = gsmaName ? modelForTacName(gsmaName, refs) : null;
+  // The one reading of the sources (tac.ts imeiModelNow): model number, then GSMA's name, then the type code.
+  const now = imeiModelNow({ modelId: byCode?.modelId ?? null, gsmaName, tacName: tac.name }, refs);
+  const modelId = now.kind === "listed" ? now.modelId : null;
+  const typeCode = tac.name ? gsmaModelName(null, tac.name) : null;
   const modelWhy = byCode
     ? `Model number ${found!.modelNumber}${tac.modelId && tac.modelId !== byCode.modelId ? ` (the type code says ${tac.model ?? "another model"})` : ""}: ${byCode.label}.`
-    : tac.modelId
-      ? tac.why
-      : byName?.kind === "mapped"
-        ? `GSMA: ${gsmaName}.`
-        : (byName?.why ?? tac.why);
-  // Staff read the catalogue's brand and model when one mapped — never a codename ("DM3") or "(A3257)".
+    : now.kind === "listed" && byName?.kind === "mapped" && byName.modelId === modelId
+      ? `GSMA: ${gsmaName}${tac.modelId !== modelId && (tac.kind === "mapped" || tac.kind === "unlisted") ? ` (the type code says ${typeCode})` : ""}.`
+      : now.kind === "listed"
+        ? tac.why
+        : now.kind === "ambiguous" && byName?.kind === "unlisted" && tac.kind === "mapped"
+          ? `The type code says ${typeCode}; GSMA says ${gsmaName} — choose by hand.`
+          : byName && byName.kind !== "none"
+            ? `${byName.why.replace(/\.$/, "")} (GSMA).`
+            : tac.why;
+  // Staff read the catalogue's brand and model when one mapped — never a codename ("DM3") or "(A3257)";
+  // else the name that decided (GSMA's, then the type code's). A stub's made-up name is never shown.
   const onFile = modelId ? refs.find((m) => m.id === modelId) : undefined;
-  const brand = onFile?.brand ?? found?.brand ?? tac.brand;
-  const model = onFile?.model ?? (gsmaName ? modelPart(gsmaName, brand) : tac.model);
+  const brand = onFile?.brand ?? (real ? found!.brand : null) ?? tac.brand;
+  const shown = now.kind === "none" ? (gsmaName ?? typeCode) : now.label;
+  const model = onFile?.model ?? (shown ? modelPart(shown, brand) : tac.model);
   return {
     imei,
     brand,
@@ -199,8 +225,9 @@ export async function resolveImei(imei: string, refs: TradeModelRef[], at: strin
     at,
     modelId,
     modelWhy,
-    modelKind: imeiModelNow({ modelId, brand, model, tacName: tac.name }, refs).kind,
+    modelKind: now.kind,
     tacName: tac.name,
+    gsmaName,
   };
 }
 
