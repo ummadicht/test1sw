@@ -1,0 +1,144 @@
+name: SwapUp Deploy (develop)
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+env:
+  DOCKER_REPO: spectrum
+  SERVICE_NAME: swapup
+  TAG_PREFIX: swapup
+  ENV_KEY: SWAPUP_TAG
+
+jobs:
+  secret-scan:
+    name: 1. Gitleaks Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks Secret Scanner
+        run: |
+          GITLEAKS_VERSION="8.30.1"
+          wget -q https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
+          tar -xzf gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz gitleaks
+          sudo mv gitleaks /usr/local/bin/
+          gitleaks git --redact --verbose --exit-code 1
+
+  test-and-typecheck:
+    name: 2. Tests & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install, Typecheck & Run Tests
+        run: |
+          npm ci
+          npm run typecheck --if-present
+          npm run test --if-present
+
+  build-and-push:
+    name: 3. Build & Push Image
+    runs-on: ubuntu-latest
+    needs: [secret-scan, test-and-typecheck]
+    outputs:
+      version_tag: ${{ steps.meta.outputs.version_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate Short SHA Tag
+        id: meta
+        run: echo "version_tag=${{ env.TAG_PREFIX }}-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push to Private Repo
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_REPO }}:${{ env.TAG_PREFIX }}-latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_REPO }}:${{ steps.meta.outputs.version_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  trivy-scan:
+    name: 4. Trivy Security Scan
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Scan Image with Trivy
+        uses: aquasecurity/trivy-action@master
+        env:
+          TRIVY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          TRIVY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+        with:
+          image-ref: '${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_REPO }}:${{ needs.build-and-push.outputs.version_tag }}'
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  deploy:
+    name: 5. SSH Pull & Deploy
+    runs-on: ubuntu-latest
+    needs: [build-and-push, trivy-scan]
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+            export COMPOSE_IGNORE_ORPHANS=True
+            cd /srv/platform
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+            # 1. Record current working tag
+            CURR_TAG=$(grep "^${{ env.ENV_KEY }}=" .env | cut -d= -f2 || echo "${{ env.TAG_PREFIX }}-latest")
+            sed -i "/^${{ env.ENV_KEY }}=/d" .rollback.env 2>/dev/null || true
+            echo "${{ env.ENV_KEY }}=$CURR_TAG" >> .rollback.env
+
+            # 2. Pin the new immutable SHA tag
+            NEW_TAG="${{ needs.build-and-push.outputs.version_tag }}"
+            sed -i "s/^${{ env.ENV_KEY }}=.*/${{ env.ENV_KEY }}=${NEW_TAG}/" .env
+
+            # 3. Pull and restart just this service
+            docker compose -f docker-compose.apps.yml pull ${{ env.SERVICE_NAME }}
+            docker compose -f docker-compose.apps.yml up -d --no-deps ${{ env.SERVICE_NAME }}
+
+            # 4. Clean up ONLY the previous version of this specific service
+            if [ "$CURR_TAG" != "$NEW_TAG" ] && [ "$CURR_TAG" != "${{ env.TAG_PREFIX }}-latest" ]; then
+              echo "Cleaning up previous image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_REPO }}:$CURR_TAG"
+              docker rmi "${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_REPO }}:$CURR_TAG" 2>/dev/null || true
+            fi

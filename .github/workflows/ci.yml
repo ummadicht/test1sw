@@ -1,0 +1,45 @@
+name: PR CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+
+jobs:
+  secret-scan:
+    name: 1. Gitleaks Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks Secret Scanner
+        run: |
+          GITLEAKS_VERSION="8.30.1"
+          wget -q https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
+          tar -xzf gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz gitleaks
+          sudo mv gitleaks /usr/local/bin/
+          gitleaks git --redact --verbose --exit-code 1
+
+  test-and-typecheck:
+    name: 2. Tests & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install & Run Tests (if present)
+        run: |
+          sed -i 's/\r$//' *.sh deploy/*.sh 2>/dev/null || true
+          npm ci
+          npm run typecheck --if-present
+          npm run test --if-present

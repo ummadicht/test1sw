@@ -1,0 +1,10 @@
+node_modules
+.next
+dist
+dist-web
+.expo
+.git
+.github
+*.log
+.env
+.env.*

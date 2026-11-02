@@ -1,0 +1,63 @@
+name: Rollback Service
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service to roll back"
+        required: true
+        type: choice
+        options:
+          - swapup
+          - swapup-mobile-web
+          - gradeiq
+          - priceiq
+          - estate-monitor
+      target_tag:
+        description: "Specific Docker tag (e.g. swapup-a1b2c3d). Leave empty to auto-restore previous tag."
+        required: false
+        type: string
+
+jobs:
+  rollback:
+    name: Rollback ${{ inputs.service }} over SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Execute Rollback on Server
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+            export COMPOSE_IGNORE_ORPHANS=True
+            cd /srv/platform
+
+            case "${{ inputs.service }}" in
+              swapup)            ENV_KEY="SWAPUP_TAG" ;;
+              swapup-mobile-web) ENV_KEY="MOBILE_TAG" ;;
+              gradeiq)           ENV_KEY="GRADEIQ_TAG" ;;
+              priceiq)           ENV_KEY="PRICEIQ_TAG" ;;
+              estate-monitor)    ENV_KEY="MONITOR_TAG" ;;
+            esac
+
+            TARGET="${{ inputs.target_tag }}"
+            if [ -z "$TARGET" ]; then
+              TARGET=$(grep "^${ENV_KEY}=" .rollback.env | cut -d= -f2 || true)
+              if [ -z "$TARGET" ]; then
+                echo "Error: No previous tag found in .rollback.env and no target_tag specified." >&2
+                exit 1
+              fi
+              echo "Auto-rolling back ${{ inputs.service }} to previous recorded tag: $TARGET"
+            else
+              echo "Rolling back ${{ inputs.service }} to specified tag: $TARGET"
+            fi
+
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            sed -i "s/^${ENV_KEY}=.*/${ENV_KEY}=${TARGET}/" .env
+
+            docker compose -f docker-compose.apps.yml pull ${{ inputs.service }}
+            docker compose -f docker-compose.apps.yml up -d --no-deps ${{ inputs.service }}
+            echo "Rollback complete. Active configuration:"
+            grep "^${ENV_KEY}=" .env
