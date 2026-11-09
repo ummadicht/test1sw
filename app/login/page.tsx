@@ -4,6 +4,8 @@ import { ensureSeeded } from "@/lib/server/seed";
 import { LoginForm } from "./LoginForm";
 import { BrandMark } from "@/components/ui";
 
+export const dynamic = 'force-dynamic';
+
 export const metadata = { title: "Sign in" };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {

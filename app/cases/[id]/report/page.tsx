@@ -52,9 +52,9 @@ export default async function CaseReportPage({ params, searchParams }: { params:
   const { id } = await params;
   const sp = await searchParams;
   const u = await requirePage(null, `/cases/${id}/report`);
-  let r: ReturnType<typeof gradingReportFor>;
+  let r: Awaited<ReturnType<typeof gradingReportFor>>;
   try {
-    r = gradingReportFor(u, id);
+    r = await gradingReportFor(u, id);
   } catch (e) {
     if (e instanceof HttpError && e.status === 404)
       return (
@@ -72,7 +72,7 @@ export default async function CaseReportPage({ params, searchParams }: { params:
   const asked = typeof sp.v === "string" ? sp.v : null;
   if (isStaff && token && asked && env && asked !== String(env.version)) {
     try {
-      env = publicReport(token, asked);
+      env = await publicReport(token, asked);
     } catch (e) {
       if (e instanceof HttpError && e.status === 404) return <Message title={`There is no version ${asked}`} back={`/cases/${id}/report`} />;
       throw e;
@@ -123,7 +123,7 @@ function StaffOnly({
   id: string;
   live: Grading | null;
   staff: StaffExtras;
-  versions: ReturnType<typeof gradingReportFor>["versions"];
+  versions: Awaited<ReturnType<typeof gradingReportFor>>["versions"];
   shown: ReportEnvelope;
   latestPath: string;
 }) {

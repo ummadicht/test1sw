@@ -7,8 +7,8 @@ import { adminOrgId } from "@/lib/server/scope";
 export async function GET(req: Request) {
   return handle(async () => {
     const u = await requireUser(["org_admin", "platform"]);
-    const orgId = adminOrgId(u, new URL(req.url).searchParams.get("orgId"));
-    return { stores: listStores(u).filter((s) => s.org_id === orgId) };
+    const orgId = await adminOrgId(u, new URL(req.url).searchParams.get("orgId"));
+    return { stores: (await listStores(u)).filter((s) => s.org_id === orgId) };
   });
 }
 
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   return handle(async () => {
     const u = await requireUser(["org_admin", "platform"]);
     const b = await body<{ orgId?: string; name?: string; kind?: string; city?: string; code?: string; creditLimit?: unknown }>(req);
-    const store = createStore(u, {
+    const store = await createStore(u, {
       orgId: b.orgId,
       name: String(b.name ?? ""),
       kind: String(b.kind ?? ""),

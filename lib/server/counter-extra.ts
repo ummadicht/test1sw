@@ -13,6 +13,6 @@ import { getCase, forViewer, type CaseView } from "./cases";
  * market listing, the store's margin (it used to reach the partner: spec §9). The
  * grade the partner sees is the report frozen at lock, never the live one.
  */
-export function getCaseForViewer(u: SessionUser, id: string): CaseView {
-  return forViewer(u, getCase(u, id));
+export async function getCaseForViewer(u: SessionUser, id: string): Promise<CaseView> {
+  return forViewer(u, await getCase(u, id));
 }

@@ -28,7 +28,7 @@ export default async function PickupsPage({ searchParams }: { searchParams: SP }
   const u = await requirePage(["store_manager", "partner", "org_admin", "platform"], "/pickups");
   const sp = await searchParams;
   const f = FILTERS.find((x) => x.key === one(sp.show)) ?? FILTERS[0];
-  const pickups = listPickups(u, { status: f.statuses.length ? f.statuses : null });
+  const pickups = await listPickups(u, { status: f.statuses.length ? f.statuses : null });
   const multiClient = new Set(pickups.map((p) => p.orgId)).size > 1;
   const multiStore = new Set(pickups.map((p) => p.storeId)).size > 1 || u.role !== "store_manager";
   const cols: PickupCol[] = [

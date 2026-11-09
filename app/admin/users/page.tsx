@@ -16,7 +16,7 @@ const ADMIN_ROLES: Role[] = ["advisor", "store_manager", "org_admin"];
 export default async function AdminUsersPage({ searchParams }: { searchParams: Promise<{ orgId?: string }> }) {
   const u = await requirePage(["org_admin", "platform"], "/admin/users");
   const sp = await searchParams;
-  const ctx = adminContext(u, sp.orgId);
+  const ctx = await adminContext(u, sp.orgId);
   const intro = "Who can sign in to this programme.";
   if (!ctx.orgId) {
     return (
@@ -28,8 +28,8 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
     );
   }
   const orgId = ctx.orgId;
-  const users = listUsers(u).filter((x) => x.orgId === orgId);
-  const stores = listStores(u)
+  const users = (await listUsers(u)).filter((x) => x.orgId === orgId);
+  const stores = (await listStores(u))
     .filter((s) => s.org_id === orgId)
     .map((s) => ({ id: s.id, name: s.name, orgId: s.org_id }));
   const storesHref = ctx.isPlatform ? `/admin/stores?orgId=${encodeURIComponent(orgId)}` : "/admin/stores";

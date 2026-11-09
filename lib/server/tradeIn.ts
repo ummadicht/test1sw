@@ -100,7 +100,7 @@ export async function priceiqQuote(input: Ask, partnerName: string): Promise<{ q
 
 /** The case's trade-in quote, in the order above. */
 export async function tradeInQuote(input: Ask): Promise<PartnerQuote> {
-  const mode = partnerMode(input.partnerId);
+  const mode = await partnerMode(input.partnerId);
   const p = await priceiqQuote(input, mode.partnerName);
   if (p.quote) return p.quote;
   const q = await partnerQuote(input);
@@ -130,8 +130,8 @@ export async function tradeInQuote(input: Ask): Promise<PartnerQuote> {
  * a repair for stays deducted). Reads the answer the trade-in just refreshed — never asks again.
  * null = PriceIQ has none at that grade or below.
  */
-export function priceiqRepaired(input: Pick<Ask, "partnerId" | "modelId" | "variant" | "brand" | "model" | "answers"> & { faults: FaultId[] }, asIs: PartnerQuote): PartnerQuote | null {
-  const read = cachedMarket(askOf(input));
+export async function priceiqRepaired(input: Pick<Ask, "partnerId" | "modelId" | "variant" | "brand" | "model" | "answers"> & { faults: FaultId[] }, asIs: PartnerQuote): Promise<PartnerQuote | null> {
+  const read = await cachedMarket(askOf(input));
   const p = priceiqTradeIn({
     answer: read.answer,
     noAnswerWhy: read.why,

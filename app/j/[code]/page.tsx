@@ -28,7 +28,7 @@ export const viewport = { themeColor: "#f4f4f6" };
 export default async function JoinPage({ params }: { params: Promise<{ code: string }> }) {
   await ensureSeeded();
   const { code } = await params;
-  const s = openByCode(code);
+  const s = await openByCode(code);
   const h = await headers();
   const ua = h.get("user-agent") || "";
   const isIphone = /iPhone|iPad|iPod/i.test(ua);

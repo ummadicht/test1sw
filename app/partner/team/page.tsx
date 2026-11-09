@@ -10,12 +10,12 @@ export const metadata = { title: "Team" };
 /** The buyback partner's operations team (admin.ts mayCreate: partner only). */
 export default async function PartnerTeamPage() {
   const u = await requirePage(["partner"], "/partner/team");
-  const org = getOrg(u.orgId);
+  const org = await getOrg(u.orgId);
   return (
     <AppShell user={u}>
       <TeamManager
         title={org ? `${org.name} team` : "Team"}
-        users={listUsers(u)}
+        users={await listUsers(u)}
         canCreateRoles={["partner"]}
         stores={[]}
         meId={u.id}

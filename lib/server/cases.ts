@@ -1,4 +1,4 @@
-import { db, tx, nowIso, todayIso, newId, nextSeq, parseJson, audit } from "./db";
+import { query, queryOne, execute, tx, nowIso, todayIso, newId, nextSeq, parseJson, audit } from "./db";
 import { HttpError, orgSettings, type SessionUser } from "./auth";
 import { getOrg, getStore, ownStore, storeInScope, canSeeStore, orgPartnerId, type StoreRow } from "./scope";
 import { partnerQuote, partnerMode, rateCardById, type PartnerQuote, type PartnerMode } from "./buyback";
@@ -328,8 +328,11 @@ export function tapFloor(onCase: CaseCameraCheck | null, s: GiqRow | null): Came
  * test session) or one already certified — a case described only at the desk gets no
  * card. Its latest session is the one the taps go against.
  */
-function caseCertify(c: CaseRow): CertifyBlock | null {
-  const s = db().prepare(`SELECT * FROM test_sessions WHERE case_id = ? ORDER BY created_at DESC LIMIT 1`).get(c.id) as (GiqRow & { phone_phase_at?: string | null }) | undefined;
+async function caseCertify(c: CaseRow): Promise<CertifyBlock | null> {
+  const s = await queryOne<GiqRow & { phone_phase_at?: string | null }>(
+    `SELECT * FROM test_sessions WHERE case_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    [c.id]
+  );
   if (!s && !Object.keys(certificationView(c.certification)).length) return null;
   return certifyBlock(c, s ?? null).block;
 }
@@ -460,22 +463,22 @@ export type CaseView = {
 
 /* ─────────────────────────── reads ─────────────────────────── */
 
-function row(id: string): CaseRow | null {
-  return (db().prepare(`SELECT * FROM cases WHERE id = ?`).get(id) as CaseRow | undefined) ?? null;
+async function row(id: string): Promise<CaseRow | null> {
+  return await queryOne<CaseRow>(`SELECT * FROM cases WHERE id = $1`, [id]);
 }
 
-export function getTradeModel(id: string | null): TradeModel | null {
+export async function getTradeModel(id: string | null): Promise<TradeModel | null> {
   if (!id) return null;
-  return (db().prepare(`SELECT * FROM trade_models WHERE id = ?`).get(id) as TradeModel | undefined) ?? null;
+  return await queryOne<TradeModel>(`SELECT * FROM trade_models WHERE id = $1`, [id]);
 }
 
 /** The buyback partner sees a case only once it became a trade-in it will collect. */
 export const PARTNER_HIDDEN_STATUSES: CaseStatus[] = ["draft", "quoted", "repair_chosen", "walked_away", "cancelled"];
 
-function caseInScope(u: SessionUser, id: string): { c: CaseRow; store: StoreRow } {
-  const c = row(id);
+async function caseInScope(u: SessionUser, id: string): Promise<{ c: CaseRow; store: StoreRow }> {
+  const c = await row(id);
   if (!c) throw new HttpError(404, "Case not found.");
-  const store = getStore(c.store_id);
+  const store = await getStore(c.store_id);
   if (!store || !canSeeStore(u, store)) throw new HttpError(404, "Case not found.");
   // A customer still at the counter (or one who never traded in) is not the
   // partner's business — same rule as listCases, enforced on every read path.
@@ -507,7 +510,7 @@ function quoteLapsed(c: CaseRow, quote: PartnerQuote | null): boolean {
   );
 }
 
-function repairNotServicedFor(tm: TradeModel | null, org: ReturnType<typeof getOrg>): string | null {
+function repairNotServicedFor(tm: TradeModel | null, org: Awaited<ReturnType<typeof getOrg>>): string | null {
   return tm && org?.target_brand && tm.brand !== org.target_brand ? `This centre repairs ${org.target_brand} only — enter the customer's outside quote.` : null;
 }
 
@@ -522,9 +525,9 @@ function storedQuote(raw: string | null): PartnerQuote | null {
  * PriceIQ or GradeIQ call, no grading report, no write: a few indexed SELECTs, so the customer's
  * phone can read it every few seconds (deviceAnswer). toView puts the same Offer on the CaseView.
  */
-function offerFor(c: CaseRow, store: StoreRow): Offer {
-  const tm = getTradeModel(c.model_id);
-  const org = getOrg(c.org_id);
+async function offerFor(c: CaseRow, store: StoreRow): Promise<Offer> {
+  const tm = await getTradeModel(c.model_id);
+  const org = await getOrg(c.org_id);
   const faults = parseJson<FaultId[]>(c.faults, []);
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
   const quote = storedQuote(c.quote);
@@ -535,7 +538,7 @@ function offerFor(c: CaseRow, store: StoreRow): Offer {
   // so the ask never says "nothing matches" after staff cleared it or on a desk-only case.
   const newPhoneMatch =
     tm && !upgrade && EDITABLE.includes(c.status)
-      ? suggestUpgrade({ brand: tm.brand, model: tm.model, series: tm.series, variant: c.variant }, newDevices(store.org_id)) !== null
+      ? suggestUpgrade({ brand: tm.brand, model: tm.model, series: tm.series, variant: c.variant }, await newDevices(store.org_id)) !== null
       : false;
   return buildOffer({
     status: c.status,
@@ -562,7 +565,7 @@ function offerFor(c: CaseRow, store: StoreRow): Offer {
     // Past the counter, the figures frozen at lock win over the quote and bonus JSON.
     locked: EDITABLE.includes(c.status) ? null : { trade: c.trade_value, premium: c.premium_value, premiumBp: c.premium_bp, bonus: c.bonus_value, payable: c.payable },
     testProgramme: !!org?.demo,
-    imeiUnlisted: imeiUnlistedOn(c, tm),
+    imeiUnlisted: await imeiUnlistedOn(c, tm),
   });
 }
 
@@ -571,22 +574,23 @@ function offerFor(c: CaseRow, store: StoreRow): Offer {
  * staff read in place of a price ("The IMEI says Apple iPhone 17 Pro Max — not on SwapUp's list, so
  * it can't be priced here yet."), and the customer's CANT_PRICE — never another phone's price. null otherwise.
  */
-function imeiUnlistedOn(c: CaseRow, tm: TradeModel | null): string | null {
+async function imeiUnlistedOn(c: CaseRow, tm: TradeModel | null): Promise<string | null> {
   if (tm || !c.imei || !EDITABLE.includes(c.status)) return null;
-  const said = caseImeiModel(c);
+  const refs = await tradeModelRefs();
+  const said = caseImeiModel(c, refs);
   return said.kind === "unlisted" ? imeiUnlistedSentence(said.label) : null;
 }
 
-function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {}): CaseView {
-  const tm = getTradeModel(c.model_id);
-  const advisor = db().prepare(`SELECT name FROM users WHERE id = ?`).get(c.advisor_id) as { name: string } | undefined;
+async function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {}): Promise<CaseView> {
+  const tm = await getTradeModel(c.model_id);
+  const advisor = await queryOne<{ name: string }>(`SELECT name FROM users WHERE id = $1`, [c.advisor_id]);
   const faults = parseJson<FaultId[]>(c.faults, []);
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
   const quote = storedQuote(c.quote);
   const quoteExpired = quoteLapsed(c, quote);
   const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
-  const org = getOrg(c.org_id);
-  const mode = org?.partner_id ? partnerMode(org.partner_id) : null;
+  const org = await getOrg(c.org_id);
+  const mode = org?.partner_id ? await partnerMode(org.partner_id) : null;
   // A price typed in by an older build (partner_manual, history only) came from no rate card: its
   // line says what it is, never the card's (SUP-9).
   const partner = mode && quote?.source.kind === "partner_manual" ? { ...mode, why: TYPED_PRICE_NOTE } : mode;
@@ -620,7 +624,7 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     modelSource: tm ? readModelSource(c.model_source) : null,
     // "blacklisted" when GSMA said so for ANY IMEI ever saved on the case (lib/server/imeiResolve.ts).
     imeiLookup: caseLookupView(c),
-    imeiWarnings: imeiWarnings(c, tm),
+    imeiWarnings: await imeiWarnings(c, tm),
     kymEarly: kymEarlyView(c.kym_early),
     closedReason: c.closed_reason,
     faults,
@@ -630,11 +634,11 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     conditionProblems: condition ? conditionFloor(condition, faults) : [],
     camera: camera ? withoutGradeiqId(camera) : null,
     certification: certificationView(c.certification),
-    certify: viewer.partner ? null : caseCertify(c),
+    certify: viewer.partner ? null : await caseCertify(c),
     quoteBlocked: identityBlock(camera),
     manualRepair: parseJson<ManualQuote | null>(c.manual_repair, null),
     refurbCost: parseJson<RefurbCost | null>(c.refurb_cost, null),
-    marketSell: caseMarketSell({ modelId: tm?.id ?? null, variant: c.variant, brand: tm?.brand ?? null, model: tm?.model ?? null, condition }),
+    marketSell: await caseMarketSell({ modelId: tm?.id ?? null, variant: c.variant, brand: tm?.brand ?? null, model: tm?.model ?? null, condition }),
     repairNotServiced: repairNotServicedFor(tm, org),
     repair: parseJson<RepairEstimate | null>(c.repair, null),
     quote,
@@ -666,7 +670,7 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     measuredStorage: c.measured_storage ?? null,
     offer: null,
     refurbEconomics: null,
-    grading: caseGrading(c.id, viewer.partner ? "partner" : "staff"),
+    grading: await caseGrading(c.id, viewer.partner ? "partner" : "staff"),
   };
   const legacyChecks = parseJson<Checks | null>(c.checks, null);
   view.dataClearState = dataClearState(c.status, view.dataClear, legacyChecks?.factoryReset === true);
@@ -678,12 +682,12 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
       view.lockBlockers.unshift(`Waiting for approval from ${org?.name ?? "the programme"} — trade-ins start then.`);
     if (store.status === "rejected") view.lockBlockers.unshift("This store is closed — no trade-ins.");
     if (quote?.status === "priced" && quote.amount) {
-      view.creditCheck = canHold(storePolicy(store), storeEvents(store.id), quote.amount);
+      view.creditCheck = canHold(await storePolicy(store), await storeEvents(store.id), quote.amount);
       if (!view.creditCheck.ok) view.lockBlockers.push(view.creditCheck.reason);
     }
   }
   // The answer is worked out for every status; `open` says whether it can still be acted on.
-  view.offer = offerFor(c, store);
+  view.offer = await offerFor(c, store);
   // The staff refurb decision, from the answer's own figures and the card the trade-in was read off —
   // only while there is a priced trade-in to decide on (at the counter, or traded in until pickup).
   if (!viewer.partner && refurbDecisionShown(c.status, view.offer.swap)) {
@@ -691,7 +695,7 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
     view.refurbEconomics = refurbEconomics({
       swap: view.offer.swap,
       quote,
-      card: cardId ? rateCardById(cardId) : null,
+      card: cardId ? await rateCardById(cardId) : null,
       device: tm ? { modelId: tm.id, variant: c.variant } : null,
       condition,
       faults,
@@ -706,40 +710,39 @@ function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean } = {})
  * One phone, one trade-in — the open trade-in (locked, collected…) that already has either of
  * these IMEIs. The lock refuses on it; the case view warns as soon as the IMEI is saved.
  */
-function imeiOnOpenTradeIn(caseId: string, imeis: (string | null)[]): { ref: string; name: string } | undefined {
+async function imeiOnOpenTradeIn(caseId: string, imeis: (string | null)[]): Promise<{ ref: string; name: string } | undefined> {
   const mine = imeis.filter((x): x is string => !!x);
   if (!mine.length) return undefined;
-  const ph = mine.map(() => "?").join(",");
-  return db()
-    .prepare(
-      `SELECT c.ref, s.name FROM cases c JOIN stores s ON s.id = c.store_id
-       WHERE c.id != ? AND c.status IN (${OPEN_TRADE_STATUSES.map(() => "?").join(",")})
-         AND (c.imei IN (${ph}) OR c.imei2 IN (${ph})) LIMIT 1`
-    )
-    .get(caseId, ...OPEN_TRADE_STATUSES, ...mine, ...mine) as { ref: string; name: string } | undefined;
+  const res = await queryOne<{ ref: string; name: string }>(
+    `SELECT c.ref, s.name FROM cases c JOIN stores s ON s.id = c.store_id
+     WHERE c.id != $1 AND c.status = ANY($2::text[])
+       AND (c.imei = ANY($3::text[]) OR c.imei2 = ANY($3::text[])) LIMIT 1`,
+    [caseId, OPEN_TRADE_STATUSES, mine]
+  );
+  return res ?? undefined;
 }
 
 /** What the advisor is told the moment the IMEI is on a case at the counter (the lock still decides). */
-function imeiWarnings(c: CaseRow, tm: TradeModel | null): string[] {
+async function imeiWarnings(c: CaseRow, tm: TradeModel | null): Promise<string[]> {
   if (!EDITABLE.includes(c.status)) return [];
   // A blacklisted number that isn't in the IMEI 1 slot (moved to IMEI 2, or replaced): named, so the
   // stop on a clean-looking IMEI 1 is explained. Said with or without an IMEI on the case now.
   const bad = blacklistWarning(c);
   if (!c.imei) return bad ? [bad] : [];
   const out: string[] = bad ? [bad] : [];
-  const dup = imeiOnOpenTradeIn(c.id, [c.imei, c.imei2]);
+  const dup = await imeiOnOpenTradeIn(c.id, [c.imei, c.imei2]);
   if (dup) out.push(`This IMEI is already on trade-in ${dup.ref}.`);
   // What the IMEI names, read against today's list (a model added since is named now). Another model
   // than the one on the case (staff's, or the phone's code) is said, not changed; a phone SwapUp doesn't
   // list is said as such — it can't be priced here, and never as another phone (SUP-258).
   const kept = withTacName(lookupFor(c.imei_lookup, c.imei));
-  const refs = tradeModelRefs();
+  const refs = await tradeModelRefs();
   const said = caseImeiModel(c, refs);
   // GSMA's own name and the type code name different phones: both are said (GSMA's decided, or neither).
   const split = imeiSourcesDisagree(kept, refs);
   if (split) out.push(`The IMEI's type code says ${split.tac}; GSMA says ${split.gsma} — check Settings › About phone.`);
   if (said.kind === "listed" && tm && said.modelId !== tm.id) {
-    const other = getTradeModel(said.modelId);
+    const other = await getTradeModel(said.modelId);
     if (other) out.push(`The IMEI says ${other.brand} ${other.model}; the case has ${tm.brand} ${tm.model} — check Settings › About phone.`);
   } else if (said.kind === "unlisted") {
     // With a model on the case it IS priced: said once, without "can't be priced here".
@@ -791,16 +794,17 @@ function lockBlockers(v: CaseView): string[] {
  * GradeIQ, and never writes, so a phone polling every 5 s can never loop a partner with the IMEI.
  * null when the case is gone.
  */
-export function deviceAnswer(caseId: string): CustomerAnswer | null {
-  const c = row(caseId);
-  const store = c ? getStore(c.store_id) : null;
+export async function deviceAnswer(caseId: string): Promise<CustomerAnswer | null> {
+  const c = await row(caseId);
+  const store = c ? await getStore(c.store_id) : null;
   if (!c || !store) return null;
-  return customerAnswer(offerFor(c, store).answer);
+  const offer = await offerFor(c, store);
+  return customerAnswer(offer.answer);
 }
 
-export function getCase(u: SessionUser, id: string): CaseView {
-  const { c, store } = caseInScope(u, id);
-  return forViewer(u, toView(c, store, { partner: u.role === "partner" }));
+export async function getCase(u: SessionUser, id: string): Promise<CaseView> {
+  const { c, store } = await caseInScope(u, id);
+  return forViewer(u, await toView(c, store, { partner: u.role === "partner" }));
 }
 
 /**
@@ -876,50 +880,51 @@ export type CaseListItem = {
   dataClear: DataClearState;
 };
 
-export function listCases(
+export async function listCases(
   u: SessionUser,
   opts: { storeId?: string | null; status?: CaseStatus[] | null; q?: string | null; limit?: number; pickupId?: string | null } = {}
-): CaseListItem[] {
+): Promise<CaseListItem[]> {
   const where: string[] = [];
   const args: unknown[] = [];
+  let pIdx = 1;
   if (u.role === "advisor" || u.role === "store_manager") {
-    where.push("c.store_id = ?");
+    where.push(`c.store_id = ${pIdx++}`);
     args.push(u.storeId);
   } else if (u.role === "org_admin") {
-    where.push("c.org_id = ?");
+    where.push(`c.org_id = ${pIdx++}`);
     args.push(u.orgId);
   } else if (u.role === "partner") {
-    where.push("c.org_id IN (SELECT id FROM orgs WHERE kind = 'client' AND partner_id = ?)");
+    where.push(`c.org_id IN (SELECT id FROM orgs WHERE kind = 'client' AND partner_id = ${pIdx++})`);
     args.push(u.orgId);
     where.push(`c.status NOT IN (${PARTNER_HIDDEN_STATUSES.map((x) => `'${x}'`).join(",")})`);
   }
   if (opts.storeId) {
-    storeInScope(u, opts.storeId);
-    where.push("c.store_id = ?");
+    await storeInScope(u, opts.storeId);
+    where.push(`c.store_id = ${pIdx++}`);
     args.push(opts.storeId);
   }
   if (opts.pickupId) {
-    where.push("c.pickup_id = ?");
+    where.push(`c.pickup_id = ${pIdx++}`);
     args.push(opts.pickupId);
   }
   if (opts.status?.length) {
-    where.push(`c.status IN (${opts.status.map(() => "?").join(",")})`);
-    args.push(...opts.status);
+    where.push(`c.status = ANY(${pIdx++}::text[])`);
+    args.push(opts.status);
   }
   if (opts.q) {
-    where.push("(c.ref LIKE ? OR c.imei LIKE ? OR c.customer LIKE ? OR t.model LIKE ?)");
+    where.push(`(c.ref ILIKE ${pIdx} OR c.imei ILIKE ${pIdx} OR c.customer ILIKE ${pIdx} OR t.model ILIKE ${pIdx})`);
     const like = `%${opts.q.trim()}%`;
-    args.push(like, like, like, like);
+    args.push(like);
+    pIdx++;
   }
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
-  const rows = db()
-    .prepare(
-      `SELECT c.*, s.name AS store_name, t.brand, t.model AS model_name
-       FROM cases c JOIN stores s ON s.id = c.store_id LEFT JOIN trade_models t ON t.id = c.model_id
-       ${where.length ? "WHERE " + where.join(" AND ") : ""}
-       ORDER BY c.updated_at DESC LIMIT ${limit}`
-    )
-    .all(...args) as (CaseRow & { store_name: string; brand: string | null; model_name: string | null })[];
+  const rows = await query<CaseRow & { store_name: string; brand: string | null; model_name: string | null }>(
+    `SELECT c.*, s.name AS store_name, t.brand, t.model AS model_name
+     FROM cases c JOIN stores s ON s.id = c.store_id LEFT JOIN trade_models t ON t.id = c.model_id
+     ${where.length ? "WHERE " + where.join(" AND ") : ""}
+     ORDER BY c.updated_at DESC LIMIT ${limit}`,
+    args
+  );
   return rows.map((r) => {
     const cust = parseJson<Customer | null>(r.customer, null);
     const up = parseJson<UpgradeChoice | null>(r.upgrade, null);
@@ -952,13 +957,12 @@ export function listCases(
 }
 
 /** Accepted phones still at this store whose data clearing is not recorded. */
-export function dataClearDueIds(storeId: string): Set<string> {
-  const rows = db()
-    .prepare(
-      `SELECT id FROM cases WHERE store_id = ? AND status IN (${DATA_CLEAR_STATUSES.map(() => "?").join(",")})
-         AND data_clear IS NULL AND COALESCE(json_extract(checks, '$.factoryReset'), 0) != 1`
-    )
-    .all(storeId, ...DATA_CLEAR_STATUSES) as { id: string }[];
+export async function dataClearDueIds(storeId: string): Promise<Set<string>> {
+  const rows = await query<{ id: string }>(
+    `SELECT id FROM cases WHERE store_id = $1 AND status = ANY($2::text[])
+       AND data_clear IS NULL AND COALESCE((checks::jsonb #>> '{factoryReset}'), '0') NOT IN ('1', 'true')`,
+    [storeId, DATA_CLEAR_STATUSES]
+  );
   return new Set(rows.map((r) => r.id));
 }
 
@@ -975,25 +979,25 @@ function requireCounter(u: SessionUser): void {
   if (!(COUNTER_ROLES as readonly string[]).includes(u.role)) throw new HttpError(403, "Only store staff work cases at the counter.");
 }
 
-export function createCase(u: SessionUser, input: { customerName?: string; customerPhone?: string; via?: "demo" | "counter" } = {}): CaseView {
+export async function createCase(u: SessionUser, input: { customerName?: string; customerPhone?: string; via?: "demo" | "counter" } = {}): Promise<CaseView> {
   requireCounter(u);
-  const store = ownStore(u);
+  const store = await ownStore(u);
   const id = newId("case");
-  const ref = `SU-${store.code}-${String(nextSeq(`case:${store.id}`)).padStart(5, "0")}`;
+  const seq = await nextSeq(`case:${store.id}`);
+  const ref = `SU-${store.code}-${String(seq).padStart(5, "0")}`;
   const now = nowIso();
   const customer =
     input.customerName || input.customerPhone
       ? JSON.stringify({ name: (input.customerName || "").trim().slice(0, 80), phone: storedMobile(input.customerPhone), idType: null, idLast4: null })
       : null;
-  db()
-    .prepare(
-      `INSERT INTO cases (id, ref, org_id, store_id, advisor_id, status, customer, faults, coverage, demo, created_at, updated_at)
-       VALUES (?,?,?,?,?,'draft',?,'[]','none',?,?,?)`
-    )
-    .run(id, ref, store.org_id, store.id, u.id, customer, 0, now, now);
+  await execute(
+    `INSERT INTO cases (id, ref, org_id, store_id, advisor_id, status, customer, faults, coverage, demo, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,'draft',$6,'[]','none',$7,$8,$9)`,
+    [id, ref, store.org_id, store.id, u.id, customer, 0, now, now]
+  );
   // A counter-QR case is opened by the customer, under a staff member's name: say so.
-  audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "case.create", entity: "case", entityId: id, ...(input.via ? { detail: { via: input.via === "counter" ? "counter code (customer-started)" : "standing demo code" } } : {}) });
-  return getCase(u, id);
+  await audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "case.create", entity: "case", entityId: id, ...(input.via ? { detail: { via: input.via === "counter" ? "counter code (customer-started)" : "standing demo code" } } : {}) });
+  return await getCase(u, id);
 }
 
 const digitsOnly = (s?: string | null) => (s || "").replace(/\D/g, "");
@@ -1003,10 +1007,11 @@ const digitsOnly = (s?: string | null) => (s || "").replace(/\D/g, "");
  * by Apply on a SwapUp Check session, just before the case is updated and
  * re-priced (so an identity mismatch already blocks that re-price).
  */
-export function recordCameraCheck(caseId: string, check: CaseCameraCheck, sources: FaultSources): void {
-  db()
-    .prepare(`UPDATE cases SET camera_check = ?, fault_sources = ?, updated_at = ? WHERE id = ? AND status IN ('draft','quoted')`)
-    .run(JSON.stringify(check), JSON.stringify(sources), nowIso(), caseId);
+export async function recordCameraCheck(caseId: string, check: CaseCameraCheck, sources: FaultSources): Promise<void> {
+  await execute(
+    `UPDATE cases SET camera_check = $1, fault_sources = $2, updated_at = $3 WHERE id = $4 AND status IN ('draft','quoted')`,
+    [JSON.stringify(check), JSON.stringify(sources), nowIso(), caseId]
+  );
 }
 
 /**
@@ -1014,8 +1019,11 @@ export function recordCameraCheck(caseId: string, check: CaseCameraCheck, source
  * BEFORE its updateCase (which reconciles from what is stored), the same way
  * Apply writes it with recordCameraCheck. Only while the case is at the counter.
  */
-export function recordFaultSources(caseId: string, sources: FaultSources): void {
-  db().prepare(`UPDATE cases SET fault_sources = ?, updated_at = ? WHERE id = ? AND status IN ('draft','quoted')`).run(JSON.stringify(sources), nowIso(), caseId);
+export async function recordFaultSources(caseId: string, sources: FaultSources): Promise<void> {
+  await execute(
+    `UPDATE cases SET fault_sources = $1, updated_at = $2 WHERE id = $3 AND status IN ('draft','quoted')`,
+    [JSON.stringify(sources), nowIso(), caseId]
+  );
 }
 
 /**
@@ -1024,13 +1032,19 @@ export function recordFaultSources(caseId: string, sources: FaultSources): void 
  * the LCD "not camera-checked" here — Apply decides, from what the sweep actually
  * did (a complete sweep proves the loop by its frames; lib/domain/gradeiqMap.ts).
  */
-export function markLcdOverride(caseId: string, info: { by: string; userId: string; reason: string; at: string; testSessionId: string }): void {
+export async function markLcdOverride(caseId: string, info: { by: string; userId: string; reason: string; at: string; testSessionId: string }): Promise<void> {
   // Only while the case is at the counter — a locked trade-in's record is not rewritten.
-  const row0 = db().prepare(`SELECT camera_check FROM cases WHERE id = ? AND status IN ('draft','quoted')`).get(caseId) as { camera_check: string | null } | undefined;
+  const row0 = await queryOne<{ camera_check: string | null }>(
+    `SELECT camera_check FROM cases WHERE id = $1 AND status IN ('draft','quoted')`,
+    [caseId]
+  );
   if (!row0) return;
   const prev = parseJson<CaseCameraCheck | null>(row0.camera_check, null) ?? { ...blankCameraCheck(info.at), testSessionId: info.testSessionId };
   const next: CaseCameraCheck = { ...prev, lcdOverride: { by: info.by, reason: info.reason, at: info.at } };
-  db().prepare(`UPDATE cases SET camera_check = ?, updated_at = ? WHERE id = ? AND status IN ('draft','quoted')`).run(JSON.stringify(next), nowIso(), caseId);
+  await execute(
+    `UPDATE cases SET camera_check = $1, updated_at = $2 WHERE id = $3 AND status IN ('draft','quoted')`,
+    [JSON.stringify(next), nowIso(), caseId]
+  );
 }
 
 /** The phone's test colours count for a certification while its last word was "colours", this recently. */
@@ -1087,27 +1101,34 @@ export async function certifyCase(
   input: { row?: unknown; value?: unknown; testSessionId?: unknown; allFine?: unknown; legacyStore?: boolean },
 ): Promise<CaseView> {
   if (u.role !== "advisor" && u.role !== "store_manager") throw new HttpError(403, "Only store staff certify a phone.");
-  const { c, store } = caseInScope(u, id);
+  const { c, store } = await caseInScope(u, id);
   if (!EDITABLE.includes(c.status)) throw new HttpError(409, "The case is past the counter.");
   const allFine = input?.allFine === true;
   if (!allFine && !isCertRow(input?.row)) throw new HttpError(400, "Say which row: screen, body or liquid.");
   let session: { id: string; phone_phase: string | null; phone_phase_at: string | null } | undefined;
   if (input.testSessionId !== undefined && input.testSessionId !== null) {
     if (typeof input.testSessionId !== "string") throw new HttpError(400, "Send the test session's id.");
-    session = db().prepare(`SELECT id, phone_phase, phone_phase_at FROM test_sessions WHERE id = ? AND case_id = ?`).get(input.testSessionId, c.id) as typeof session;
+    session = (await queryOne<{ id: string; phone_phase: string | null; phone_phase_at: string | null }>(
+      `SELECT id, phone_phase, phone_phase_at FROM test_sessions WHERE id = $1 AND case_id = $2`,
+      [input.testSessionId, c.id]
+    )) ?? undefined;
     if (!session) throw new HttpError(404, "Test session not found.");
   } else {
-    session = db().prepare(`SELECT id, phone_phase, phone_phase_at FROM test_sessions WHERE case_id = ? ORDER BY created_at DESC LIMIT 1`).get(c.id) as typeof session;
+    session = (await queryOne<{ id: string; phone_phase: string | null; phone_phase_at: string | null }>(
+      `SELECT id, phone_phase, phone_phase_at FROM test_sessions WHERE case_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [c.id]
+    )) ?? undefined;
   }
   const withColours = session?.phone_phase === "colours" && !!session.phone_phase_at && Date.now() - Date.parse(session.phone_phase_at) < COLOURS_FRESH_MS;
   // The session in full: "All fine" reads its card from it (allFineTaps), and the Screen's wait below.
-  const full = session ? ((db().prepare(`SELECT * FROM test_sessions WHERE id = ?`).get(session.id) as (GiqRow & { phone_phase_at?: string | null }) | undefined) ?? null) : null;
+  const full = session ? (await queryOne<GiqRow & { phone_phase_at?: string | null }>(`SELECT * FROM test_sessions WHERE id = $1`, [session.id])) : null;
   const taps: readonly { row: CertRow; value: string }[] = allFine
     ? allFineTaps(c, full)
     : [{ row: input.row as CertRow, value: typeof input.value === "string" ? input.value.trim().toLowerCase() : "" }];
 
-  const out = tx(() => {
-    const fresh = row(id);
+  const out = await tx(async (client) => {
+    const freshRes = await client.query(`SELECT * FROM cases WHERE id = $1`, [id]);
+    const fresh = freshRes.rows[0] as CaseRow | undefined;
     if (!fresh || !EDITABLE.includes(fresh.status)) throw new HttpError(409, "The case is past the counter.");
     const prevFaults = parseJson<FaultId[]>(fresh.faults, []);
     const prevCondition = parseJson<ConditionAnswers | null>(fresh.condition, null);
@@ -1140,14 +1161,13 @@ export async function certifyCase(
     const describes = JSON.stringify(r.faults) !== JSON.stringify(prevFaults) || JSON.stringify(r.condition) !== JSON.stringify(prevCondition);
     const now = nowIso();
     // Before Apply the case has no condition, and a tap doesn't invent one (Apply folds it in).
-    db()
-      .prepare(
-        `UPDATE cases SET faults = ?, fault_sources = ?, condition = ?, certification = ?, partner_manual = CASE WHEN ? THEN NULL ELSE partner_manual END, updated_at = ?
-         WHERE id = ? AND status IN ('draft','quoted')`
-      )
-      .run(JSON.stringify(r.faults), JSON.stringify(r.sources), r.condition ? JSON.stringify(r.condition) : null, JSON.stringify(r.certification), describes ? 1 : 0, now, id);
+    await client.query(
+      `UPDATE cases SET faults = $1, fault_sources = $2, condition = $3, certification = $4, partner_manual = CASE WHEN $5 THEN NULL ELSE partner_manual END, updated_at = $6
+       WHERE id = $7 AND status IN ('draft','quoted')`,
+      [JSON.stringify(r.faults), JSON.stringify(r.sources), r.condition ? JSON.stringify(r.condition) : null, JSON.stringify(r.certification), describes, now, id]
+    );
     for (const d of done)
-      audit({
+      await audit({
         userId: u.id,
         orgId: c.org_id,
         storeId: store.id,
@@ -1158,10 +1178,10 @@ export async function certifyCase(
       });
     return { changed: true, describes };
   });
-  if (!out.changed) return getCase(u, id);
+  if (!out.changed) return await getCase(u, id);
   // The report follows (a new version when its body moved), then the re-price — as updateCase does.
-  issueQuietly(id, "certified", u.id);
-  return reprice(u, id, { requote: out.describes });
+  await issueQuietly(id, "certified", u.id);
+  return await reprice(u, id, { requote: out.describes });
 }
 
 const SCREENS = new Set<string>(SCREEN_ORDER);
@@ -1252,13 +1272,13 @@ async function resolveNewImei(u: SessionUser, id: string, raw: unknown, withImei
   if (typeof raw !== "string" || !raw) return null;
   const r = readImei(raw);
   if (!r.ok || r.checkDigit !== "valid") return null;
-  const { c } = caseInScope(u, id);
+  const { c } = await caseInScope(u, id);
   if (!EDITABLE.includes(c.status) || r.imei === c.imei) return null;
   // The case's IMEI 2 as IMEI 1 with no IMEI 2 sent: updateCase refuses it — never paid for.
   if (!withImei2 && r.imei === c.imei2) return null;
   const cached = lookupFor(c.imei_lookup, r.imei);
   if (cached) return { rec: cached, fresh: false };
-  return { rec: await resolveImei(r.imei, tradeModelRefs(), nowIso()), fresh: true };
+  return { rec: await resolveImei(r.imei, await tradeModelRefs(), nowIso()), fresh: true };
 }
 
 /**
@@ -1274,21 +1294,15 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   // GradeIQ's lookup (≤ 10 s) — BEFORE the case is read for the save, so no network call sits
   // between that read and the write.
   const resolved = await resolveNewImei(u, id, patch.imei, patch.imei2 !== undefined);
-  const { c, store } = caseInScope(u, id);
+  const { c, store } = await caseInScope(u, id);
   if (!EDITABLE.includes(c.status)) throw new HttpError(409, "The case is past the counter.");
 
   const sets: Record<string, unknown> = {};
   let pricingChanged = false;
 
-  // The model the new IMEI names (owner, 2026-10-25: the model is "derived from" the IMEI) — read
-  // against today's list, so an answer kept from before a model joined it names that model now. It is
-  // the case's model where the case has none, where an earlier IMEI named it (that IMEI is gone, so is
-  // its basis), or where the customer only picked one on their phone (a claim): a phone the IMEI names
-  // that SwapUp doesn't list then leaves NO model — never another phone to price (SUP-258). Staff's
-  // own model, the phone's code and a Phonecheck report stand (imeiWarnings says when they disagree).
   let imeiModel: string | null | undefined;
   if (patch.modelId === undefined && resolved) {
-    const said = imeiModelNow(withTacName(resolved.rec), tradeModelRefs());
+    const said = imeiModelNow(withTacName(resolved.rec), await tradeModelRefs());
     const claim = c.model_source === "customer";
     if (said.kind === "listed") {
       if (!c.model_id || claim || (c.model_source === "imei" && said.modelId !== c.model_id)) imeiModel = said.modelId;
@@ -1296,7 +1310,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   }
   const modelPatch = patch.modelId !== undefined ? patch.modelId : imeiModel;
   if (modelPatch !== undefined) {
-    const tm = modelPatch ? getTradeModel(modelPatch) : null;
+    const tm = modelPatch ? await getTradeModel(modelPatch) : null;
     if (modelPatch && !tm) throw new HttpError(400, "Unknown model.");
     sets.model_id = tm?.id ?? null;
     if (tm?.id !== c.model_id) {
@@ -1306,19 +1320,14 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     pricingChanged = true;
   }
   const modelChanged = "model_id" in sets && sets.model_id !== c.model_id;
-  // Where the model came from. The phone's own code confirming the model on the case makes it the phone's;
-  // the IMEI naming the model the customer picked makes it the IMEI's (no longer only a claim).
   if (modelChanged) sets.model_source = sets.model_id ? (patch.modelId !== undefined ? (internal.modelSource ?? "advisor") : "imei") : null;
   else if (patch.modelId && internal.modelSource === "phone" && c.model_source !== "phone") sets.model_source = "phone";
   else if (sets.model_id && c.model_source === "customer" && (imeiModel !== undefined || internal.modelSource === "imei")) sets.model_source = "imei";
   let variantChanged = false;
   if (patch.variant !== undefined) {
-    const tm = getTradeModel((sets.model_id as string | undefined) ?? c.model_id);
+    const tm = await getTradeModel((sets.model_id as string | undefined) ?? c.model_id);
     const variants = tm ? parseJson<string[]>(tm.variants, []) : [];
     if (patch.variant && !variants.includes(patch.variant)) throw new HttpError(400, "No such storage for this model.");
-    // Re-saving the size already there (the pressed chip tapped again) is no news: it keeps
-    // the size's source and its quote. Only Apply's word may change the source of the same
-    // size — a measurement upgrades the customer's claim (lib/domain/phoneLed.ts storageOnSave).
     const next = patch.variant || null;
     const s = storageOnSave({ next, prev: c.variant, prevSource: readVariantSource(c.variant_source), from: internal.variantSource, modelChanged });
     if (s.changed || internal.variantSource) {
@@ -1336,14 +1345,11 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     } else {
       const r = readImei(patch.imei);
       if (!r.ok) throw new HttpError(400, r.reason);
-      // The case's own IMEI 2 as IMEI 1, with no IMEI 2 sent, would be one number twice: send both to swap them.
       if (patch.imei2 === undefined && r.imei !== c.imei && r.imei === c.imei2)
         throw new HttpError(400, "IMEI 1 can't be the same as IMEI 2 — that number is this case's IMEI 2.");
       sets.imei = r.imei;
       sets.imei_check = r.checkDigit;
     }
-    // A new IMEI 1 is another phone (or a corrected read): the old IMEI 2 was that phone's, so it
-    // goes unless this patch says the IMEI 2 too. Saving the IMEI 1 the case has keeps it.
     if (patch.imei2 === undefined && sets.imei !== c.imei && (c.imei2 || c.imei2_check)) {
       sets.imei2 = null;
       sets.imei2_check = null;
@@ -1365,7 +1371,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   if (resolved && sets.imei === resolved.rec.imei) {
     sets.imei_lookup = withLookup(c.imei_lookup, resolved.rec);
     if (resolved.fresh)
-      audit({
+      await audit({
         userId: u.id,
         orgId: c.org_id,
         storeId: store.id,
@@ -1375,7 +1381,6 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
         detail: { source: resolved.rec.source, blacklist: resolved.rec.blacklist, modelId: resolved.rec.modelId, modelKind: resolved.rec.modelKind ?? null, modelNumber: resolved.rec.modelNumber, ...(imeiModel !== undefined ? { setModel: imeiModel } : {}) },
       });
   }
-  // The early KYM answer was for the numbers the case had: a new number needs its own check.
   const numbersChanged = ("imei" in sets && sets.imei !== c.imei) || ("imei2" in sets && sets.imei2 !== c.imei2);
   if (numbersChanged && patch.kymEarly === undefined && c.kym_early) sets.kym_early = null;
   if (patch.kymEarly !== undefined) {
@@ -1387,7 +1392,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
       if (!Object.hasOwn(KYM_LABEL, status)) throw new HttpError(400, "Record the KYM IMEI check result.");
       const reference = String(patch.kymEarly.reference ?? "").trim().slice(0, 80) || null;
       sets.kym_early = JSON.stringify({ status: status as KymStatus, reference, by: u.name, at: nowIso() } satisfies KymEarly);
-      audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.kym_early", entity: "case", entityId: id, detail: { status, reference } });
+      await audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.kym_early", entity: "case", entityId: id, detail: { status, reference } });
     }
   }
   let faults = parseJson<FaultId[]>(c.faults, []);
@@ -1401,20 +1406,12 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   }
   if (patch.coverage !== undefined) {
     if (!["none", "warranty", "care_plus"].includes(patch.coverage)) throw new HttpError(400, "Unknown cover.");
-    // Cover moves only the repair price. The partner's quote reads model, storage,
-    // condition and IMEI — re-asking would silently extend (or re-call) the trade-in.
     sets.coverage = patch.coverage;
   }
   if (patch.condition !== undefined) {
     const next = patch.condition === null ? null : cleanCondition(patch.condition);
     sets.condition = next === null ? null : JSON.stringify(next);
     pricingChanged = true;
-    // The condition edited by itself (staff "edit only conditions"): a defect it records that no fault
-    // explains — a cracked screen, lines, a cracked back, a faulty part — brings its fault (source
-    // "condition"), so the repair side prices it instead of saying "Nothing to repair"; a fault only
-    // the condition brought goes when the condition stops naming it (a mis-tap undone in the editor).
-    // The trade-in reads the condition only, so its price doesn't move. A patch that says the faults
-    // (the fault list, Apply, Phonecheck) is taken as sent.
     if (next && patch.faults === undefined) {
       const r = faultsAfterConditionEdit(faults, reconcileFaultSources(parseJson<FaultSources>(c.fault_sources, {}), faults), next);
       if (r.faults !== faults) {
@@ -1428,15 +1425,11 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   if (patch.conditionFromFaults) {
     const prev = parseJson<ConditionAnswers | null>((sets.condition as string | undefined) ?? c.condition, null);
     const base = prev ? { accessories: prev.accessories, age: prev.age } : { accessories: { charger: true, box: false, bill: false }, age: "gt11m" as const };
-    // What the camera confirmed is part of what is known about the phone.
     const filled = conditionFromFaults(faults, base);
     sets.condition = JSON.stringify(camera ? applyCameraFloor(filled, camera.floor) : filled);
     pricingChanged = true;
   }
-  // A condition edit wrote its own sources (faultsAfterConditionEdit); a fault ticked with none is the advisor's.
   if ("faults" in sets && !("fault_sources" in sets)) sets.fault_sources = JSON.stringify(reconcileFaultSources(parseJson<FaultSources>(c.fault_sources, {}), faults));
-  // The camera only ever makes the phone worse. Recording it better than the
-  // camera confirmed needs a reason, kept with the advisor's name.
   if (camera && (patch.faults !== undefined || patch.condition !== undefined || patch.conditionFromFaults || patch.cameraOverride)) {
     const answers = parseJson<ConditionAnswers | null>((sets.condition as string | undefined) ?? c.condition, null);
     const covered = new Set(camera.overrides.flatMap((o) => o.items));
@@ -1458,7 +1451,7 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     }
     if (changed) {
       sets.camera_check = JSON.stringify(next);
-      audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.camera_override", entity: "case", entityId: id, detail: { reason, items: problems.map((p) => p.key), identity: !!next.identityOverride && !camera.identityOverride } });
+      await audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.camera_override", entity: "case", entityId: id, detail: { reason, items: problems.map((p) => p.key), identity: !!next.identityOverride && !camera.identityOverride } });
     }
   }
   if (patch.customer !== undefined) {
@@ -1481,7 +1474,6 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
       if (reason.length < 8) throw new HttpError(400, "Say where the quote comes from.");
       sets.manual_repair = JSON.stringify({ amount, reason, by: u.name } satisfies ManualQuote);
     }
-    // The repair quote is the customer's, not the partner's: no re-quote (see cover above).
   }
   if (patch.refurbCost !== undefined) {
     if (patch.refurbCost === null) sets.refurb_cost = null;
@@ -1490,20 +1482,17 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
       if (!Number.isInteger(amount) || amount < 0 || amount > 500_000) throw new HttpError(400, "Refurb cost must be a whole rupee amount up to ₹5,00,000.");
       sets.refurb_cost = JSON.stringify({ amount, by: u.name, at: nowIso() } satisfies RefurbCost);
     }
-    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.refurb_cost", entity: "case", entityId: id, detail: { amount: patch.refurbCost?.amount ?? null } });
+    await audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.refurb_cost", entity: "case", entityId: id, detail: { amount: patch.refurbCost?.amount ?? null } });
   }
-  // A quote an older build let staff type in describes ONE device in ONE condition: once the
-  // description changes it no longer belongs to this phone (it is never priced from either way).
   const describes = modelPatch !== undefined || variantChanged || patch.faults !== undefined || patch.condition !== undefined || patch.conditionFromFaults;
   if (describes && c.partner_manual) sets.partner_manual = null;
   if (patch.upgradeDeviceId !== undefined) {
     if (!patch.upgradeDeviceId) sets.upgrade = null;
     else {
-      const d = db()
-        .prepare(`SELECT * FROM new_devices WHERE id = ? AND org_id = ? AND active = 1`)
-        .get(patch.upgradeDeviceId, store.org_id) as
-        | { id: string; brand: string; model: string; series: string; variant: string; price: number; support_end_year: number | null }
-        | undefined;
+      const d = await queryOne<{ id: string; brand: string; model: string; series: string; variant: string; price: number; support_end_year: number | null }>(
+        `SELECT * FROM new_devices WHERE id = $1 AND org_id = $2 AND active = 1`,
+        [patch.upgradeDeviceId, store.org_id]
+      );
       if (!d) throw new HttpError(400, "That new phone is not in this programme's catalogue.");
       sets.upgrade = JSON.stringify({
         deviceId: d.id,
@@ -1519,24 +1508,14 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
     }
   }
 
-  // The new phone SwapUp suggests (lib/domain/upgrade.ts) — at Apply, and again
-  // whenever the phone's model or storage really changes on a case whose new
-  // phone is still SwapUp's suggestion, or that has none yet (a desk-only case
-  // given its model, a tested one that had no model at Apply): with no new phone
-  // the swap can't be locked, so an empty case is never left waiting for one.
-  // Staff's own choice always stands; their Clear stands until the phone itself
-  // changes. A suggestion for another phone is cleared, never kept: no
-  // suggestion is better than a wrong one.
   const prevUpgrade = parseJson<UpgradeChoice | null>(c.upgrade, null);
   const phoneChanged = modelChanged || variantChanged;
   const autoUpgrade = patch.upgradeDeviceId === undefined && (internal.autoUpgrade || phoneChanged) && (!prevUpgrade || prevUpgrade.suggested === true);
   if (autoUpgrade) {
-    const tm = getTradeModel("model_id" in sets ? (sets.model_id as string | null) : c.model_id);
-    // With no size on the case, the phone's own reading still says how big it is (a 1TB
-    // Ultra is suggested against 1TB, not "storage unknown").
+    const tm = await getTradeModel("model_id" in sets ? (sets.model_id as string | null) : c.model_id);
     const measured = "measured_storage" in sets ? (sets.measured_storage as string | null) : c.measured_storage;
     const variant = ("variant" in sets ? (sets.variant as string | null) : c.variant) ?? measured;
-    const catalogue = newDevices(store.org_id);
+    const catalogue = await newDevices(store.org_id);
     const s = tm ? suggestUpgrade({ brand: tm.brand, model: tm.model, series: tm.series, variant }, catalogue) : null;
     const d = s ? catalogue.find((x) => x.id === s.deviceId) : undefined;
     sets.upgrade =
@@ -1559,15 +1538,14 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   if (Object.keys(sets).length) {
     sets.updated_at = nowIso();
     const cols = Object.keys(sets);
-    db()
-      .prepare(`UPDATE cases SET ${cols.map((k) => `${k} = ?`).join(", ")} WHERE id = ? AND status IN ('draft','quoted')`)
-      .run(...cols.map((k) => sets[k]), id);
+    const setClauses = cols.map((k, idx) => `${k} = ${idx + 1}`).join(", ");
+    await execute(
+      `UPDATE cases SET ${setClauses} WHERE id = ${cols.length + 1} AND status IN ('draft','quoted')`,
+      [...cols.map((k) => sets[k]), id]
+    );
   }
-  // The grading report follows every edit (a new version only when its body moved).
-  // Nothing in it reads a price, so it is issued before the re-price; the view the
-  // re-price returns then carries the new version.
-  issueQuietly(id, internal.reportReason ?? "edited", u.id);
-  return reprice(u, id, { requote: pricingChanged });
+  await issueQuietly(id, internal.reportReason ?? "edited", u.id);
+  return await reprice(u, id, { requote: pricingChanged });
 }
 
 /**
@@ -1575,11 +1553,11 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
  * inputs changed or the quote is missing/expired), bonus and decision.
  */
 export async function reprice(u: SessionUser, id: string, opts: { requote?: boolean } = {}): Promise<CaseView> {
-  const { c, store } = caseInScope(u, id);
-  if (!EDITABLE.includes(c.status)) return toView(c, store);
-  const org = getOrg(c.org_id)!;
-  const settings = orgSettings(org.id);
-  const tm = getTradeModel(c.model_id);
+  const { c, store } = await caseInScope(u, id);
+  if (!EDITABLE.includes(c.status)) return await toView(c, store);
+  const org = (await getOrg(c.org_id))!;
+  const settings = await orgSettings(org.id);
+  const tm = await getTradeModel(c.model_id);
   const faults = parseJson<FaultId[]>(c.faults, []);
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
   const manual = parseJson<ManualQuote | null>(c.manual_repair, null);
@@ -1589,14 +1567,11 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
   let repair: RepairEstimate | null = null;
   const serviced = !tm || !org.target_brand || tm.brand === org.target_brand;
   if (tm && (manual || (faults.length && serviced))) {
-    const book = (
-      db().prepare(`SELECT model_id, part, price, source FROM repair_book WHERE org_id = ? AND model_id = ?`).all(org.id, tm.id) as {
-        model_id: string;
-        part: string;
-        price: number;
-        source: string;
-      }[]
-    ).map((r) => ({ modelId: r.model_id, part: r.part, price: r.price, source: parseJson(r.source, { kind: "client", label: "Price book" }) }) as RepairBookEntry);
+    const rawBook = await query<{ model_id: string; part: string; price: number; source: string }>(
+      `SELECT model_id, part, price, source FROM repair_book WHERE org_id = $1 AND model_id = $2`,
+      [org.id, tm.id]
+    );
+    const book = rawBook.map((r) => ({ modelId: r.model_id, part: r.part, price: r.price, source: parseJson(r.source, { kind: "client", label: "Price book" }) }) as RepairBookEntry);
     const rp = settings.repairPolicy;
     const policy = {
       labour: rp.labourByTier[tm.service_tier] ?? rp.labourByTier.other ?? 0,
@@ -1613,7 +1588,7 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
   const consistent = !!condition && conditionFloor(condition, faults).length === 0;
   // A quote from a source that no longer exists (an older build's) is re-asked like a lapsed one.
   const expired = (!!quote?.validUntil && Date.parse(quote.validUntil) < Date.now()) || (!!quote && retiredSource(quote.source?.kind));
-  const partnerId = orgPartnerId(org.id);
+  const partnerId = await orgPartnerId(org.id);
   // The camera says this is not the phone on the case: no price until a store manager resolves it.
   const blocked = identityBlock(parseJson<CaseCameraCheck | null>(c.camera_check, null));
   if (!tm || !c.variant || !condition || !consistent || blocked) {
@@ -1638,7 +1613,7 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
     else if (quote.source.kind === "priceiq") {
       // Beside a PriceIQ trade-in, the repaired value is PriceIQ's too: the grade after refurb, less
       // the markdown. Where it has none, the partner's rate card may supply one, else there is none.
-      repairedQuote = priceiqRepaired({ partnerId, modelId: tm.id, variant: c.variant, brand: tm.brand, model: tm.model, answers: condition, faults }, quote);
+      repairedQuote = await priceiqRepaired({ partnerId, modelId: tm.id, variant: c.variant, brand: tm.brand, model: tm.model, answers: condition, faults }, quote);
       if (!repairedQuote) {
         const what = await partnerQuote({ partnerId, modelId: tm.id, variant: c.variant, answers: healedCondition(condition, faults), whatIf: true });
         repairedQuote = what.status === "priced" ? what : null;
@@ -1690,7 +1665,7 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
   const repairRatio = repairPays !== null && repairedVal ? repairPays / repairedVal : null;
   let bonus: BonusApplied | null = parseJson<BonusApplied | null>(c.bonus, null);
   if (upgrade && tm) {
-    const campaigns: Campaign[] = activeCampaigns(org.id);
+    const campaigns: Campaign[] = await activeCampaigns(org.id);
     const best = bestCampaign(campaigns, {
       today: todayIso(),
       oldBrand: tm.brand,
@@ -1740,12 +1715,10 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
   });
 
   const status: CaseStatus = market !== null || repairPays !== null ? "quoted" : "draft";
-  db()
-    .prepare(
-      `UPDATE cases SET repair = ?, quote = ?, repaired_quote = ?, storage_quotes = ?, bonus = ?, decision = ?, status = ?, updated_at = ?
-       WHERE id = ? AND status IN ('draft','quoted')`
-    )
-    .run(
+  await execute(
+    `UPDATE cases SET repair = $1, quote = $2, repaired_quote = $3, storage_quotes = $4, bonus = $5, decision = $6, status = $7, updated_at = $8
+     WHERE id = $9 AND status IN ('draft','quoted')`,
+    [
       repair ? JSON.stringify(repair) : null,
       quote ? JSON.stringify(quote) : null,
       repairedQuote ? JSON.stringify(repairedQuote) : null,
@@ -1755,17 +1728,19 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
       status,
       nowIso(),
       id
-    );
-  return getCase(u, id);
+    ]
+  );
+  return await getCase(u, id);
 }
 
 export async function setBonusOverride(u: SessionUser, id: string, input: { bp: number | null; reason?: string }): Promise<CaseView> {
   if (!["store_manager", "org_admin", "platform"].includes(u.role)) throw new HttpError(403, "Only a store manager can change the bonus.");
-  const { c, store } = caseInScope(u, id);
+  const { c, store } = await caseInScope(u, id);
   if (c.status !== "quoted") throw new HttpError(409, "The bonus can only be changed before the trade-in is locked.");
   const bonus = parseJson<BonusApplied | null>(c.bonus, null);
   if (!bonus) throw new HttpError(409, "Choose the new phone first.");
-  const campaign = activeCampaigns(c.org_id).find((x) => x.id === bonus.campaignId);
+  const campaigns = await activeCampaigns(c.org_id);
+  const campaign = campaigns.find((x) => x.id === bonus.campaignId);
   if (!campaign) throw new HttpError(409, "The campaign behind this bonus is no longer running.");
   if (input.bp === null) {
     bonus.override = null;
@@ -1779,34 +1754,34 @@ export async function setBonusOverride(u: SessionUser, id: string, input: { bp: 
     if (campaign.capRupees !== null) amount = Math.min(amount, campaign.capRupees);
     bonus.override = { bp, amount, reason, by: u.name };
   }
-  db().prepare(`UPDATE cases SET bonus = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(bonus), nowIso(), id);
-  audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.bonus_override", entity: "case", entityId: id, detail: bonus.override });
+  await execute(`UPDATE cases SET bonus = $1, updated_at = $2 WHERE id = $3`, [JSON.stringify(bonus), nowIso(), id]);
+  await audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.bonus_override", entity: "case", entityId: id, detail: bonus.override });
   // The decision shows the bonus; recompute it without asking the partner again.
-  return reprice(u, id, { requote: false });
+  return await reprice(u, id, { requote: false });
 }
 
-export function chooseRepair(u: SessionUser, id: string): CaseView {
+export async function chooseRepair(u: SessionUser, id: string): Promise<CaseView> {
   requireCounter(u);
-  return tx(() => {
-    const { c, store } = caseInScope(u, id);
+  return await tx(async (client) => {
+    const { c, store } = await caseInScope(u, id);
     assertTransition(c.status, "repair_chosen");
     const now = nowIso();
-    db().prepare(`UPDATE cases SET status = 'repair_chosen', closed_at = ?, updated_at = ? WHERE id = ?`).run(now, now, id);
-    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.repair_chosen", entity: "case", entityId: id });
-    return getCase(u, id);
+    await client.query(`UPDATE cases SET status = 'repair_chosen', closed_at = $1, updated_at = $2 WHERE id = $3`, [now, now, id]);
+    await audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.repair_chosen", entity: "case", entityId: id });
+    return await getCase(u, id);
   });
 }
 
-export function walkAway(u: SessionUser, id: string, reason?: string): CaseView {
+export async function walkAway(u: SessionUser, id: string, reason?: string): Promise<CaseView> {
   requireCounter(u);
-  return tx(() => {
-    const { c, store } = caseInScope(u, id);
+  return await tx(async (client) => {
+    const { c, store } = await caseInScope(u, id);
     assertTransition(c.status, "walked_away");
     const now = nowIso();
     const why = (reason || "").trim().slice(0, 200) || null;
-    db().prepare(`UPDATE cases SET status = 'walked_away', closed_reason = ?, closed_at = ?, updated_at = ? WHERE id = ?`).run(why, now, now, id);
-    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.walked_away", entity: "case", entityId: id, detail: { reason: reason ?? null } });
-    return getCase(u, id);
+    await client.query(`UPDATE cases SET status = 'walked_away', closed_reason = $1, closed_at = $2, updated_at = $3 WHERE id = $4`, [why, now, now, id]);
+    await audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.walked_away", entity: "case", entityId: id, detail: { reason: reason ?? null } });
+    return await getCase(u, id);
   });
 }
 
@@ -1836,11 +1811,12 @@ export type LockInput = {
  * (premium_value, premium_bp, premium_funded_by) and claimed on /admin/claims,
  * never a hold and never a chargeback.
  */
-export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseView {
+export async function lockTradeIn(u: SessionUser, id: string, input: LockInput): Promise<CaseView> {
   requireCounter(u);
   // Reported lost or stolen (GSMA, for any IMEI the case ever had): refused before anything else is
   // asked, whatever the lock says. The early KYM answer is not asked here: the lock's own is.
-  if (gsmaBlacklisted(caseInScope(u, id).c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
+  const inScope = await caseInScope(u, id);
+  if (gsmaBlacklisted(inScope.c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
   const name = String(input?.customer?.name || "").trim();
   const phone = digitsOnly(input?.customer?.phone);
   const idType = String(input?.customer?.idType || "");
@@ -1868,10 +1844,10 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
     throw new HttpError(409, `IMEI register says "${KYM_LABEL[kymStatus]}" — do not take it.`);
   const kymRef = String(ch.kym.reference ?? "").trim().slice(0, 80) || null;
 
-  return tx(() => {
-    const { c, store } = caseInScope(u, id);
+  return await tx(async (client) => {
+    const { c, store } = await caseInScope(u, id);
     if (gsmaBlacklisted(c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
-    const view = toView(c, store);
+    const view = await toView(c, store);
     assertTransition(c.status, "locked");
     // A claimed storage is enough to SHOW a price; moving money needs it seen —
     // the same rule as the IMEI, one tick, and only when the phone couldn't measure it.
@@ -1884,11 +1860,11 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
 
     // One phone, one trade-in — matched on EITHER of its IMEIs, so presenting
     // the second number of a dual-SIM phone does not get it past the check.
-    const dup = imeiOnOpenTradeIn(c.id, [c.imei, c.imei2]);
+    const dup = await imeiOnOpenTradeIn(c.id, [c.imei, c.imei2]);
     if (dup) throw new HttpError(409, `IMEI already traded in (${dup.ref}, ${dup.name}).`);
 
     const M = view.quote!.amount!;
-    const check = canHold(storePolicy(store), storeEvents(store.id), M);
+    const check = canHold(await storePolicy(store), await storeEvents(store.id), M);
     if (!check.ok) throw new HttpError(409, check.reason);
     const B = view.bonus ? (view.bonus.override?.amount ?? view.bonus.amount) : 0;
     const price = parseJson<UpgradeChoice | null>(c.upgrade, null)!.price;
@@ -1901,7 +1877,8 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
       throw e;
     }
     const payable = x.customerPays;
-    const premiumFundedBy = getOrg(c.org_id)?.name ?? "The programme";
+    const org = await getOrg(c.org_id);
+    const premiumFundedBy = org?.name ?? "The programme";
     const now = nowIso();
     const customer: Customer = { name: name.slice(0, 80), phone, idType, idLast4 };
     const checks: Checks = {
@@ -1922,38 +1899,38 @@ export function lockTradeIn(u: SessionUser, id: string, input: LockInput): CaseV
     const supersede = !!early && (early.status !== "clear" || (early.reference ?? null) !== kymRef);
     const kymEarly = supersede ? JSON.stringify({ status: "clear", reference: kymRef, by: u.name, at: now } satisfies KymEarly) : c.kym_early;
 
-    const upd = db()
-      .prepare(
-        `UPDATE cases SET status = 'locked', customer = ?, checks = ?, kym_early = ?, trade_value = ?, premium_value = ?, premium_bp = ?, premium_funded_by = ?, bonus_value = ?, payable = ?, locked_at = ?, updated_at = ?
-         WHERE id = ? AND status = 'quoted'`
-      )
-      .run(JSON.stringify(customer), JSON.stringify(checks), kymEarly, M, x.premium, x.premiumBp, premiumFundedBy, B, payable, now, now, id);
-    if (upd.changes !== 1) throw new HttpError(409, "This case changed — reload.");
+    const upd = await client.query(
+      `UPDATE cases SET status = 'locked', customer = $1, checks = $2, kym_early = $3, trade_value = $4, premium_value = $5, premium_bp = $6, premium_funded_by = $7, bonus_value = $8, payable = $9, locked_at = $10, updated_at = $11
+       WHERE id = $12 AND status = 'quoted'`,
+      [JSON.stringify(customer), JSON.stringify(checks), kymEarly, M, x.premium, x.premiumBp, premiumFundedBy, B, payable, now, now, id]
+    );
+    if ((upd.rowCount ?? 0) !== 1) throw new HttpError(409, "This case changed — reload.");
     if (supersede)
-      audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.kym_early", entity: "case", entityId: id, detail: { status: "clear", reference: kymRef, supersedes: early!.status, at: "lock" } });
-    postEvents(store.id, [{ kind: "hold", caseId: id, amount: x.hold, at: now, note: `Trade-in ${c.ref}` }], u.id);
+      await audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.kym_early", entity: "case", entityId: id, detail: { status: "clear", reference: kymRef, supersedes: early!.status, at: "lock" } });
+    await postEvents(store.id, [{ kind: "hold", caseId: id, amount: x.hold, at: now, note: `Trade-in ${c.ref}` }], u.id);
     // The report as it stands at hand-over, frozen: the partner's evidence at pickup and clearance.
     // Inside this transaction, so it is exactly the phone that was locked (issuing reads only the database).
-    issueQuietly(id, "traded_in", u.id, { final: true });
-    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.lock", entity: "case", entityId: id, detail: { tradeValue: M, premium: { amount: x.premium, bp: x.premiumBp, rule: PREMIUM_RULE_VERSION, fundedBy: premiumFundedBy }, wePay: x.wePay, bonus: B, payable, source: view.quote!.source.kind, kym: checks.kym, storage: { variant: c.variant, source: c.variant_source, seen: checks.storageSeen === true } } });
-    return getCase(u, id);
+    await issueQuietly(id, "traded_in", u.id, { final: true });
+    await audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.lock", entity: "case", entityId: id, detail: { tradeValue: M, premium: { amount: x.premium, bp: x.premiumBp, rule: PREMIUM_RULE_VERSION, fundedBy: premiumFundedBy }, wePay: x.wePay, bonus: B, payable, source: view.quote!.source.kind, kym: checks.kym, storage: { variant: c.variant, source: c.variant_source, seen: checks.storageSeen === true } } });
+    return await getCase(u, id);
   });
 }
 
-export function cancelTradeIn(u: SessionUser, id: string, reason: string): CaseView {
+export async function cancelTradeIn(u: SessionUser, id: string, reason: string): Promise<CaseView> {
   if (!["store_manager", "org_admin", "platform"].includes(u.role)) throw new HttpError(403, "Only a store manager can cancel a trade-in.");
   if ((reason || "").trim().length < 4) throw new HttpError(400, "Say why the trade-in is cancelled.");
-  return tx(() => {
-    const { c, store } = caseInScope(u, id);
+  return await tx(async (client) => {
+    const { c, store } = await caseInScope(u, id);
     assertTransition(c.status, "cancelled");
     const now = nowIso();
-    const upd = db()
-      .prepare(`UPDATE cases SET status = 'cancelled', closed_reason = ?, closed_at = ?, updated_at = ? WHERE id = ? AND status = 'locked'`)
-      .run(reason.trim().slice(0, 200), now, now, id);
-    if (upd.changes !== 1) throw new HttpError(409, "This case changed — reload.");
-    postEvents(store.id, cancelEvents(id, c.trade_value!, now), u.id);
-    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.cancel", entity: "case", entityId: id, detail: { reason: reason.trim() } });
-    return getCase(u, id);
+    const upd = await client.query(
+      `UPDATE cases SET status = 'cancelled', closed_reason = $1, closed_at = $2, updated_at = $3 WHERE id = $4 AND status = 'locked'`,
+      [reason.trim().slice(0, 200), now, now, id]
+    );
+    if ((upd.rowCount ?? 0) !== 1) throw new HttpError(409, "This case changed — reload.");
+    await postEvents(store.id, cancelEvents(id, c.trade_value!, now), u.id);
+    await audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.cancel", entity: "case", entityId: id, detail: { reason: reason.trim() } });
+    return await getCase(u, id);
   });
 }
 
@@ -1963,13 +1940,13 @@ export function cancelTradeIn(u: SessionUser, id: string, reason: string): CaseV
  * back to a setup screen that does not ask for their account. Store staff
  * only, while the phone is at the store. Recorded once.
  */
-export function recordDataClear(u: SessionUser, id: string, input: Record<string, unknown>): CaseView {
+export async function recordDataClear(u: SessionUser, id: string, input: Record<string, unknown>): Promise<CaseView> {
   requireCounter(u);
   const missing = missingDataClearSteps(input);
   if (missing.length) throw new HttpError(400, `Confirm first: ${missing.join("; ")}.`);
   const note = typeof input.note === "string" ? input.note.trim().slice(0, 200) || null : null;
-  return tx(() => {
-    const { c, store } = caseInScope(u, id);
+  return await tx(async (client) => {
+    const { c, store } = await caseInScope(u, id);
     if (!DATA_CLEAR_STATUSES.includes(c.status)) throw new HttpError(409, "Record data clearing after the trade-in, at the store.");
     if (c.data_clear) throw new HttpError(409, "Data clearing is already recorded for this phone.");
     const now = nowIso();
@@ -1980,9 +1957,12 @@ export function recordDataClear(u: SessionUser, id: string, input: Record<string
       by: u.name,
       at: now,
     };
-    const upd = db().prepare(`UPDATE cases SET data_clear = ?, updated_at = ? WHERE id = ? AND data_clear IS NULL`).run(JSON.stringify(record), now, id);
-    if (upd.changes !== 1) throw new HttpError(409, "This case changed — reload.");
-    audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.data_clear", entity: "case", entityId: id, detail: { note } });
-    return getCase(u, id);
+    const upd = await client.query(
+      `UPDATE cases SET data_clear = $1, updated_at = $2 WHERE id = $3 AND data_clear IS NULL`,
+      [JSON.stringify(record), now, id]
+    );
+    if ((upd.rowCount ?? 0) !== 1) throw new HttpError(409, "This case changed — reload.");
+    await audit({ userId: u.id, orgId: c.org_id, storeId: store.id, action: "case.data_clear", entity: "case", entityId: id, detail: { note } });
+    return await getCase(u, id);
   });
 }

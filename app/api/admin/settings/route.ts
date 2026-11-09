@@ -7,8 +7,8 @@ import { adminOrgId } from "@/lib/server/scope";
 export async function GET(req: Request) {
   return handle(async () => {
     const u = await requireUser(["org_admin", "platform"]);
-    const orgId = adminOrgId(u, new URL(req.url).searchParams.get("orgId"));
-    return { settings: orgSettings(orgId) };
+    const orgId = await adminOrgId(u, new URL(req.url).searchParams.get("orgId"));
+    return { settings: await orgSettings(orgId) };
   });
 }
 
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   return handle(async () => {
     const u = await requireUser(["org_admin", "platform"]);
     const b = await body<{ orgId?: string; patch?: Partial<OrgSettings> }>(req);
-    const org = updateOrgSettings(u, b.orgId ?? null, b.patch && typeof b.patch === "object" ? b.patch : {});
+    const org = await updateOrgSettings(u, b.orgId ?? null, b.patch && typeof b.patch === "object" ? b.patch : {});
     return { settings: org.settings };
   });
 }

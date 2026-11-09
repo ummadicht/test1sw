@@ -46,16 +46,17 @@ function caseStatusLabel(s: string): string {
   return (CASE_STATUS_LABEL as Record<string, string>)[s] ?? s;
 }
 
-function partnerNameFor(orgId: string): string {
-  const org = getOrg(orgId);
-  return (org?.partner_id ? getOrg(org.partner_id)?.name : null) ?? "the buyback partner";
+async function partnerNameFor(orgId: string): Promise<string> {
+  const org = await getOrg(orgId);
+  const pOrg = org?.partner_id ? await getOrg(org.partner_id) : null;
+  return pOrg?.name ?? "the buyback partner";
 }
 
 export default async function StorePage({ searchParams }: { searchParams: SP }) {
   const u = await requirePage(["store_manager", "org_admin", "platform"], "/store");
   const sp = await searchParams;
   const isManager = u.role === "store_manager";
-  const scope = isManager ? [] : storesForUser(u);
+  const scope = isManager ? [] : await storesForUser(u);
   let storeId = isManager ? u.storeId : one(sp.storeId);
   if (!storeId && scope.length === 1) storeId = scope[0].id;
 
@@ -69,35 +70,35 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
 
   let cs: CreditSummary;
   try {
-    cs = creditSummary(u, storeId, { withLedger: true });
+    cs = await creditSummary(u, storeId, { withLedger: true });
   } catch (e) {
     if (e instanceof HttpError && e.status === 404) notFound();
     throw e;
   }
-  const store = getStore(cs.store.id)!;
-  const partner = partnerNameFor(store.org_id);
+  const store = (await getStore(cs.store.id))!;
+  const partner = await partnerNameFor(store.org_id);
   const now = nowIso();
   const { policy, position: pos, advice } = cs;
   const st = STATE[pos.state];
 
-  const pickups = listPickups(u, { storeId: cs.store.id });
+  const pickups = await listPickups(u, { storeId: cs.store.id });
   const pickupRef = new Map(pickups.map((p) => [p.id, p.ref]));
   const pickupOfCase = new Map<string, { id: string; ref: string }>();
   for (const p of pickups) for (const i of p.items) if (!pickupOfCase.has(i.id)) pickupOfCase.set(i.id, { id: p.id, ref: p.ref });
-  const chargebacks = openChargebacks(u, cs.store.id);
+  const chargebacks = await openChargebacks(u, cs.store.id);
   // Newest first by when it happened (demo data back-dates some holds, so posting order alone reads oddly).
-  const ledger = [...(cs.ledger ?? [])].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : b.id - a.id));
+  const ledger = [...(cs.ledger ?? [])].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : Number(b.id) - Number(a.id)));
 
-  const dataDue = dataClearDueIds(cs.store.id);
+  const dataDue = await dataClearDueIds(cs.store.id);
   const bookable: BookableDevice[] = cs.held
     .filter((h) => h.status === "locked")
     .map((h) => ({ caseId: h.caseId, ref: h.ref, label: h.label, value: h.value, days: wholeDays(h.heldSince, now), dataDue: dataDue.has(h.caseId) }));
   const onPickup = cs.held.length - bookable.length;
 
   const month = istMonthStart(now);
-  const monthRow = programmeReport(u, { from: month.iso }).stores.find((s) => s.storeId === cs.store.id) ?? null;
+  const monthRow = (await programmeReport(u, { from: month.iso })).stores.find((s) => s.storeId === cs.store.id) ?? null;
 
-  const tablets: TabletRow[] = listStoreDevices(u, cs.store.id).map((d) => {
+  const tablets: TabletRow[] = (await listStoreDevices(u, cs.store.id)).map((d) => {
     const age = d.lastSeenAt ? ageLabel(d.lastSeenAt, now) : null;
     return {
       id: d.id,
@@ -129,7 +130,7 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
             ) : null}
             <h1 className="text-[26px] sm:text-[30px] font-[750] tracking-tight">{isManager ? "Credit & pickups" : cs.store.name}</h1>
             <p className="text-[15px] text-ink-2">
-              {isManager ? cs.store.name : getOrg(store.org_id)?.name}
+              {isManager ? cs.store.name : (await getOrg(store.org_id))?.name}
               {cs.store.city ? ` · ${cs.store.city}` : ""} · <span className="num">{cs.store.code}</span>
             </p>
           </div>
@@ -386,7 +387,7 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
         <StoreTablets tablets={tablets} canRemove={isManager} />
 
         {/* ── Phonecheck station (docs/GRADING.md) ─────────── */}
-        <StorePhonecheck storeId={cs.store.id} initial={getStorePhonecheck(u, cs.store.id)} canEdit />
+        <StorePhonecheck storeId={cs.store.id} initial={await getStorePhonecheck(u, cs.store.id)} canEdit />
 
         {/* ── credit ledger ───────────────────────────────── */}
         <Card
@@ -415,7 +416,7 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
                 <tbody>
                   {ledger.map((l) => {
                     const k = KIND[l.kind];
-                    const signed = SIGN[l.kind] * l.amount;
+                    const signed = SIGN[l.kind] * Number(l.amount);
                     return (
                       <tr key={l.id}>
                         <td className="whitespace-nowrap text-[13.5px]">{fmtWhen(l.at)}</td>
@@ -450,10 +451,11 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
 }
 
 /** Programme admins and the platform pick a store first. */
-function StorePicker({ u }: { u: SessionUser }) {
-  const report = programmeReport(u);
-  const stores = storesForUser(u);
-  const orgOf = new Map(stores.map((s) => [s.id, getOrg(s.org_id)?.name ?? ""]));
+async function StorePicker({ u }: { u: SessionUser }) {
+  const report = await programmeReport(u);
+  const stores = await storesForUser(u);
+  const orgPairs = await Promise.all(stores.map(async (s) => [s.id, (await getOrg(s.org_id))?.name ?? ""] as const));
+  const orgOf = new Map(orgPairs);
   const multiOrg = new Set(orgOf.values()).size > 1;
   return (
     <div className="space-y-5">

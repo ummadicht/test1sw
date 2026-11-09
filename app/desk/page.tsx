@@ -20,9 +20,9 @@ const STATE_PILL: Record<string, { label: string; cls: string }> = {
 
 export default async function DeskPage() {
   const u = await requirePage(["advisor", "store_manager"], "/desk");
-  const credit = u.storeId ? creditSummary(u, u.storeId) : null;
-  const atCounter = listCases(u, { status: ["draft", "quoted"], limit: 30 });
-  const waiting = listCases(u, { status: ["locked", "in_pickup"], limit: 60 });
+  const credit = u.storeId ? await creditSummary(u, u.storeId) : null;
+  const atCounter = await listCases(u, { status: ["draft", "quoted"], limit: 30 });
+  const waiting = await listCases(u, { status: ["locked", "in_pickup"], limit: 60 });
   const p = credit?.position;
   const state = p ? (STATE_PILL[p.state] ?? STATE_PILL.ok) : null;
   const atStore = credit?.held.filter((h) => h.status === "locked").length ?? 0;

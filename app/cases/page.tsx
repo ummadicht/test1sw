@@ -50,8 +50,8 @@ export default async function CasesPage({ searchParams }: { searchParams: SP }) 
     .filter(isStatus);
   const isPartner = u.role === "partner";
 
-  const cases = listCases(u, { q: q || null, status: status.length ? status : null, limit: LIMIT });
-  const showStore = storesForUser(u).length > 1;
+  const cases = await listCases(u, { q: q || null, status: status.length ? status : null, limit: LIMIT });
+  const showStore = (await storesForUser(u)).length > 1;
 
   // A partner never sees cases before the trade-in is taken, so "At the counter" would always be empty for them.
   const groups = GROUPS.filter((g) => !(isPartner && g.key === "counter"));

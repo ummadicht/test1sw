@@ -14,8 +14,8 @@ const ORG_KIND: Record<string, string> = { platform: "Platform staff", client: "
 
 export default async function AccountPage() {
   const u = await requirePage(null, "/account");
-  const org = getOrg(u.orgId);
-  const store = u.storeId ? getStore(u.storeId) : null;
+  const org = await getOrg(u.orgId);
+  const store = u.storeId ? await getStore(u.storeId) : null;
   const rows: { label: string; value: ReactNode }[] = [
     { label: "Name", value: u.name },
     { label: "Username", value: <span className="num">{u.username}</span> },

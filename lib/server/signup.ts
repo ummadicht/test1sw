@@ -1,5 +1,5 @@
 import { createHash, randomInt } from "node:crypto";
-import { db, tx, nowIso, newId, parseJson, audit } from "./db";
+import { query, queryOne, execute, tx, nowIso, newId, parseJson, audit } from "./db";
 import { HttpError, hashPassword, issueToken, orgSettings, type SessionUser, type Role } from "./auth";
 import { getOrg, getStore, storeInScope, type StoreRow } from "./scope";
 import { userPayload } from "./mobileAuth";
@@ -35,7 +35,7 @@ export function throttle(key: string, max = 10, windowMs = 30 * 60_000): void {
 }
 
 /* ── validation shared by both paths ─────────────────────────── */
-function cleanPerson(input: { name?: unknown; username?: unknown; password?: unknown; phone?: unknown }, needPhone: boolean) {
+async function cleanPerson(input: { name?: unknown; username?: unknown; password?: unknown; phone?: unknown }, needPhone: boolean) {
   const name = String(input.name ?? "").trim().replace(/\s+/g, " ");
   const username = String(input.username ?? "").trim().toLowerCase();
   const password = String(input.password ?? "");
@@ -45,83 +45,93 @@ function cleanPerson(input: { name?: unknown; username?: unknown; password?: unk
   if (password.length < 8) throw new HttpError(400, "Choose a password of at least 8 characters.");
   if (/^(.)\1+$/.test(password) || password.toLowerCase() === username) throw new HttpError(400, "That password is too easy to guess.");
   if (needPhone && !/^[6-9]\d{9}$/.test(phone)) throw new HttpError(400, "Enter a 10-digit Indian mobile number.");
-  const taken = db().prepare(`SELECT 1 FROM users WHERE username = ?`).get(username);
+  const taken = await queryOne(`SELECT 1 FROM users WHERE username = $1`, [username]);
   if (taken) throw new HttpError(409, "That username is taken.");
   return { name: name.slice(0, 80), username, password, phone };
 }
 
-function tokenFor(userId: string) {
-  const u = db().prepare(`SELECT id, org_id, store_id, username, name, role FROM users WHERE id = ?`).get(userId) as {
+async function tokenFor(userId: string) {
+  const u = (await queryOne<{
     id: string;
     org_id: string;
     store_id: string | null;
     username: string;
     name: string;
     role: Role;
-  };
+  }>(`SELECT id, org_id, store_id, username, name, role FROM users WHERE id = $1`, [userId]))!;
   const su: SessionUser = { id: u.id, orgId: u.org_id, storeId: u.store_id, username: u.username, name: u.name, role: u.role, exp: Date.now() + 12 * 3_600_000 };
-  return { token: issueToken(su), expiresAt: new Date(su.exp).toISOString(), user: userPayload(su) };
+  const payload = await userPayload(su);
+  return { token: issueToken(su), expiresAt: new Date(su.exp).toISOString(), user: payload };
 }
 
 /* ── programmes that accept self-registration ────────────────── */
-export function selfSignupAllowed(orgId: string): boolean {
-  const o = getOrg(orgId);
+export async function selfSignupAllowed(orgId: string): Promise<boolean> {
+  const o = await getOrg(orgId);
   if (!o || o.kind !== "client") return false;
-  const s = orgSettings(orgId) as ReturnType<typeof orgSettings> & { selfSignup?: boolean };
-  // Demo programmes accept it unless switched off; real ones only when switched on.
+  const s = (await orgSettings(orgId)) as Awaited<ReturnType<typeof orgSettings>> & { selfSignup?: boolean };
   return s.selfSignup ?? !!o.demo;
 }
 
-export function programmes() {
-  const rows = db().prepare(`SELECT id, name, client_type, target_brand FROM orgs WHERE kind = 'client' ORDER BY name`).all() as {
+export async function programmes() {
+  const rows = await query<{
     id: string;
     name: string;
     client_type: string | null;
     target_brand: string | null;
-  }[];
-  return rows.filter((r) => selfSignupAllowed(r.id)).map((r) => ({ id: r.id, name: r.name, clientType: r.client_type, brand: r.target_brand }));
+  }>(`SELECT id, name, client_type, target_brand FROM orgs WHERE kind = 'client' ORDER BY name`);
+  const allowed = await Promise.all(
+    rows.map(async (r) => {
+      const ok = await selfSignupAllowed(r.id);
+      return ok ? { id: r.id, name: r.name, clientType: r.client_type, brand: r.target_brand } : null;
+    })
+  );
+  return allowed.filter((x): x is NonNullable<typeof x> => x !== null);
 }
 
-function storeCode(orgId: string, name: string): string {
+async function storeCode(orgId: string, name: string): Promise<string> {
   const letters = name.toUpperCase().replace(/[^A-Z]/g, "");
   const base = (letters.slice(0, 3) || "STR").padEnd(3, "X");
   for (let i = 0; i < 50; i++) {
     const code = i === 0 ? base : `${base.slice(0, 3)}${randomInt(10, 99)}`;
-    const clash = db().prepare(`SELECT 1 FROM stores WHERE org_id = ? AND code = ?`).get(orgId, code);
+    const clash = await queryOne(`SELECT 1 FROM stores WHERE org_id = $1 AND code = $2`, [orgId, code]);
     if (!clash) return code;
   }
   throw new HttpError(503, "Could not pick a store code — try again.");
 }
 
 /* ── register a new store ────────────────────────────────────── */
-export function registerStore(input: Record<string, unknown>) {
+export async function registerStore(input: Record<string, unknown>) {
   const programmeId = String(input.programmeId ?? "");
-  if (!selfSignupAllowed(programmeId)) throw new HttpError(400, "This programme needs an invite — ask your contact.");
+  if (!(await selfSignupAllowed(programmeId))) throw new HttpError(400, "This programme needs an invite — ask your contact.");
   const storeName = String(input.storeName ?? "").trim().replace(/\s+/g, " ");
   const city = String(input.city ?? "").trim().replace(/\s+/g, " ");
   const kind = String(input.storeKind ?? "") as (typeof KINDS)[number];
   if (storeName.length < 3) throw new HttpError(400, "Enter the store's name as customers know it.");
   if (city.length < 2) throw new HttpError(400, "Enter the city.");
   if (!KINDS.includes(kind)) throw new HttpError(400, "Choose what kind of store it is.");
-  const person = cleanPerson({ name: input.managerName, username: input.username, password: input.password, phone: input.phone }, true);
-  const dupe = db().prepare(`SELECT 1 FROM stores WHERE org_id = ? AND lower(name) = lower(?) AND lower(COALESCE(city,'')) = lower(?)`).get(programmeId, storeName, city);
+  const person = await cleanPerson({ name: input.managerName, username: input.username, password: input.password, phone: input.phone }, true);
+  const dupe = await queryOne(
+    `SELECT 1 FROM stores WHERE org_id = $1 AND lower(name) = lower($2) AND lower(COALESCE(city,'')) = lower($3)`,
+    [programmeId, storeName, city]
+  );
   if (dupe) throw new HttpError(409, "That store is already registered — ask its manager for an invite.");
 
-  const ids = tx(() => {
+  const code = await storeCode(programmeId, storeName);
+  const ids = await tx(async () => {
     const now = nowIso();
     const storeId = newId("st");
-    db()
-      .prepare(
-        `INSERT INTO stores (id, org_id, name, kind, city, code, credit_limit, active, created_at, status, settings)
-         VALUES (?,?,?,?,?,?,0,1,?,'pending',?)`
-      )
-      .run(storeId, programmeId, storeName.slice(0, 80), kind, city.slice(0, 60), storeCode(programmeId, storeName), now, JSON.stringify({ contactPhone: person.phone }));
+    await execute(
+      `INSERT INTO stores (id, org_id, name, kind, city, code, credit_limit, active, created_at, status, settings)
+       VALUES ($1, $2, $3, $4, $5, $6, 0, 1, $7, 'pending', $8)`,
+      [storeId, programmeId, storeName.slice(0, 80), kind, city.slice(0, 60), code, now, JSON.stringify({ contactPhone: person.phone })]
+    );
     const userId = newId("usr");
-    db()
-      .prepare(`INSERT INTO users (id, org_id, store_id, username, name, role, password_hash, created_at) VALUES (?,?,?,?,?,'store_manager',?,?)`)
-      .run(userId, programmeId, storeId, person.username, person.name, hashPassword(person.password), now);
-    db().prepare(`UPDATE stores SET registered_by = ? WHERE id = ?`).run(userId, storeId);
-    audit({ userId, orgId: programmeId, storeId, action: "store.self_register", entity: "store", entityId: storeId, detail: { storeName, city, kind } });
+    await execute(
+      `INSERT INTO users (id, org_id, store_id, username, name, role, password_hash, created_at) VALUES ($1, $2, $3, $4, $5, 'store_manager', $6, $7)`,
+      [userId, programmeId, storeId, person.username, person.name, hashPassword(person.password), now]
+    );
+    await execute(`UPDATE stores SET registered_by = $1 WHERE id = $2`, [userId, storeId]);
+    await audit({ userId, orgId: programmeId, storeId, action: "store.self_register", entity: "store", entityId: storeId, detail: { storeName, city, kind } });
     return { storeId, userId };
   });
   return tokenFor(ids.userId);
@@ -134,37 +144,39 @@ function newInviteCode(): string {
   return c;
 }
 
-export function createInvite(u: SessionUser, storeId: string, input: { role?: string; days?: number; uses?: number }) {
+export async function createInvite(u: SessionUser, storeId: string, input: { role?: string; days?: number; uses?: number }) {
   if (!["store_manager", "org_admin", "platform"].includes(u.role)) throw new HttpError(403, "Only a store manager can invite staff.");
-  const store = storeInScope(u, storeId);
+  const store = await storeInScope(u, storeId);
   const role = input.role === "store_manager" && u.role !== "store_manager" ? "store_manager" : "advisor";
   const days = Math.min(30, Math.max(1, Math.floor(Number(input.days ?? 7)) || 7));
   const uses = Math.min(20, Math.max(1, Math.floor(Number(input.uses ?? 5)) || 5));
   const code = newInviteCode();
   const now = nowIso();
   const expiresAt = new Date(Date.now() + days * 86_400_000).toISOString();
-  db()
-    .prepare(`INSERT INTO store_invites (code_hash, code_hint, store_id, role, created_by, created_at, expires_at, max_uses) VALUES (?,?,?,?,?,?,?,?)`)
-    .run(sha(code), code.slice(-3), store.id, role, u.id, now, expiresAt, uses);
-  audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "invite.create", entity: "store", entityId: store.id, detail: { role, days, uses, hint: code.slice(-3) } });
+  await execute(
+    `INSERT INTO store_invites (code_hash, code_hint, store_id, role, created_by, created_at, expires_at, max_uses) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [sha(code), code.slice(-3), store.id, role, u.id, now, expiresAt, uses]
+  );
+  await audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "invite.create", entity: "store", entityId: store.id, detail: { role, days, uses, hint: code.slice(-3) } });
   const base = (process.env.SWAPUP_PUBLIC_URL || "").replace(/\/$/, "");
   return {
     code,
     role,
     expiresAt,
     maxUses: uses,
-    // Opens the store app's sign-up with the code filled in (browser version; the Android app reads the same ?invite=).
     url: `${base}/app/store/?invite=${code}`,
     deepLink: `swapupstore://join?invite=${code}&server=${encodeURIComponent(base)}`,
   };
 }
 
-export function listInvites(u: SessionUser, storeId: string) {
+export async function listInvites(u: SessionUser, storeId: string) {
   if (!["store_manager", "org_admin", "platform"].includes(u.role)) throw new HttpError(403, "Only a store manager can see invites.");
-  const store = storeInScope(u, storeId);
-  return (db()
-    .prepare(`SELECT code_hash, code_hint, role, created_at, expires_at, max_uses, uses, revoked_at FROM store_invites WHERE store_id = ? ORDER BY created_at DESC LIMIT 30`)
-    .all(store.id) as { code_hash: string; code_hint: string; role: string; created_at: string; expires_at: string; max_uses: number; uses: number; revoked_at: string | null }[]).map((r) => ({
+  const store = await storeInScope(u, storeId);
+  const rows = await query<{ code_hash: string; code_hint: string; role: string; created_at: string; expires_at: string; max_uses: number; uses: number; revoked_at: string | null }>(
+    `SELECT code_hash, code_hint, role, created_at, expires_at, max_uses, uses, revoked_at FROM store_invites WHERE store_id = $1 ORDER BY created_at DESC LIMIT 30`,
+    [store.id]
+  );
+  return rows.map((r) => ({
     id: r.code_hash.slice(0, 16),
     hint: `…${r.code_hint}`,
     role: r.role,
@@ -176,58 +188,60 @@ export function listInvites(u: SessionUser, storeId: string) {
   }));
 }
 
-export function revokeInvite(u: SessionUser, storeId: string, id: string) {
+export async function revokeInvite(u: SessionUser, storeId: string, id: string) {
   if (!["store_manager", "org_admin", "platform"].includes(u.role)) throw new HttpError(403, "Only a store manager can revoke invites.");
-  const store = storeInScope(u, storeId);
-  const r = db()
-    .prepare(`UPDATE store_invites SET revoked_at = ? WHERE store_id = ? AND substr(code_hash, 1, 16) = ? AND revoked_at IS NULL`)
-    .run(nowIso(), store.id, String(id).slice(0, 16));
-  if (r.changes !== 1) throw new HttpError(404, "Invite not found.");
+  const store = await storeInScope(u, storeId);
+  const r = await execute(
+    `UPDATE store_invites SET revoked_at = $1 WHERE store_id = $2 AND substr(code_hash, 1, 16) = $3 AND revoked_at IS NULL`,
+    [nowIso(), store.id, String(id).slice(0, 16)]
+  );
+  if (r.rowCount !== 1) throw new HttpError(404, "Invite not found.");
   return { ok: true as const };
 }
 
 /** What an invite code would let you join — shown before the person fills in their details. */
-export function peekInvite(raw: unknown) {
+export async function peekInvite(raw: unknown) {
   const code = String(raw ?? "").toUpperCase().replace(/[\s-]/g, "");
   if (!/^[A-Z2-9]{8}$/.test(code)) throw new HttpError(404, "An invite code is 8 letters and numbers.");
-  const inv = db().prepare(`SELECT * FROM store_invites WHERE code_hash = ?`).get(sha(code)) as
-    | { store_id: string; role: string; expires_at: string; max_uses: number; uses: number; revoked_at: string | null }
-    | undefined;
+  const inv = await queryOne<{ store_id: string; role: string; expires_at: string; max_uses: number; uses: number; revoked_at: string | null }>(
+    `SELECT * FROM store_invites WHERE code_hash = $1`,
+    [sha(code)]
+  );
   if (!inv || inv.revoked_at || Date.parse(inv.expires_at) < Date.now() || inv.uses >= inv.max_uses)
     throw new HttpError(404, "That invite has expired — ask your manager for a new one.");
-  const store = getStore(inv.store_id)!;
+  const store = (await getStore(inv.store_id))!;
   return { code, inv, store };
 }
 
-export function joinWithInvite(input: Record<string, unknown>) {
-  const { code } = peekInvite(input.inviteCode);
-  const person = cleanPerson({ name: input.name, username: input.username, password: input.password, phone: input.phone }, false);
-  const userId = tx(() => {
-    // Re-read inside the transaction so two people racing for the last use can't both get in.
-    const { inv, store } = peekInvite(code);
+export async function joinWithInvite(input: Record<string, unknown>) {
+  const { code } = await peekInvite(input.inviteCode);
+  const person = await cleanPerson({ name: input.name, username: input.username, password: input.password, phone: input.phone }, false);
+  const userId = await tx(async () => {
+    const { inv, store } = await peekInvite(code);
     if (!store.active || store.status === "rejected") throw new HttpError(409, "This store is closed in SwapUp.");
-    const upd = db().prepare(`UPDATE store_invites SET uses = uses + 1 WHERE code_hash = ? AND uses < max_uses`).run(sha(code));
-    if (upd.changes !== 1) throw new HttpError(409, "That invite is used up — ask your manager for a new one.");
+    const upd = await execute(`UPDATE store_invites SET uses = uses + 1 WHERE code_hash = $1 AND uses < max_uses`, [sha(code)]);
+    if (upd.rowCount !== 1) throw new HttpError(409, "That invite is used up — ask your manager for a new one.");
     const id = newId("usr");
-    db()
-      .prepare(`INSERT INTO users (id, org_id, store_id, username, name, role, password_hash, created_at) VALUES (?,?,?,?,?,?,?,?)`)
-      .run(id, store.org_id, store.id, person.username, person.name, inv.role, hashPassword(person.password), nowIso());
-    audit({ userId: id, orgId: store.org_id, storeId: store.id, action: "user.join_invite", entity: "user", entityId: id, detail: { role: inv.role } });
+    await execute(
+      `INSERT INTO users (id, org_id, store_id, username, name, role, password_hash, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, store.org_id, store.id, person.username, person.name, inv.role, hashPassword(person.password), nowIso()]
+    );
+    await audit({ userId: id, orgId: store.org_id, storeId: store.id, action: "user.join_invite", entity: "user", entityId: id, detail: { role: inv.role } });
     return id;
   });
   return tokenFor(userId);
 }
 
-export function invitePreview(raw: unknown) {
-  const { store } = peekInvite(raw);
-  const org = getOrg(store.org_id);
+export async function invitePreview(raw: unknown) {
+  const { store } = await peekInvite(raw);
+  const org = await getOrg(store.org_id);
   return { storeName: store.name, city: store.city, programme: org?.name ?? "" };
 }
 
 /* ── programme approval ──────────────────────────────────────── */
-export function reviewStore(u: SessionUser, storeId: string, input: { decision?: string; creditLimit?: number; note?: string }) {
+export async function reviewStore(u: SessionUser, storeId: string, input: { decision?: string; creditLimit?: number; note?: string }) {
   if (!["org_admin", "platform"].includes(u.role)) throw new HttpError(403, "Only the programme admin approves stores.");
-  const store = storeInScope(u, storeId);
+  const store = await storeInScope(u, storeId);
   const decision = input.decision === "reject" ? "rejected" : input.decision === "approve" ? "active" : null;
   if (!decision) throw new HttpError(400, "Approve or reject.");
   const note = String(input.note ?? "").trim().slice(0, 300) || null;
@@ -236,22 +250,21 @@ export function reviewStore(u: SessionUser, storeId: string, input: { decision?:
     limit = Number(input.creditLimit);
     if (!Number.isInteger(limit) || limit < 0 || limit > 100_000_000) throw new HttpError(400, "Set the store's credit limit (whole rupees) to approve it.");
   } else if (!note || note.length < 4) throw new HttpError(400, "Say why the store is rejected — the manager will see it.");
-  tx(() => {
-    db().prepare(`UPDATE stores SET status = ?, credit_limit = ?, review_note = ?, active = ? WHERE id = ?`).run(decision, limit, note, decision === "rejected" ? 0 : 1, store.id);
-    audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: `store.${decision === "active" ? "approve" : "reject"}`, entity: "store", entityId: store.id, detail: { limit, note } });
+  await tx(async () => {
+    await execute(`UPDATE stores SET status = $1, credit_limit = $2, review_note = $3, active = $4 WHERE id = $5`, [decision, limit, note, decision === "rejected" ? 0 : 1, store.id]);
+    await audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: `store.${decision === "active" ? "approve" : "reject"}`, entity: "store", entityId: store.id, detail: { limit, note } });
   });
-  return getStore(store.id) as StoreRow;
+  return (await getStore(store.id)) as StoreRow;
 }
 
-export function pendingStores(u: SessionUser) {
+export async function pendingStores(u: SessionUser) {
   if (!["org_admin", "platform"].includes(u.role)) throw new HttpError(403, "Not allowed.");
-  const rows = db()
-    .prepare(
-      `SELECT s.*, o.name AS org_name, us.name AS manager_name, us.username AS manager_username
-       FROM stores s JOIN orgs o ON o.id = s.org_id LEFT JOIN users us ON us.id = s.registered_by
-       WHERE s.status = 'pending' ${u.role === "org_admin" ? "AND s.org_id = ?" : ""} ORDER BY s.created_at`
-    )
-    .all(...(u.role === "org_admin" ? [u.orgId] : [])) as (StoreRow & { org_name: string; manager_name: string | null; manager_username: string | null; settings: string })[];
+  const rows = await query<StoreRow & { org_name: string; manager_name: string | null; manager_username: string | null; settings: string }>(
+    `SELECT s.*, o.name AS org_name, us.name AS manager_name, us.username AS manager_username
+     FROM stores s JOIN orgs o ON o.id = s.org_id LEFT JOIN users us ON us.id = s.registered_by
+     WHERE s.status = 'pending' ${u.role === "org_admin" ? "AND s.org_id = $1" : ""} ORDER BY s.created_at`,
+    u.role === "org_admin" ? [u.orgId] : []
+  );
   return rows.map((r) => ({
     id: r.id,
     name: r.name,

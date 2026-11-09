@@ -21,7 +21,7 @@ export default async function RateCardsPage({ searchParams }: { searchParams: Pr
   let partnerId = u.orgId;
   let partners: { id: string; name: string }[] = [];
   if (u.role === "platform") {
-    partners = listOrgs(u)
+    partners = (await listOrgs(u))
       .filter((o) => o.kind === "partner")
       .map((o) => ({ id: o.id, name: o.name }));
     const hit = partners.find((p) => p.id === sp.partnerId) ?? partners[0];
@@ -38,12 +38,12 @@ export default async function RateCardsPage({ searchParams }: { searchParams: Pr
     partnerId = hit.id;
   }
 
-  const mode = partnerMode(partnerId);
-  const cards = rateCards(partnerId);
+  const mode = await partnerMode(partnerId);
+  const cards = await rateCards(partnerId);
   const activeSummary = cards.find((c) => c.active) ?? null;
   let active: ActiveCardInfo | null = null;
   if (activeSummary) {
-    const card = rateCardDetail(partnerId, activeSummary.id);
+    const card = await rateCardDetail(partnerId, activeSummary.id);
     active = {
       id: card.id,
       label: card.source.label,

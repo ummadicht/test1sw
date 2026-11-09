@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { db, tx, nowIso, newId, parseJson, audit } from "./db";
+import { query, queryOne, execute, tx, nowIso, newId, parseJson, audit } from "./db";
 import { HttpError, type SessionUser } from "./auth";
 import { getStore } from "./scope";
 import { getCase, KYM_LABEL, type Checks, type KymStatus } from "./cases";
@@ -104,12 +104,15 @@ type PcRowLite = { id: string; source: "pull" | "webhook" | "upload"; record: st
 const EDITABLE: CaseStatus[] = ["draft", "quoted"];
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
-function caseRow(id: string): CaseRowLite | null {
-  return (db().prepare(`SELECT * FROM cases WHERE id = ?`).get(id) as CaseRowLite | undefined) ?? null;
+async function caseRow(id: string): Promise<CaseRowLite | null> {
+  return queryOne<CaseRowLite>(`SELECT * FROM cases WHERE id = $1`, [id]);
 }
 
-function tradeModels(): (TradeModelRef & { label: string })[] {
-  return (db().prepare(`SELECT id, brand, model, variants, model_codes FROM trade_models`).all() as { id: string; brand: string; model: string; variants: string; model_codes: string }[]).map((r) => ({
+async function tradeModels(): Promise<(TradeModelRef & { label: string })[]> {
+  const rows = await query<{ id: string; brand: string; model: string; variants: string; model_codes: string }>(
+    `SELECT id, brand, model, variants, model_codes FROM trade_models`
+  );
+  return rows.map((r) => ({
     id: r.id,
     brand: r.brand,
     model: r.model,
@@ -140,18 +143,19 @@ type Live = {
  * applied. A session still running — or one staff only unlocked the camera for
  * (markLcdOverride writes a blank record with no `by`) — is not evidence yet.
  */
-function appliedSession(caseId: string, camera: CaseCameraCheck | null): SessionRow | null {
+async function appliedSession(caseId: string, camera: CaseCameraCheck | null): Promise<SessionRow | null> {
   if (!camera?.testSessionId) return null;
-  const s = db().prepare(`SELECT * FROM test_sessions WHERE id = ? AND case_id = ?`).get(camera.testSessionId, caseId) as SessionRow | undefined;
+  const s = await queryOne<SessionRow>(`SELECT * FROM test_sessions WHERE id = $1 AND case_id = $2`, [camera.testSessionId, caseId]);
   if (!s) return null;
   return s.status === "applied" || camera.by !== null ? s : null;
 }
 
 /** The Phonecheck record a case's grade reads: the newest one attached to it. */
-function attachedPhonecheck(caseId: string): { row: PcRowLite; record: PcRecord } | null {
-  const row = db()
-    .prepare(`SELECT id, source, record, received_at, attach_override FROM phonecheck_records WHERE case_id = ? AND attached_at IS NOT NULL ORDER BY attached_at DESC, received_at DESC LIMIT 1`)
-    .get(caseId) as PcRowLite | undefined;
+async function attachedPhonecheck(caseId: string): Promise<{ row: PcRowLite; record: PcRecord } | null> {
+  const row = await queryOne<PcRowLite>(
+    `SELECT id, source, record, received_at, attach_override FROM phonecheck_records WHERE case_id = $1 AND attached_at IS NOT NULL ORDER BY attached_at DESC, received_at DESC LIMIT 1`,
+    [caseId]
+  );
   if (!row) return null;
   try {
     return { row, record: JSON.parse(row.record) as PcRecord };
@@ -173,16 +177,16 @@ function passportIdOf(s: SessionRow | null): string | null {
   return typeof id === "string" ? id : null;
 }
 
-function live(c: CaseRowLite): Live {
+async function live(c: CaseRowLite): Promise<Live> {
   const faults = parseJson<FaultId[]>(c.faults, []);
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
   const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
-  const models = tradeModels();
+  const models = await tradeModels();
   const tm = c.model_id ? (models.find((m) => m.id === c.model_id) ?? null) : null;
-  const store = getStore(c.store_id);
+  const store = await getStore(c.store_id);
 
   const evidence: TestEvidence[] = [];
-  const s = appliedSession(c.id, camera);
+  const s = await appliedSession(c.id, camera);
   let plan: readonly PlanItem[] = DEFAULT_PLAN;
   let device: DeviceReport | null = null;
   let findings: ReportInput["camera"]["findings"] = [];
@@ -231,7 +235,7 @@ function live(c: CaseRowLite): Live {
       disagreements: disagreements(parseJson<Declared | null>(s.declared, null), raw, ce.snap, ce.mapping, ce.fin),
     };
   }
-  const pc = attachedPhonecheck(c.id);
+  const pc = await attachedPhonecheck(c.id);
   let pcModelMismatch: GradingInput["pcModelMismatch"] = null;
   if (pc) {
     evidence.push(evidenceFromPhonecheck(pc.record, pc.row.source === "upload" ? "phonecheck_upload" : "phonecheck", pc.row.received_at));
@@ -262,9 +266,11 @@ function live(c: CaseRowLite): Live {
   const kymStatus = checks?.kym?.status as KymStatus | undefined;
   const locked = !EDITABLE.includes(c.status) && !!checks;
   const modelMatch = device ? matchModel(device, models).match : pc ? matchModel(pcDeviceReport(pc.record), models).match : null;
-  const earlier = s
-    ? (db().prepare(`SELECT COUNT(*) n FROM test_sessions WHERE case_id = ? AND status = 'applied' AND id != ?`).get(c.id, s.id) as { n: number }).n
-    : (db().prepare(`SELECT COUNT(*) n FROM test_sessions WHERE case_id = ? AND status = 'applied'`).get(c.id) as { n: number }).n;
+  const earlierRow = s
+    ? await queryOne<{ n: string | number }>(`SELECT COUNT(*) n FROM test_sessions WHERE case_id = $1 AND status = 'applied' AND id != $2`, [c.id, s.id])
+    : await queryOne<{ n: string | number }>(`SELECT COUNT(*) n FROM test_sessions WHERE case_id = $1 AND status = 'applied'`, [c.id]);
+  const earlier = Number(earlierRow?.n || 0);
+
   const report: Omit<ReportInput, "grading"> = {
     case: { ref: c.ref, store: store?.name ?? "", storeCode: store?.code ?? null },
     phone: {
@@ -307,21 +313,20 @@ export type ReportEnvelope = ReportVersion & { schema: typeof REPORT_SCHEMA; bod
 const versionOf = (r: VersionRow): ReportVersion => ({ version: r.version, sha256: r.sha256, issuedAt: r.issued_at, reason: r.reason, final: !!r.final });
 const envelopeOf = (r: VersionRow): ReportEnvelope => ({ schema: REPORT_SCHEMA, ...versionOf(r), body: JSON.parse(r.body) as ReportBody });
 
-function latestRow(caseId: string): VersionRow | null {
-  return (db().prepare(`SELECT * FROM grading_reports WHERE case_id = ? ORDER BY version DESC LIMIT 1`).get(caseId) as VersionRow | undefined) ?? null;
+async function latestRow(caseId: string): Promise<VersionRow | null> {
+  return queryOne<VersionRow>(`SELECT * FROM grading_reports WHERE case_id = $1 ORDER BY version DESC LIMIT 1`, [caseId]);
 }
 
 /** The version frozen at lock, if the case has one. */
-function finalRow(caseId: string): VersionRow | null {
-  return (db().prepare(`SELECT * FROM grading_reports WHERE case_id = ? AND final = 1 ORDER BY version DESC LIMIT 1`).get(caseId) as VersionRow | undefined) ?? null;
+async function finalRow(caseId: string): Promise<VersionRow | null> {
+  return queryOne<VersionRow>(`SELECT * FROM grading_reports WHERE case_id = $1 AND final = 1 ORDER BY version DESC LIMIT 1`, [caseId]);
 }
 
 /** The version the buyback partner sees: the one frozen at lock, else (a case locked before reports existed) the latest backfill. */
-function partnerRow(caseId: string): VersionRow | null {
-  return (
-    (db()
-      .prepare(`SELECT * FROM grading_reports WHERE case_id = ? AND (final = 1 OR reason = 'backfill') ORDER BY final DESC, version DESC LIMIT 1`)
-      .get(caseId) as VersionRow | undefined) ?? null
+async function partnerRow(caseId: string): Promise<VersionRow | null> {
+  return queryOne<VersionRow>(
+    `SELECT * FROM grading_reports WHERE case_id = $1 AND (final = 1 OR reason = 'backfill') ORDER BY final DESC, version DESC LIMIT 1`,
+    [caseId]
   );
 }
 
@@ -332,48 +337,48 @@ function partnerRow(caseId: string): VersionRow | null {
  * null when there is nothing to report (no evidence) or nothing may be issued
  * (past the counter, except the lock version and a first backfill).
  */
-export function issueIfChanged(caseId: string, reason: ReportReason, userId: string | null, opts: { final?: boolean } = {}): ReportVersion | null {
-  return tx(() => {
-    const c = caseRow(caseId);
+export async function issueIfChanged(caseId: string, reason: ReportReason, userId: string | null, opts: { final?: boolean } = {}): Promise<ReportVersion | null> {
+  return tx(async () => {
+    const c = await caseRow(caseId);
     if (!c) return null;
-    const latest = latestRow(caseId);
+    const latest = await latestRow(caseId);
     const editable = EDITABLE.includes(c.status);
     if (opts.final) {
       if (latest?.final) return versionOf(latest);
     } else if (!editable && !(reason === "backfill" && !latest)) {
       return latest ? versionOf(latest) : null;
     }
-    const l = live(c);
+    const l = await live(c);
     if (!l.evidence && !latest) return null;
     const b = bodyOf(l);
     if (latest && latest.sha256 === b.sha && !opts.final) return versionOf(latest);
     let token = c.report_token;
     if (!token) {
       token = randomBytes(16).toString("base64url");
-      db().prepare(`UPDATE cases SET report_token = ? WHERE id = ? AND report_token IS NULL`).run(token, caseId);
+      await execute(`UPDATE cases SET report_token = $1 WHERE id = $2 AND report_token IS NULL`, [token, caseId]);
     }
     const version = (latest?.version ?? 0) + 1;
     const at = nowIso();
-    db()
-      .prepare(
-        `INSERT INTO grading_reports (id, case_id, version, reason, ruleset, status, label, final, body, sha256, photo_sources, issued_at, issued_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
-      )
-      .run(newId("gr"), caseId, version, reason, l.grading.ruleset, l.grading.status, l.grading.label, opts.final ? 1 : 0, b.text, b.sha, JSON.stringify(b.photoSources), at, userId);
-    audit({ userId, orgId: c.org_id, storeId: c.store_id, action: "grading.report", entity: "case", entityId: caseId, detail: { version, reason, label: l.grading.label, final: !!opts.final, sha256: b.sha } });
+    await execute(
+      `INSERT INTO grading_reports (id, case_id, version, reason, ruleset, status, label, final, body, sha256, photo_sources, issued_at, issued_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [newId("gr"), caseId, version, reason, l.grading.ruleset, l.grading.status, l.grading.label, opts.final ? 1 : 0, b.text, b.sha, JSON.stringify(b.photoSources), at, userId]
+    );
+    await audit({ userId, orgId: c.org_id, storeId: c.store_id, action: "grading.report", entity: "case", entityId: caseId, detail: { version, reason, label: l.grading.label, final: !!opts.final, sha256: b.sha } });
     return { version, sha256: b.sha, issuedAt: at, reason, final: !!opts.final };
   });
 }
 
 /** v1 for a case tested before reports existed — only when there is evidence (issueIfChanged checks). */
-function ensureBackfill(caseId: string): void {
-  if (!db().prepare(`SELECT 1 FROM grading_reports WHERE case_id = ? LIMIT 1`).get(caseId)) issueIfChanged(caseId, "backfill", null);
+async function ensureBackfill(caseId: string): Promise<void> {
+  const has = await queryOne<{ '?column?': number }>(`SELECT 1 FROM grading_reports WHERE case_id = $1 LIMIT 1`, [caseId]);
+  if (!has) await issueIfChanged(caseId, "backfill", null);
 }
 
 /** Never let the report break the counter: a failure to issue is logged, and the edit stands. */
-export function issueQuietly(caseId: string, reason: ReportReason, userId: string | null, opts: { final?: boolean } = {}): void {
+export async function issueQuietly(caseId: string, reason: ReportReason, userId: string | null, opts: { final?: boolean } = {}): Promise<void> {
   try {
-    issueIfChanged(caseId, reason, userId, opts);
+    await issueIfChanged(caseId, reason, userId, opts);
   } catch (e) {
     console.error(`[swapup] grading report not issued for ${caseId} (${reason}):`, e);
   }
@@ -405,11 +410,11 @@ const reportRef = (token: string | null, r: VersionRow | null, pinned: boolean):
  * and the partner show), linked to exactly that version. Partner: only what the
  * frozen version says — null when the case has none.
  */
-export function caseGrading(caseId: string, viewer: "staff" | "partner"): CaseGrading | null {
-  ensureBackfill(caseId);
-  const c = caseRow(caseId);
+export async function caseGrading(caseId: string, viewer: "staff" | "partner"): Promise<CaseGrading | null> {
+  await ensureBackfill(caseId);
+  const c = await caseRow(caseId);
   if (!c) return null;
-  const frozen = viewer === "partner" ? partnerRow(caseId) : !EDITABLE.includes(c.status) ? finalRow(caseId) : null;
+  const frozen = viewer === "partner" ? await partnerRow(caseId) : !EDITABLE.includes(c.status) ? await finalRow(caseId) : null;
   if (viewer === "partner" && !frozen) return null;
   if (frozen) {
     const g = (JSON.parse(frozen.body) as ReportBody).grade;
@@ -421,10 +426,10 @@ export function caseGrading(caseId: string, viewer: "staff" | "partner"): CaseGr
       final: g.final,
       why: g.reasons[0]?.text ?? null,
       report: reportRef(c.report_token, frozen, true),
-      phonecheck: viewer === "partner" ? null : pullState({ storeId: c.store_id, status: c.status, imei: c.imei, imei2: c.imei2 }),
+      phonecheck: viewer === "partner" ? null : await pullState({ storeId: c.store_id, status: c.status, imei: c.imei, imei2: c.imei2 }),
     };
   }
-  const l = live(c);
+  const l = await live(c);
   const g = l.grading;
   return {
     status: g.status,
@@ -433,23 +438,25 @@ export function caseGrading(caseId: string, viewer: "staff" | "partner"): CaseGr
     letter: g.letter,
     final: g.final,
     why: g.reasons[0]?.text ?? null,
-    report: reportRef(c.report_token, latestRow(caseId), false),
-    phonecheck: pullState({ storeId: c.store_id, status: c.status, imei: c.imei, imei2: c.imei2 }),
+    report: reportRef(c.report_token, await latestRow(caseId), false),
+    phonecheck: await pullState({ storeId: c.store_id, status: c.status, imei: c.imei, imei2: c.imei2 }),
   };
 }
 
 /** A pickup line's grade: the frozen version, linked to exactly that version. */
-export function pickupGrading(caseId: string): { label: string; final: boolean; version: number; path: string } | null {
-  ensureBackfill(caseId);
-  const r = partnerRow(caseId);
-  const token = (db().prepare(`SELECT report_token FROM cases WHERE id = ?`).get(caseId) as { report_token: string | null } | undefined)?.report_token ?? null;
+export async function pickupGrading(caseId: string): Promise<{ label: string; final: boolean; version: number; path: string } | null> {
+  await ensureBackfill(caseId);
+  const r = await partnerRow(caseId);
+  const tokenRow = await queryOne<{ report_token: string | null }>(`SELECT report_token FROM cases WHERE id = $1`, [caseId]);
+  const token = tokenRow?.report_token ?? null;
   if (!r || !token) return null;
   return { label: r.label, final: !!r.final, version: r.version, path: `/r/${token}?v=${r.version}` };
 }
 
 /** The customer's link once their check is applied (GET /api/device/status). */
-export function reportPathFor(caseId: string): string | null {
-  const token = (db().prepare(`SELECT report_token FROM cases WHERE id = ?`).get(caseId) as { report_token: string | null } | undefined)?.report_token ?? null;
+export async function reportPathFor(caseId: string): Promise<string | null> {
+  const tokenRow = await queryOne<{ report_token: string | null }>(`SELECT report_token FROM cases WHERE id = $1`, [caseId]);
+  const token = tokenRow?.report_token ?? null;
   return token ? `/r/${token}` : null;
 }
 
@@ -462,8 +469,8 @@ export type CustomerGrading = { status: Grading["status"]; label: string; grade:
  * the live grade, so the phone and the page it links to can't disagree.
  * null while nothing is issued.
  */
-export function customerGradingFor(caseId: string): CustomerGrading | null {
-  const r = latestRow(caseId);
+export async function customerGradingFor(caseId: string): Promise<CustomerGrading | null> {
+  const r = await latestRow(caseId);
   if (!r) return null;
   const g = (JSON.parse(r.body) as ReportBody).grade;
   return { status: g.status, label: g.label, grade: g.grade, letter: g.letter, final: g.final };
@@ -495,17 +502,17 @@ export type StaffExtras = {
  * frozen version only (404 before lock, as for the case itself), no live
  * grade, no versions list, no staff extras.
  */
-export function gradingReportFor(u: SessionUser, caseId: string) {
-  const v = getCase(u, caseId); // scope: out of scope → 404; the partner sees a case only once traded in
-  ensureBackfill(caseId);
-  const c = caseRow(caseId)!;
+export async function gradingReportFor(u: SessionUser, caseId: string) {
+  const v = await getCase(u, caseId); // scope: out of scope → 404; the partner sees a case only once traded in
+  await ensureBackfill(caseId);
+  const c = (await caseRow(caseId))!;
   if (u.role === "partner") {
-    const r = partnerRow(caseId);
+    const r = await partnerRow(caseId);
     return { live: null, issued: r ? envelopeOf(r) : null, versions: r ? [versionOf(r)] : [], path: reportRef(c.report_token, r, true)?.path ?? null, staff: null };
   }
-  const l = live(c);
-  const latest = latestRow(caseId);
-  const rows = db().prepare(`SELECT version, sha256, issued_at, reason, final FROM grading_reports WHERE case_id = ? ORDER BY version`).all(caseId) as VersionRow[];
+  const l = await live(c);
+  const latest = await latestRow(caseId);
+  const rows = await query<VersionRow>(`SELECT version, sha256, issued_at, reason, final FROM grading_reports WHERE case_id = $1 ORDER BY version`, [caseId]);
   const after = gradeAfterRefurb(l.condition);
   const cam = l.camera;
   const gid = cam?.gradeiqId ?? null;
@@ -549,24 +556,25 @@ export function gradingReportFor(u: SessionUser, caseId: string) {
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
 
-function versionByToken(token: string, v: string | null): { row: VersionRow; caseId: string } {
+async function versionByToken(token: string, v: string | null): Promise<{ row: VersionRow; caseId: string }> {
   const notFound = new HttpError(404, "Report not found.");
   if (!TOKEN_RE.test(token)) throw notFound;
-  const c = db().prepare(`SELECT id FROM cases WHERE report_token = ?`).get(token) as { id: string } | undefined;
+  const c = await queryOne<{ id: string }>(`SELECT id FROM cases WHERE report_token = $1`, [token]);
   if (!c) throw notFound;
   let row: VersionRow | undefined;
-  if (v === null || v === "") row = latestRow(c.id) ?? undefined;
+  if (v === null || v === "") row = (await latestRow(c.id)) ?? undefined;
   else {
     if (!/^[1-9]\d{0,5}$/.test(v)) throw notFound;
-    row = db().prepare(`SELECT * FROM grading_reports WHERE case_id = ? AND version = ?`).get(c.id, Number(v)) as VersionRow | undefined;
+    row = (await queryOne<VersionRow>(`SELECT * FROM grading_reports WHERE case_id = $1 AND version = $2`, [c.id, Number(v)])) ?? undefined;
   }
   if (!row) throw notFound;
   return { row, caseId: c.id };
 }
 
 /** GET /api/r/<token>[?v=n] — anyone with the link. The latest version, or version n. Never a list of versions. */
-export function publicReport(token: string, v: string | null): ReportEnvelope {
-  return envelopeOf(versionByToken(token, v).row);
+export async function publicReport(token: string, v: string | null): Promise<ReportEnvelope> {
+  const { row } = await versionByToken(token, v);
+  return envelopeOf(row);
 }
 
 /** GradeIQ serves one flat folder: /api/uploads/<file>, file = [A-Za-z0-9._-]+ (its own traversal guard). */
@@ -579,7 +587,7 @@ const PHOTO_TYPE = /^image\/(jpeg|png|webp|gif|heic|heif)\b/i;
  * under /api/uploads/; never a redirect (the URL carries GradeIQ's session id).
  */
 export async function reportPhoto(token: string, n: string, v: string | null): Promise<Response> {
-  const { row } = versionByToken(token, v);
+  const { row } = await versionByToken(token, v);
   const notFound = new HttpError(404, "Photo not found.");
   if (!/^\d{1,3}$/.test(n)) throw notFound;
   const sources = parseJson<string[]>(row.photo_sources, []);

@@ -25,7 +25,7 @@ const TABS: { id: Tab; label: string }[] = [
 export default async function AdminCataloguePage({ searchParams }: { searchParams: Promise<{ orgId?: string; tab?: string; modelId?: string }> }) {
   const u = await requirePage(["org_admin", "platform"], "/admin/catalogue");
   const sp = await searchParams;
-  const ctx = adminContext(u, sp.orgId);
+  const ctx = await adminContext(u, sp.orgId);
   const tab: Tab = sp.tab === "repair" || sp.tab === "models" ? sp.tab : "new";
   const intro = "What the counter sells, what a repair costs, and which phones it can take in trade.";
   if (!ctx.orgId) {
@@ -38,18 +38,18 @@ export default async function AdminCataloguePage({ searchParams }: { searchParam
     );
   }
   const orgId = ctx.orgId;
-  const s = orgSettings(orgId);
+  const s = await orgSettings(orgId);
 
   let body: ReactNode;
   if (tab === "new") {
-    body = <NewPhonesTab orgId={orgId} isPlatform={ctx.isPlatform} initial={newDevices(orgId, true)} />;
+    body = <NewPhonesTab orgId={orgId} isPlatform={ctx.isPlatform} initial={await newDevices(orgId, true)} />;
   } else if (tab === "repair") {
-    const all = tradeModelsDetailed();
+    const all = await tradeModelsDetailed();
     const tm = sp.modelId ? all.find((m) => m.id === sp.modelId) ?? null : null;
     const model: RepairModel | null = tm
       ? { id: tm.id, brand: tm.brand, model: tm.model, releaseYear: tm.releaseYear, serviceTier: tm.serviceTier, carePlusFee: tm.carePlusFee }
       : null;
-    const book = repairBook(orgId);
+    const book = await repairBook(orgId);
     const counts = new Map<string, { modelId: string; label: string; count: number }>();
     for (const r of book) {
       const c = counts.get(r.modelId) ?? { modelId: r.modelId, label: r.model ? `${r.brand} ${r.model}` : r.modelId, count: 0 };
@@ -69,7 +69,7 @@ export default async function AdminCataloguePage({ searchParams }: { searchParam
       />
     );
   } else {
-    body = <TradeModelsTab models={tradeModelsDetailed()} labourByTier={s.repairPolicy.labourByTier} carePlusDefault={s.repairPolicy.carePlusFeeDefault} />;
+    body = <TradeModelsTab models={await tradeModelsDetailed()} labourByTier={s.repairPolicy.labourByTier} carePlusDefault={s.repairPolicy.carePlusFeeDefault} />;
   }
 
   return (

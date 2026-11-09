@@ -22,7 +22,7 @@ export default async function CasePage({ params, searchParams }: { params: Promi
 
   let view: CaseView;
   try {
-    view = getCaseForViewer(u, id);
+    view = await getCaseForViewer(u, id);
   } catch (e) {
     if (e instanceof HttpError && e.status === 404) {
       return (
@@ -39,7 +39,7 @@ export default async function CasePage({ params, searchParams }: { params: Promi
     throw e;
   }
 
-  const tm = view.device ? getTradeModel(view.device.modelId) : null;
+  const tm = view.device ? await getTradeModel(view.device.modelId) : null;
   const initialModel: ModelOption | null = tm
     ? {
         id: tm.id,
@@ -55,13 +55,13 @@ export default async function CasePage({ params, searchParams }: { params: Promi
   // Campaign bands, so a manager changing the bonus sees the limits before the server refuses.
   const bands: Record<string, CampaignBand> = {};
   if (u.role === "store_manager") {
-    for (const c of activeCampaigns(view.orgId)) bands[c.id] = { name: c.name, minBp: c.minBp, maxBp: c.maxBp, capRupees: c.capRupees };
+    for (const c of await activeCampaigns(view.orgId)) bands[c.id] = { name: c.name, minBp: c.minBp, maxBp: c.maxBp, capRupees: c.capRupees };
   }
 
   let pickup: PickupInfo | null = null;
   if (view.pickupId) {
     try {
-      const p = getPickup(u, view.pickupId);
+      const p = await getPickup(u, view.pickupId);
       pickup = { ref: p.ref, status: p.status, collectedAt: p.collectedAt, collectorName: p.collectorName, settledAt: p.settledAt };
     } catch {
       pickup = null; // out of this user's scope — the case still shows
@@ -70,7 +70,7 @@ export default async function CasePage({ params, searchParams }: { params: Promi
 
   return (
     <AppShell user={u} wide>
-      <CaseWorkspace initial={view} role={u.role} brands={tradeBrands()} initialModel={initialModel} bands={bands} pickup={pickup} answerFirst={answerFirst} />
+      <CaseWorkspace initial={view} role={u.role} brands={await tradeBrands()} initialModel={initialModel} bands={bands} pickup={pickup} answerFirst={answerFirst} />
     </AppShell>
   );
 }

@@ -18,7 +18,7 @@ export const metadata = { title: "Stores" };
 export default async function AdminStoresPage({ searchParams }: { searchParams: Promise<{ orgId?: string }> }) {
   const u = await requirePage(["org_admin", "platform"], "/admin/stores");
   const sp = await searchParams;
-  const ctx = adminContext(u, sp.orgId);
+  const ctx = await adminContext(u, sp.orgId);
   const intro = "Each store's trade-in credit line.";
   if (!ctx.orgId) {
     return (
@@ -30,10 +30,10 @@ export default async function AdminStoresPage({ searchParams }: { searchParams: 
     );
   }
   const orgId = ctx.orgId;
-  const stores = listStores(u).filter((s) => s.org_id === orgId);
-  const live = new Map(programmeReport(u, { orgId }).stores.map((r) => [r.storeId, r]));
+  const stores = (await listStores(u)).filter((s) => s.org_id === orgId);
+  const live = new Map((await programmeReport(u, { orgId })).stores.map((r) => [r.storeId, r]));
   const totalLimit = stores.reduce((t, s) => t + s.credit_limit, 0);
-  const pending = pendingStores(u).filter((p) => stores.some((s) => s.id === p.id));
+  const pending = (await pendingStores(u)).filter((p) => stores.some((s) => s.id === p.id));
 
   return (
     <AppShell user={u} wide>

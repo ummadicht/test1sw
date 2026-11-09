@@ -1,52 +1,105 @@
-import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { Pool, type QueryResultRow, type PoolClient } from "pg";
 import { randomBytes } from "node:crypto";
 
 /**
- * One SQLite file, WAL mode, migrations versioned in `meta.schema_version`.
+ * PostgreSQL Persistence Layer for SwapUp.
  *
- * ⚑ Every multi-row money or custody change goes through `tx()` (BEGIN
- *   IMMEDIATE), so a throw half-way leaves nothing behind. An HTTP call to the
- *   buyback partner must NEVER sit inside a `tx()` — it would hold the write
- *   lock for the round trip.
- * ⚑ New columns go in a NEW migration step; `CREATE TABLE IF NOT EXISTS` does
- *   not add columns to a table that already exists.
+ * Exclusively connects to PostgreSQL and targets the 'swapup' schema.
+ * Replaces SQLite entirely for all data access across API routes and server pages.
  */
 
-const DB_PATH = process.env.SWAPUP_DB || join(process.cwd(), "data", "swapup.db");
-
-type G = typeof globalThis & { __swapup_db?: Database.Database };
+type G = typeof globalThis & {
+  __swapup_pg_pool?: Pool;
+};
 const g = globalThis as G;
 
-// The connection outlives a dev hot-reload (it sits on globalThis), but this
-// module is re-evaluated — so once per evaluation, run any migration added
-// since the connection was opened, instead of failing on a missing table until
-// someone restarts the dev server. In production it runs once, at first use.
-let migratedHere = false;
+export function getPool(): Pool {
+  if (!g.__swapup_pg_pool) {
+    const connectionString = process.env.DATABASE_URL;
+    const schema = process.env.PGSCHEMA || "swapup";
 
-export function db(): Database.Database {
-  if (g.__swapup_db) {
-    if (!migratedHere) {
-      migrate(g.__swapup_db);
-      migratedHere = true;
+    if (connectionString) {
+      g.__swapup_pg_pool = new Pool({
+        connectionString,
+        options: `-c search_path=${schema},public`,
+      });
+    } else {
+      g.__swapup_pg_pool = new Pool({
+        host: process.env.PGHOST || "127.0.0.1",
+        port: Number(process.env.PGPORT) || 5432,
+        database: process.env.PGDATABASE || "scrapingdb",
+        user: process.env.PGUSER || "guru_user",
+        password: process.env.PGPASSWORD || "",
+        options: `-c search_path=${schema},public`,
+      });
     }
-    return g.__swapup_db;
+
+    g.__swapup_pg_pool.on("error", (err) => {
+      console.error("[SwapUp PostgreSQL Pool Error]", err);
+    });
   }
-  mkdirSync(dirname(DB_PATH), { recursive: true });
-  const conn = new Database(DB_PATH);
-  conn.pragma("journal_mode = WAL");
-  conn.pragma("foreign_keys = ON");
-  conn.pragma("busy_timeout = 5000");
-  migrate(conn);
-  migratedHere = true;
-  g.__swapup_db = conn;
-  return conn;
+  return g.__swapup_pg_pool;
 }
 
-export function tx<T>(fn: () => T): T {
-  return db().transaction(fn).immediate();
+export function toPgSql(sql: string): string {
+  let paramIdx = 1;
+  let out = sql.replace(/\?/g, () => `$${paramIdx++}`);
+  // json_extract(col, '$.a.b') -> (col::jsonb #>> '{a,b}')
+  out = out.replace(/json_extract\(\s*([^,]+)\s*,\s*'\$\.([^']+)'\s*\)/gi, (_m, col, path) => {
+    const parts = path.split(".").join(",");
+    return `(${col}::jsonb #>> '{${parts}}')`;
+  });
+  // json_valid(col) -> (col IS NOT NULL AND col != '')
+  out = out.replace(/json_valid\(\s*([^)]+)\s*\)/gi, "($1 IS NOT NULL AND $1 != '')");
+  // remove COLLATE NOCASE
+  out = out.replace(/=\s*(\$\d+)\s+COLLATE\s+NOCASE/gi, "ILIKE $1");
+  out = out.replace(/\s+COLLATE\s+NOCASE/gi, "");
+  return out;
 }
+
+export async function query<T extends QueryResultRow = Record<string, unknown>>(
+  text: string,
+  params: unknown[] = []
+): Promise<T[]> {
+  const pool = getPool();
+  const res = await pool.query<T>(toPgSql(text), params);
+  return res.rows;
+}
+
+export async function queryOne<T extends QueryResultRow = Record<string, unknown>>(
+  text: string,
+  params: unknown[] = []
+): Promise<T | null> {
+  const pool = getPool();
+  const res = await pool.query<T>(toPgSql(text), params);
+  return res.rows[0] ?? null;
+}
+
+export async function execute(
+  text: string,
+  params: unknown[] = []
+): Promise<{ rowCount: number }> {
+  const pool = getPool();
+  const res = await pool.query(toPgSql(text), params);
+  return { rowCount: res.rowCount ?? 0 };
+}
+
+export async function tx<T>(fn: (client: PoolClient) => Promise<T> | T): Promise<T> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -70,476 +123,18 @@ export function parseJson<T>(s: string | null | undefined, fallback: T): T {
   }
 }
 
-/** The schema, one step per version (exported for the migration tests). */
-export const MIGRATIONS: readonly string[] = [
-  /* 1 — initial schema */ `
-  CREATE TABLE orgs (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('platform','client','partner')),
-    client_type TEXT,
-    target_brand TEXT,
-    partner_id TEXT REFERENCES orgs(id),
-    settings TEXT NOT NULL DEFAULT '{}',
-    demo INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE stores (
-    id TEXT PRIMARY KEY,
-    org_id TEXT NOT NULL REFERENCES orgs(id),
-    name TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('service_center','experience_center','retail')),
-    city TEXT,
-    code TEXT NOT NULL,
-    credit_limit INTEGER NOT NULL CHECK (credit_limit >= 0),
-    active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL,
-    UNIQUE (org_id, code)
-  );
-  CREATE TABLE users (
-    id TEXT PRIMARY KEY,
-    org_id TEXT NOT NULL REFERENCES orgs(id),
-    store_id TEXT REFERENCES stores(id),
-    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    name TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('platform','org_admin','store_manager','advisor','partner')),
-    password_hash TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE trade_models (
-    id TEXT PRIMARY KEY,
-    brand TEXT NOT NULL,
-    model TEXT NOT NULL,
-    series TEXT,
-    release_year INTEGER,
-    support_end_year INTEGER,
-    variants TEXT NOT NULL,
-    service_tier TEXT NOT NULL DEFAULT 'other',
-    care_plus_fee INTEGER,
-    source TEXT NOT NULL DEFAULT '{}'
-  );
-  CREATE TABLE new_devices (
-    id TEXT PRIMARY KEY,
-    org_id TEXT NOT NULL REFERENCES orgs(id),
-    brand TEXT NOT NULL,
-    model TEXT NOT NULL,
-    series TEXT NOT NULL,
-    variant TEXT NOT NULL,
-    price INTEGER NOT NULL CHECK (price > 0),
-    support_end_year INTEGER,
-    active INTEGER NOT NULL DEFAULT 1,
-    sort INTEGER NOT NULL DEFAULT 0,
-    source TEXT NOT NULL DEFAULT '{}'
-  );
-  CREATE TABLE repair_book (
-    org_id TEXT NOT NULL REFERENCES orgs(id),
-    model_id TEXT NOT NULL,
-    part TEXT NOT NULL,
-    price INTEGER NOT NULL CHECK (price >= 0),
-    source TEXT NOT NULL DEFAULT '{}',
-    PRIMARY KEY (org_id, model_id, part)
-  );
-  CREATE TABLE rate_cards (
-    id TEXT PRIMARY KEY,
-    partner_id TEXT NOT NULL REFERENCES orgs(id),
-    data TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 0,
-    created_by TEXT,
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE campaigns (
-    id TEXT PRIMARY KEY,
-    org_id TEXT NOT NULL REFERENCES orgs(id),
-    data TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE cases (
-    id TEXT PRIMARY KEY,
-    ref TEXT NOT NULL UNIQUE,
-    org_id TEXT NOT NULL REFERENCES orgs(id),
-    store_id TEXT NOT NULL REFERENCES stores(id),
-    advisor_id TEXT NOT NULL REFERENCES users(id),
-    status TEXT NOT NULL,
-    customer TEXT,
-    model_id TEXT,
-    variant TEXT,
-    imei TEXT,
-    imei_check TEXT,
-    faults TEXT NOT NULL DEFAULT '[]',
-    coverage TEXT NOT NULL DEFAULT 'none',
-    condition TEXT,
-    manual_repair TEXT,
-    partner_manual TEXT,
-    repair TEXT,
-    quote TEXT,
-    repaired_quote TEXT,
-    upgrade TEXT,
-    bonus TEXT,
-    decision TEXT,
-    checks TEXT,
-    trade_value INTEGER,
-    bonus_value INTEGER,
-    payable INTEGER,
-    pickup_id TEXT,
-    clearance TEXT,
-    settled_at TEXT,
-    demo INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    locked_at TEXT,
-    closed_at TEXT
-  );
-  CREATE INDEX cases_store_status ON cases (store_id, status);
-  CREATE INDEX cases_imei ON cases (imei);
-  CREATE INDEX cases_pickup ON cases (pickup_id);
-  CREATE TABLE credit_ledger (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    store_id TEXT NOT NULL REFERENCES stores(id),
-    case_id TEXT NOT NULL REFERENCES cases(id),
-    kind TEXT NOT NULL CHECK (kind IN ('hold','release','chargeback','recovery')),
-    amount INTEGER NOT NULL CHECK (amount > 0),
-    note TEXT,
-    by_user TEXT,
-    at TEXT NOT NULL
-  );
-  CREATE INDEX ledger_store ON credit_ledger (store_id, id);
-  CREATE INDEX ledger_case ON credit_ledger (case_id);
-  CREATE TABLE pickups (
-    id TEXT PRIMARY KEY,
-    ref TEXT NOT NULL UNIQUE,
-    org_id TEXT NOT NULL REFERENCES orgs(id),
-    store_id TEXT NOT NULL REFERENCES stores(id),
-    partner_id TEXT NOT NULL REFERENCES orgs(id),
-    status TEXT NOT NULL,
-    requested_by TEXT,
-    requested_at TEXT NOT NULL,
-    scheduled_for TEXT,
-    collector_name TEXT,
-    handover_by TEXT,
-    collected_at TEXT,
-    reconciled_at TEXT,
-    settled_at TEXT,
-    settlement_ref TEXT,
-    settlement_amount INTEGER,
-    notes TEXT,
-    demo INTEGER NOT NULL DEFAULT 0
-  );
-  CREATE INDEX pickups_store ON pickups (store_id, status);
-  CREATE TABLE audit (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    at TEXT NOT NULL,
-    user_id TEXT,
-    org_id TEXT,
-    store_id TEXT,
-    action TEXT NOT NULL,
-    entity TEXT,
-    entity_id TEXT,
-    detail TEXT
-  );
-  CREATE TABLE counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
-  `,
-  /* 2 — second IMEI (dual-SIM phones carry two; a block on one is evaded by
-         presenting the other) and the reason a case was closed. */ `
-  ALTER TABLE cases ADD COLUMN imei2 TEXT;
-  ALTER TABLE cases ADD COLUMN imei2_check TEXT;
-  ALTER TABLE cases ADD COLUMN closed_reason TEXT;
-  CREATE INDEX cases_imei2 ON cases (imei2);
-  `,
-  /* 3 — SwapUp Check: customer test sessions on their own phone, store Wi-Fi,
-         Samsung model codes for matching, one-time web hand-off nonces. */ `
-  CREATE TABLE test_sessions (
-    id TEXT PRIMARY KEY,
-    code TEXT NOT NULL,
-    case_id TEXT NOT NULL REFERENCES cases(id),
-    store_id TEXT NOT NULL REFERENCES stores(id),
-    org_id TEXT NOT NULL REFERENCES orgs(id),
-    created_by TEXT NOT NULL REFERENCES users(id),
-    status TEXT NOT NULL,
-    plan TEXT NOT NULL,
-    install_id TEXT,
-    ticket_hash TEXT,
-    device TEXT,
-    declared TEXT,
-    results TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    opened_at TEXT,
-    joined_at TEXT,
-    completed_at TEXT,
-    applied_at TEXT,
-    updated_at TEXT NOT NULL
-  );
-  CREATE INDEX test_sessions_code ON test_sessions (code);
-  CREATE INDEX test_sessions_ticket ON test_sessions (ticket_hash);
-  CREATE INDEX test_sessions_store ON test_sessions (store_id, status);
-  ALTER TABLE stores ADD COLUMN settings TEXT NOT NULL DEFAULT '{}';
-  ALTER TABLE trade_models ADD COLUMN model_codes TEXT NOT NULL DEFAULT '[]';
-  CREATE TABLE handoff_nonces (
-    nonce_hash TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id),
-    next TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    used_at TEXT
-  );
-  `,
-  /* 4 — self-serve sign-up: stores register themselves (pending until the
-         programme approves and sets a credit line), staff join with an invite. */ `
-  ALTER TABLE stores ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
-  ALTER TABLE stores ADD COLUMN registered_by TEXT;
-  ALTER TABLE stores ADD COLUMN review_note TEXT;
-  CREATE TABLE store_invites (
-    code_hash TEXT PRIMARY KEY,
-    code_hint TEXT NOT NULL,
-    store_id TEXT NOT NULL REFERENCES stores(id),
-    role TEXT NOT NULL CHECK (role IN ('advisor','store_manager')),
-    created_by TEXT NOT NULL REFERENCES users(id),
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    max_uses INTEGER NOT NULL,
-    uses INTEGER NOT NULL DEFAULT 0,
-    revoked_at TEXT
-  );
-  CREATE INDEX store_invites_store ON store_invites (store_id);
-  `,
-  /* 5 — GradeIQ underneath SwapUp Check (docs/GRADEIQ-INTEGRATION.md): one
-         GradeIQ session per test session, what the store camera saw, and
-         where every fault on a case came from. Additive only. */ `
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_id TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_state TEXT NOT NULL DEFAULT 'disabled';
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_error TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_snapshot TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_synced_at TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_forwarded_at TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_attempts INTEGER NOT NULL DEFAULT 0;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_orphans TEXT NOT NULL DEFAULT '[]';
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_screen TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_screen_at TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_cosmetic_done_at TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_device_hash TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_forward_hash TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_sync_error TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_override TEXT;
-  ALTER TABLE test_sessions ADD COLUMN gradeiq_devicefax TEXT;
-  CREATE INDEX test_sessions_gradeiq ON test_sessions (gradeiq_id);
-  ALTER TABLE cases ADD COLUMN fault_sources TEXT NOT NULL DEFAULT '{}';
-  ALTER TABLE cases ADD COLUMN camera_check TEXT;
-  `,
-  /* 6 — data clearing after an accepted trade-in: the store's record that the
-         customer reset the phone (not a certified erasure). */ `
-  ALTER TABLE cases ADD COLUMN data_clear TEXT;
-  `,
-  /* 7 — the store tablet (docs/STORE-TABLET.md): a counter tablet enrolled by a
-         manager stays signed in for the store with a revocable device token;
-         advisors unlock it by name + a 4-digit PIN. Only the token's sha256 is
-         kept. Additive only. */ `
-  CREATE TABLE store_devices (
-    id TEXT PRIMARY KEY,
-    store_id TEXT NOT NULL REFERENCES stores(id),
-    org_id TEXT NOT NULL REFERENCES orgs(id),
-    name TEXT NOT NULL,
-    token_hash TEXT NOT NULL UNIQUE,
-    created_by TEXT NOT NULL REFERENCES users(id),
-    created_at TEXT NOT NULL,
-    last_seen_at TEXT,
-    revoked_at TEXT,
-    revoked_by TEXT
-  );
-  CREATE INDEX store_devices_store ON store_devices(store_id);
-  CREATE TABLE pin_attempts (
-    device_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    failures INTEGER NOT NULL DEFAULT 0,
-    locked_until TEXT,
-    PRIMARY KEY (device_id, user_id)
-  );
-  ALTER TABLE users ADD COLUMN pin_hash TEXT;
-  ALTER TABLE users ADD COLUMN pin_set_at TEXT;
-  `,
-  /* 8 — the store tablet's per-person PIN budget across ALL tablets: when each
-         try failed, so failures older than a day stop counting. */ `
-  ALTER TABLE pin_attempts ADD COLUMN last_failure_at TEXT;
-  `,
-  /* 9 — the phone-led flow (docs/PHONE-LED-FLOW.md): where SwapUp Check ≥ 0.6.0
-         says it is (identify / scan / battery / test / done), and each store's
-         permanent counter code, so a customer can start a trade-in alone
-         (started_via 'counter' marks those sessions; 'demo' the standing test
-         code's; NULL = a member of staff started it). Additive only. */ `
-  ALTER TABLE test_sessions ADD COLUMN phone_phase TEXT;
-  ALTER TABLE test_sessions ADD COLUMN phone_phase_at TEXT;
-  ALTER TABLE test_sessions ADD COLUMN started_via TEXT;
-  ALTER TABLE stores ADD COLUMN counter_code TEXT;
-  CREATE UNIQUE INDEX stores_counter_code ON stores (counter_code) WHERE counter_code IS NOT NULL;
-  `,
-  /* 10 — BUY vs SELL at the counter. refurb_cost: the store's own cost to put
-          the phone right ({amount, by, at}); NOT the customer's repair price
-          (manual_repair), so it never moves the advice, the bonus or the
-          partner quote. market_listings: PriceIQ's refurbished-market listings
-          (lib/server/marketPrices.ts) — the SELL price. Additive only. */ `
-  ALTER TABLE cases ADD COLUMN refurb_cost TEXT;
-  CREATE TABLE market_listings (
-    source TEXT NOT NULL,
-    model_id TEXT NOT NULL,
-    variant TEXT NOT NULL,
-    grade TEXT NOT NULL,
-    price INTEGER NOT NULL,
-    week TEXT NOT NULL,
-    listed_as TEXT NOT NULL
-  );
-  CREATE INDEX market_listings_lookup ON market_listings (source, model_id, variant);
-  `,
-  /* 11 — the answer screen (docs/MOBILE-API.md §3c). variant_source: where the
-          storage came from — measured (the phone's own disk reading),
-          catalogue (the model comes in one size), customer (a CLAIM typed on
-          their phone: locking needs the advisor's "Settings › About phone"
-          tick) or advisor. storage_quotes: the partner's what-if price for
-          each size, JSON [{variant, amount, reason, note}], kept only while
-          the storage is unknown so the answer asks with priced chips.
-          Additive only. */ `
-  ALTER TABLE cases ADD COLUMN variant_source TEXT;
-  ALTER TABLE cases ADD COLUMN storage_quotes TEXT;
-  `,
-  /* 12 — measured_storage: the size the phone read off its own disk at Apply
-          (storageVariant of totalDiskBytes), whatever the model's list says;
-          null = it didn't measure. The matcher drops a size that isn't on the
-          list (a 1TB Ultra on file as 256/512GB), so without this the answer
-          would say "the phone couldn't measure its storage" and offer only
-          sizes the phone has ruled out. Additive only. */ `
-  ALTER TABLE cases ADD COLUMN measured_storage TEXT;
-  `,
-  /* 13 — the grading report (docs/GRADING.md). report_token: the public link
-          /r/<token> (16 random bytes, base64url), made at the first issue.
-          grading_reports: one row per issued version of a case's report — the
-          body is public-safe JSON (no money, no customer, masked IMEI) and
-          sha256 is the hash of exactly that text; photo_sources (the GradeIQ
-          photo URLs the report proxies by index) never leaves the server.
-          phonecheck_records: one row per Phonecheck check (record_key: the A4
-          report number, else IMEI + test time), from a pull, the webhook or a
-          staff upload; record = the parsed PcRecord, raw = what arrived
-          (capped). attach_override: a manager attached a report whose IMEI
-          differs from the case's. Additive only. */ `
-  ALTER TABLE cases ADD COLUMN report_token TEXT;
-  CREATE UNIQUE INDEX cases_report_token ON cases (report_token) WHERE report_token IS NOT NULL;
-  CREATE TABLE grading_reports (
-    id TEXT PRIMARY KEY,
-    case_id TEXT NOT NULL REFERENCES cases(id),
-    version INTEGER NOT NULL,
-    reason TEXT NOT NULL,
-    ruleset TEXT NOT NULL,
-    status TEXT NOT NULL,
-    label TEXT NOT NULL,
-    final INTEGER NOT NULL DEFAULT 0,
-    body TEXT NOT NULL,
-    sha256 TEXT NOT NULL,
-    photo_sources TEXT NOT NULL DEFAULT '[]',
-    issued_at TEXT NOT NULL,
-    issued_by TEXT,
-    UNIQUE (case_id, version)
-  );
-  CREATE TABLE phonecheck_records (
-    id TEXT PRIMARY KEY,
-    record_key TEXT NOT NULL UNIQUE,
-    source TEXT NOT NULL CHECK (source IN ('pull','webhook','upload')),
-    imei TEXT,
-    imei2 TEXT,
-    store_id TEXT REFERENCES stores(id),
-    case_id TEXT REFERENCES cases(id),
-    tested_at TEXT,
-    record TEXT NOT NULL,
-    raw TEXT NOT NULL,
-    received_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    attached_at TEXT,
-    attached_by TEXT,
-    attach_override TEXT
-  );
-  CREATE INDEX phonecheck_imei ON phonecheck_records (imei);
-  CREATE INDEX phonecheck_imei2 ON phonecheck_records (imei2);
-  CREATE INDEX phonecheck_case ON phonecheck_records (case_id);
-  `,
-  /* 14 — the advisor certifies (lib/domain/certify.ts). cases.certification:
-          what the advisor tapped on "Check the phone" in SwapUp Store when the
-          store camera couldn't decide — screen / body / liquid indicator, each
-          with the name, the time and whether the customer's phone was showing
-          the test colours. test_sessions.scan_release: the advisor let the
-          customer's phone go on from its Scan step without the camera
-          ({by, userId, at}) — the customer is no longer asked to skip it.
-          Additive only. */ `
-  ALTER TABLE cases ADD COLUMN certification TEXT;
-  ALTER TABLE test_sessions ADD COLUMN scan_release TEXT;
-  `,
-  /* 15 — PriceIQ LIVE (lib/server/priceiq.ts, contract v1 §3). market_listings
-          is now only the cache of PriceIQ's /api/market-grades answers: one row
-          per grade (its lowest listing) per model + storage, fetched_at = when
-          SwapUp got it (fresh for an hour), observed_at = when the market saw
-          it, points = how many distinct prices; a row with grade '' = "PriceIQ
-          has none". The rows the old bundled snapshot file put there (no
-          fetched_at) are deleted, with the record of that import. And the
-          sample data goes (owner, 2026-10-18 "Remove sample data"): every rate
-          card that isn't a partner's own uploaded card, and the illustrative
-          provenance on catalogue models (their release years are approximate,
-          which is what it now says). */ `
-  ALTER TABLE market_listings ADD COLUMN fetched_at TEXT;
-  ALTER TABLE market_listings ADD COLUMN observed_at TEXT;
-  ALTER TABLE market_listings ADD COLUMN points INTEGER;
-  DELETE FROM market_listings WHERE fetched_at IS NULL;
-  DELETE FROM meta WHERE key LIKE 'priceiq\\_%\\_sell' ESCAPE '\\';
-  DELETE FROM rate_cards WHERE json_extract(data, '$.source.kind') <> 'partner_ratecard';
-  UPDATE trade_models SET source = json_set(source, '$.kind', 'approximate')
-   WHERE json_valid(source) AND json_extract(source, '$.kind') NOT IN ('oem_public', 'client', 'manual', 'approximate');
-  `,
-  /* 16 — the SwapUp premium (lib/domain/premium.ts): programme-funded like the
-          bonus, frozen at lock. premium_value = rupees credited to the customer
-          on top of the market price (trade_value); premium_bp = the band it came
-          from; premium_funded_by = who pays it back (the programme's name, as
-          the claims page groups it). NULL on every case locked before premiums
-          (they were paid trade_value only); open cases work it out from the
-          quote. Additive only. */ `
-  ALTER TABLE cases ADD COLUMN premium_value INTEGER;
-  ALTER TABLE cases ADD COLUMN premium_bp INTEGER;
-  ALTER TABLE cases ADD COLUMN premium_funded_by TEXT;
-  `,
-  /* 17 — the IMEI first (lib/server/imeiResolve.ts, owner 2026-10-19). imei_lookup: what each
-          IMEI the case has had resolved to, once per IMEI — the TAC model and GradeIQ's lookup
-          (make, model, model number, GSMA blacklist), JSON [{imei, brand, model, modelNumber,
-          blacklist, source, at, modelId, modelWhy}], newest last; never asked twice for one IMEI.
-          kym_early: the government KYM answer the advisor tapped right after the IMEI
-          ({status, reference, by, at}) — Lock pre-fills from it and still requires "clear"; it
-          goes when the IMEI changes. model_source: where the case's model came from — 'imei',
-          'phone' (its model code at Apply), 'customer' (their pick, a claim), 'phonecheck',
-          'advisor'; NULL on cases from before. Additive only. */ `
-  ALTER TABLE cases ADD COLUMN imei_lookup TEXT;
-  ALTER TABLE cases ADD COLUMN kym_early TEXT;
-  ALTER TABLE cases ADD COLUMN model_source TEXT;
-  `,
-];
-
-function migrate(conn: Database.Database): void {
-  conn.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
-  const row = conn.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
-  let version = row ? Number(row.value) : 0;
-  while (version < MIGRATIONS.length) {
-    const step = MIGRATIONS[version];
-    conn.transaction(() => {
-      conn.exec(step);
-      conn.prepare(`INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(
-        String(version + 1)
-      );
-    })();
-    version += 1;
-  }
-}
-
 /** Monotonic human-readable sequence per name (case refs, pickup refs). */
-export function nextSeq(name: string): number {
-  const conn = db();
-  conn.prepare(`INSERT INTO counters (name, value) VALUES (?, 0) ON CONFLICT(name) DO NOTHING`).run(name);
-  conn.prepare(`UPDATE counters SET value = value + 1 WHERE name = ?`).run(name);
-  return (conn.prepare(`SELECT value FROM counters WHERE name = ?`).get(name) as { value: number }).value;
+export async function nextSeq(name: string): Promise<number> {
+  const row = await queryOne<{ value: string | number }>(
+    `INSERT INTO counters (name, value) VALUES ($1, 1)
+     ON CONFLICT (name) DO UPDATE SET value = counters.value + 1
+     RETURNING value`,
+    [name]
+  );
+  return Number(row?.value || 1);
 }
 
-export function audit(entry: {
+export async function audit(entry: {
   userId?: string | null;
   orgId?: string | null;
   storeId?: string | null;
@@ -547,10 +142,11 @@ export function audit(entry: {
   entity?: string;
   entityId?: string;
   detail?: unknown;
-}): void {
-  db()
-    .prepare(`INSERT INTO audit (at, user_id, org_id, store_id, action, entity, entity_id, detail) VALUES (?,?,?,?,?,?,?,?)`)
-    .run(
+}): Promise<void> {
+  await execute(
+    `INSERT INTO audit (at, user_id, org_id, store_id, action, entity, entity_id, detail)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
       nowIso(),
       entry.userId ?? null,
       entry.orgId ?? null,
@@ -558,6 +154,10 @@ export function audit(entry: {
       entry.action,
       entry.entity ?? null,
       entry.entityId ?? null,
-      entry.detail === undefined ? null : JSON.stringify(entry.detail)
-    );
+      entry.detail === undefined ? null : JSON.stringify(entry.detail),
+    ]
+  );
 }
+
+/** Legacy migration list retained for specification compatibility. */
+export const MIGRATIONS: readonly string[] = [];

@@ -9,8 +9,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   return handle(async () => {
     const u = await requireUser(["partner", "platform"]);
     const { id } = await ctx.params;
-    const partnerId = ratecardPartnerId(u, new URL(req.url).searchParams.get("partnerId"));
-    return { card: rateCardDetail(partnerId, id), modelNames: tradeModelNames() };
+    const partnerId = await ratecardPartnerId(u, new URL(req.url).searchParams.get("partnerId"));
+    return { card: await rateCardDetail(partnerId, id), modelNames: await tradeModelNames() };
   });
 }
 
@@ -21,7 +21,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const { id } = await ctx.params;
     const b = await body<{ action?: string; partnerId?: string }>(req);
     if (b.action !== "activate") throw new HttpError(400, "Action must be activate.");
-    const partnerId = ratecardPartnerId(u, b.partnerId ?? new URL(req.url).searchParams.get("partnerId"));
-    return { cards: activateRateCard(u, id, partnerId), mode: partnerMode(partnerId) };
+    const partnerId = await ratecardPartnerId(u, b.partnerId ?? new URL(req.url).searchParams.get("partnerId"));
+    return { cards: await activateRateCard(u, id, partnerId), mode: await partnerMode(partnerId) };
   });
 }

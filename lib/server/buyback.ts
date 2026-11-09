@@ -1,16 +1,8 @@
 /**
  * THE BUYBACK PARTNER SEAM — the programme's buyback partner (its org row).
- *
- * The partner collects and pays for the phones. Where the trade-in PRICE comes from is
- * lib/server/tradeIn.ts, best first: PriceIQ's refurbished market price at the phone's grade,
- * then — this file — the partner's RATE CARD: the price sheet its operations team uploads on
- * /partner/rate-cards. SwapUp has no partner quote API (none exists to call), keeps no built-in
- * prices of its own and takes no typed ones: with no card, the partner simply has no price.
- *
- * Every answer records where it came from, so the UI never has to guess whether a number is real.
  */
 
-import { db, parseJson, nowIso } from "./db";
+import { queryOne, parseJson, nowIso } from "./db";
 import { priceFromCard, type RateCard, type QuoteLine, type PriceSourceKind } from "../domain/ratecard";
 import type { ConditionAnswers } from "../domain/condition";
 import type { Rupees } from "../domain/money";
@@ -27,18 +19,14 @@ export type PartnerQuote = {
   quotedAt: string;
   validUntil: string | null;
   reason?: string;
-  /** source.kind "priceiq": the grade, base, markdown and market age the lines start from (lib/server/tradeIn.ts). */
   priceiq?: PriceiqMeta;
-  /** PriceIQ was asked first and had no price: why (a rate-card quote, or no price at all). */
   priceiqWhy?: string;
-  /** A rate-card row with grade prices: the grade the price is FOR (ratecard.ts priceFromCard). */
   grade?: MarketGrade;
 };
 
 export type PartnerMode = {
   partnerId: string;
   partnerName: string;
-  /** partner_ratecard = the partner's uploaded card prices what PriceIQ can't; none = no card loaded. */
   kind: "partner_ratecard" | "none";
   label: string;
   why: string;
@@ -48,33 +36,37 @@ export type PartnerMode = {
 type CardRow = { id: string; data: string; created_at: string };
 
 /** The partner's active uploaded rate card, or null. */
-export function activeRateCard(partnerId: string): RateCard | null {
-  const row = db()
-    .prepare(`SELECT id, data, created_at FROM rate_cards WHERE partner_id = ? AND active = 1 ORDER BY created_at DESC LIMIT 1`)
-    .get(partnerId) as CardRow | undefined;
+export async function activeRateCard(partnerId: string): Promise<RateCard | null> {
+  const row = await queryOne<CardRow>(
+    `SELECT id, data, created_at FROM rate_cards WHERE partner_id = $1 AND active = 1 ORDER BY created_at DESC LIMIT 1`,
+    [partnerId]
+  );
   if (!row) return null;
   const card = parseJson<RateCard | null>(row.data, null);
   return card && card.source?.kind === "partner_ratecard" ? { ...card, id: row.id } : null;
 }
 
 /**
- * A rate card by its id, active or not: the card a quote was read off (`source.rateCardId`), so the
- * staff refurb decision prices the phone repaired off the SAME card as the trade-in, even after a
- * newer card went live. Cards are never deleted; null for an id SwapUp doesn't have.
+ * A rate card by its id, active or not.
  */
-export function rateCardById(id: string): RateCard | null {
-  const row = db().prepare(`SELECT id, data FROM rate_cards WHERE id = ?`).get(id) as { id: string; data: string } | undefined;
+export async function rateCardById(id: string): Promise<RateCard | null> {
+  const row = await queryOne<{ id: string; data: string }>(
+    `SELECT id, data FROM rate_cards WHERE id = $1`,
+    [id]
+  );
   if (!row) return null;
   const card = parseJson<RateCard | null>(row.data, null);
   return card && card.source?.kind === "partner_ratecard" ? { ...card, id: row.id } : null;
 }
 
-export function partnerMode(partnerId: string): PartnerMode {
-  const p = db().prepare(`SELECT name FROM orgs WHERE id = ? AND kind = 'partner'`).get(partnerId) as { name: string } | undefined;
+export async function partnerMode(partnerId: string): Promise<PartnerMode> {
+  const p = await queryOne<{ name: string }>(
+    `SELECT name FROM orgs WHERE id = $1 AND kind = 'partner'`,
+    [partnerId]
+  );
   const partnerName = p?.name ?? "Buyback partner";
-  const card = activeRateCard(partnerId);
+  const card = await activeRateCard(partnerId);
   if (!card) return { partnerId, partnerName, kind: "none", label: "No rate card", why: "No rate card loaded — a phone PriceIQ can't price gets no trade-in price.", rateCardId: null };
-  // The role, never the partner org's name (SUP-48): staff read this line on the desk's trade-in step.
   return { partnerId, partnerName, kind: "partner_ratecard", label: card.source.label, why: `The buyback partner's rate card from ${card.source.effectiveFrom}.`, rateCardId: card.id };
 }
 
@@ -83,8 +75,7 @@ function addDays(iso: string, days: number): string {
 }
 
 /**
- * The partner's rate-card price for a phone. Never throws for a pricing miss — an unpriced
- * quote is an answer the UI shows, not an exception.
+ * The partner's rate-card price for a phone.
  */
 export async function partnerQuote(input: {
   partnerId: string;
@@ -93,12 +84,11 @@ export async function partnerQuote(input: {
   answers: ConditionAnswers;
   imei?: string | null;
   validityDaysOverride?: number | null;
-  /** A what-if (repaired value, a storage chip) — never binding. */
   whatIf?: boolean;
 }): Promise<PartnerQuote> {
-  const mode = partnerMode(input.partnerId);
+  const mode = await partnerMode(input.partnerId);
   const quotedAt = nowIso();
-  const card = mode.rateCardId ? activeRateCard(input.partnerId) : null;
+  const card = mode.rateCardId ? await activeRateCard(input.partnerId) : null;
   if (!card) {
     return {
       status: "unpriced",

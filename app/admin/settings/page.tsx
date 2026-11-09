@@ -11,7 +11,7 @@ export const metadata = { title: "Programme settings" };
 export default async function AdminSettingsPage({ searchParams }: { searchParams: Promise<{ orgId?: string }> }) {
   const u = await requirePage(["org_admin", "platform"], "/admin/settings");
   const sp = await searchParams;
-  const ctx = adminContext(u, sp.orgId);
+  const ctx = await adminContext(u, sp.orgId);
   const intro = "Credit, pickups, repair pricing and the recommendation.";
   return (
     <AppShell user={u} wide>
@@ -21,7 +21,7 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
             key={ctx.orgId}
             orgId={ctx.orgId}
             isPlatform={ctx.isPlatform}
-            initial={orgSettings(ctx.orgId)}
+            initial={await orgSettings(ctx.orgId)}
             labourDefaults={orgSettingsDefaults().repairPolicy.labourByTier}
           />
         ) : null}

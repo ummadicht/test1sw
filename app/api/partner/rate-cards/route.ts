@@ -8,8 +8,8 @@ import { ratecardPartnerId, readDeductions } from "@/lib/server/ratecard-extra";
 export async function GET(req: Request) {
   return handle(async () => {
     const u = await requireUser(["partner", "platform"]);
-    const partnerId = ratecardPartnerId(u, new URL(req.url).searchParams.get("partnerId"));
-    return { cards: rateCards(partnerId), mode: partnerMode(partnerId) };
+    const partnerId = await ratecardPartnerId(u, new URL(req.url).searchParams.get("partnerId"));
+    return { cards: await rateCards(partnerId), mode: await partnerMode(partnerId) };
   });
 }
 
@@ -22,8 +22,8 @@ export async function POST(req: Request) {
   return handle(async () => {
     const u = await requireUser(["partner", "platform"]);
     const b = await body<{ partnerId?: string; label?: string; effectiveFrom?: string; quoteValidityDays?: unknown; csv?: string; activate?: boolean; deductions?: unknown }>(req);
-    const partnerId = ratecardPartnerId(u, b.partnerId ?? new URL(req.url).searchParams.get("partnerId"));
-    const cards = uploadRateCard(u, {
+    const partnerId = await ratecardPartnerId(u, b.partnerId ?? new URL(req.url).searchParams.get("partnerId"));
+    const cards = await uploadRateCard(u, {
       partnerId,
       label: String(b.label ?? ""),
       effectiveFrom: String(b.effectiveFrom ?? ""),
@@ -32,6 +32,6 @@ export async function POST(req: Request) {
       deductions: b.deductions === undefined || b.deductions === null ? undefined : readDeductions(b.deductions),
       activate: b.activate !== false,
     });
-    return { cards, mode: partnerMode(partnerId) };
+    return { cards, mode: await partnerMode(partnerId) };
   });
 }

@@ -17,7 +17,7 @@ type SP = { orgId?: string; from?: string; to?: string };
 export default async function AdminOverviewPage({ searchParams }: { searchParams: Promise<SP> }) {
   const u = await requirePage(["org_admin", "platform"], "/admin");
   const sp = await searchParams;
-  const ctx = adminContext(u, sp.orgId);
+  const ctx = await adminContext(u, sp.orgId);
   const from = isIsoDate(sp.from) ? sp.from : null;
   const to = isIsoDate(sp.to) ? sp.to : null;
 
@@ -31,8 +31,8 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
     );
   }
 
-  const report = programmeReport(u, { orgId: ctx.orgId, from, to });
-  const settings = orgSettings(ctx.orgId);
+  const report = await programmeReport(u, { orgId: ctx.orgId, from, to });
+  const settings = await orgSettings(ctx.orgId);
   const t = report.totals;
   const decided = t.funnel.repairs + t.funnel.upgrades + t.funnel.walked;
   const totalState = lineState(t.limit, t.exposure, settings.warnAt);

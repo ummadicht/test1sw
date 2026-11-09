@@ -1,4 +1,4 @@
-import { db, parseJson } from "./db";
+import { query, queryOne, parseJson } from "./db";
 import { HttpError, type SessionUser } from "./auth";
 
 /**
@@ -33,21 +33,22 @@ export type StoreRow = {
   review_note?: string | null;
 };
 
-export function getOrg(id: string): OrgRow | null {
-  return (db().prepare(`SELECT * FROM orgs WHERE id = ?`).get(id) as OrgRow | undefined) ?? null;
+export async function getOrg(id: string): Promise<OrgRow | null> {
+  return queryOne<OrgRow>("SELECT * FROM orgs WHERE id = $1", [id]);
 }
 
-export function getStore(id: string): StoreRow | null {
-  return (db().prepare(`SELECT * FROM stores WHERE id = ?`).get(id) as StoreRow | undefined) ?? null;
+export async function getStore(id: string): Promise<StoreRow | null> {
+  return queryOne<StoreRow>("SELECT * FROM stores WHERE id = $1", [id]);
 }
 
 /** Client org ids a partner user serves. */
-export function partnerClientIds(partnerId: string): string[] {
-  return (db().prepare(`SELECT id FROM orgs WHERE kind = 'client' AND partner_id = ?`).all(partnerId) as { id: string }[]).map((r) => r.id);
+export async function partnerClientIds(partnerId: string): Promise<string[]> {
+  const rows = await query<{ id: string }>("SELECT id FROM orgs WHERE kind = 'client' AND partner_id = $1", [partnerId]);
+  return rows.map((r) => r.id);
 }
 
 /** Can this user see/act on this store at all? */
-export function canSeeStore(u: SessionUser, store: StoreRow): boolean {
+export async function canSeeStore(u: SessionUser, store: StoreRow): Promise<boolean> {
   switch (u.role) {
     case "platform":
       return true;
@@ -57,33 +58,37 @@ export function canSeeStore(u: SessionUser, store: StoreRow): boolean {
     case "advisor":
       return store.id === u.storeId;
     case "partner":
-      return partnerClientIds(u.orgId).includes(store.org_id);
+      return (await partnerClientIds(u.orgId)).includes(store.org_id);
   }
 }
 
-export function storeInScope(u: SessionUser, storeId: string): StoreRow {
-  const s = getStore(storeId);
-  if (!s || !canSeeStore(u, s)) throw new HttpError(404, "Store not found.");
+export async function storeInScope(u: SessionUser, storeId: string): Promise<StoreRow> {
+  const s = await getStore(storeId);
+  if (!s || !(await canSeeStore(u, s))) throw new HttpError(404, "Store not found.");
   return s;
 }
 
 /** Stores the user may see, for lists. */
-export function storesForUser(u: SessionUser): StoreRow[] {
-  const all = db().prepare(`SELECT * FROM stores ORDER BY name`).all() as StoreRow[];
-  return all.filter((s) => canSeeStore(u, s));
+export async function storesForUser(u: SessionUser): Promise<StoreRow[]> {
+  const all = await query<StoreRow>("SELECT * FROM stores ORDER BY name");
+  const filtered: StoreRow[] = [];
+  for (const s of all) {
+    if (await canSeeStore(u, s)) filtered.push(s);
+  }
+  return filtered;
 }
 
 /** The one store a counter user works in. */
-export function ownStore(u: SessionUser): StoreRow {
+export async function ownStore(u: SessionUser): Promise<StoreRow> {
   if (!u.storeId) throw new HttpError(403, "This account is not attached to a store.");
   return storeInScope(u, u.storeId);
 }
 
 /** Orgs a user may administer (catalogues, campaigns, stores). */
-export function adminOrgId(u: SessionUser, requested?: string | null): string {
+export async function adminOrgId(u: SessionUser, requested?: string | null): Promise<string> {
   if (u.role === "platform") {
     if (!requested) throw new HttpError(400, "Choose a client.");
-    const o = getOrg(requested);
+    const o = await getOrg(requested);
     if (!o || o.kind !== "client") throw new HttpError(404, "Client not found.");
     return o.id;
   }
@@ -91,8 +96,8 @@ export function adminOrgId(u: SessionUser, requested?: string | null): string {
   throw new HttpError(403, "Your role cannot change programme settings.");
 }
 
-export function orgPartnerId(orgId: string): string {
-  const o = getOrg(orgId);
+export async function orgPartnerId(orgId: string): Promise<string> {
+  const o = await getOrg(orgId);
   if (!o?.partner_id) throw new HttpError(409, "This client has no buyback partner configured.");
   return o.partner_id;
 }

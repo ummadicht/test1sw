@@ -9,8 +9,8 @@ import { ratecardPartnerId, rateCardTemplateCsv } from "@/lib/server/ratecard-ex
 export async function GET(req: Request) {
   try {
     const u = await requireUser(["partner", "platform"]);
-    const partnerId = ratecardPartnerId(u, new URL(req.url).searchParams.get("partnerId"));
-    const t = rateCardTemplateCsv(partnerId);
+    const partnerId = await ratecardPartnerId(u, new URL(req.url).searchParams.get("partnerId"));
+    const t = await rateCardTemplateCsv(partnerId);
     return new Response(t.csv, {
       headers: {
         "content-type": "text/csv; charset=utf-8",

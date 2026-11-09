@@ -27,7 +27,7 @@ export default async function TagPage({ params }: { params: Promise<{ id: string
   const u = await requirePage(null, `/cases/${id}/tag`);
   let v: CaseView;
   try {
-    v = getCaseForViewer(u, id);
+    v = await getCaseForViewer(u, id);
   } catch (e) {
     if (e instanceof HttpError && e.status === 404)
       return (
@@ -58,7 +58,8 @@ export default async function TagPage({ params }: { params: Promise<{ id: string
   }
 
   const qr = await QRCode.toDataURL(v.ref, { margin: 1, width: 360, errorCorrectionLevel: "M" });
-  const test = !!getOrg(v.orgId)?.demo;
+  const org = await getOrg(v.orgId);
+  const test = !!org?.demo;
 
   return (
     <Shell>

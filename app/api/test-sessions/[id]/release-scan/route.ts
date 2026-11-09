@@ -12,6 +12,6 @@ import { releaseScan } from "@/lib/server/testSessions";
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   return handle(async () => {
     const u = await requireUser();
-    return releaseScan(u, (await ctx.params).id, publicOrigin(req)).session;
+    return (await releaseScan(u, (await ctx.params).id, publicOrigin(req))).session;
   });
 }

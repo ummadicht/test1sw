@@ -8,8 +8,8 @@ export async function GET(req: Request) {
   return handle(async () => {
     const u = await requireUser(["org_admin", "platform"]);
     const p = new URL(req.url).searchParams;
-    const orgId = adminOrgId(u, p.get("orgId"));
-    return { rows: repairBook(orgId, p.get("modelId")) };
+    const orgId = await adminOrgId(u, p.get("orgId"));
+    return { rows: await repairBook(orgId, p.get("modelId")) };
   });
 }
 
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     const u = await requireUser(["org_admin", "platform"]);
     const b = await body<{ orgId?: string; modelId?: string; part?: string; price?: unknown; sourceLabel?: string }>(req);
     const price = b.price === null ? null : typeof b.price === "number" ? b.price : Number.NaN;
-    const rows = saveRepairPrice(u, {
+    const rows = await saveRepairPrice(u, {
       orgId: b.orgId,
       modelId: String(b.modelId ?? ""),
       part: String(b.part ?? ""),

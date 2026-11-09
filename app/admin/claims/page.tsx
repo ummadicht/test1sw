@@ -26,7 +26,7 @@ const claimOf = (r: BonusClaimRow, k: Kind) => (k === "bonus" ? r.bonus : r.prem
 export default async function AdminClaimsPage({ searchParams }: { searchParams: Promise<{ orgId?: string; month?: string }> }) {
   const u = await requirePage(["org_admin", "platform"], "/admin/claims");
   const sp = await searchParams;
-  const ctx = adminContext(u, sp.orgId);
+  const ctx = await adminContext(u, sp.orgId);
   const intro = "Bonuses and premiums given, to claim back from the funder.";
   if (!ctx.orgId) {
     return (
@@ -41,8 +41,8 @@ export default async function AdminClaimsPage({ searchParams }: { searchParams: 
   const thisMonth = monthIst();
   const allMonths = sp.month === "all";
   const month = allMonths ? null : isMonth(sp.month) ? sp.month : thisMonth;
-  const rows = bonusClaims(u, { orgId, month });
-  const ids = caseIdsByRef(u, rows.map((r) => r.caseRef));
+  const rows = await bonusClaims(u, { orgId, month });
+  const ids = await caseIdsByRef(u, rows.map((r) => r.caseRef));
 
   const groups = new Map<string, Group>();
   for (const r of rows) {

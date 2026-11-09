@@ -35,7 +35,7 @@ type ReportRow = { label: string; version: number; final: boolean; sha256: strin
  */
 async function reportRow(u: SessionUser, caseId: string): Promise<ReportRow | null> {
   try {
-    const r = gradingReportFor(u, caseId);
+    const r = await gradingReportFor(u, caseId);
     const env = r.issued;
     const token = tokenOf(r.path);
     if (!env || !token) return null;
@@ -53,7 +53,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
   const u = await requirePage(null, `/cases/${id}/receipt`);
   let v: CaseView;
   try {
-    v = getCaseForViewer(u, id);
+    v = await getCaseForViewer(u, id);
   } catch (e) {
     if (e instanceof HttpError && e.status === 404)
       return (
@@ -83,8 +83,8 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const store = getStore(v.storeId);
-  const org = getOrg(v.orgId);
+  const store = await getStore(v.storeId);
+  const org = await getOrg(v.orgId);
   // A test programme's receipt says so on its face: no real money changes hands.
   const test = !!org?.demo;
   const priceiq = v.quote?.source.kind === "priceiq";

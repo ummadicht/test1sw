@@ -10,8 +10,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const u = await requireUser(["org_admin", "platform"]);
     const { id } = await ctx.params;
     const b = await body<{ orgId?: string; active?: unknown }>(req);
-    const orgId = adminOrgId(u, b.orgId);
-    setNewDeviceActive(u, { orgId, id, active: b.active === true });
-    return { devices: newDevices(orgId, true) };
+    const orgId = await adminOrgId(u, b.orgId);
+    await setNewDeviceActive(u, { orgId, id, active: b.active === true });
+    return { devices: await newDevices(orgId, true) };
   });
 }

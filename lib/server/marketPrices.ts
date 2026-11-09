@@ -16,17 +16,17 @@ import type { ConditionAnswers } from "../domain/condition";
 export type CaseMarketSell = MarketSell & { source: "PriceIQ · refurbished market" };
 
 /** The sell price for a phone on a case, from PriceIQ — or why there is none. */
-export function caseMarketSell(input: {
+export async function caseMarketSell(input: {
   modelId: string | null;
   variant: string | null;
   brand?: string | null;
   model: string | null;
   condition: ConditionAnswers | null;
-}): CaseMarketSell {
+}): Promise<CaseMarketSell> {
   const source = "PriceIQ · refurbished market" as const;
   if (!input.modelId || !input.variant || !input.model) return { amount: null, why: "The phone's model and storage aren't on the case yet.", source };
   const ask: MarketAsk = { modelId: input.modelId, variant: input.variant, brand: input.brand ?? "", model: input.model };
-  const read = cachedMarket(ask);
+  const read = await cachedMarket(ask);
   return {
     ...marketSell({ answer: read.answer, noAnswerWhy: read.why, condition: input.condition, label: `${input.model} ${input.variant}`, asOf: nowIso() }),
     source,

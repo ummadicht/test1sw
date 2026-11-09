@@ -18,9 +18,9 @@ import { LETTER_NOTE } from "@/components/counter/gradingView";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Pickup" };
 
-function load(u: Parameters<typeof getPickup>[0], id: string): PickupView {
+async function load(u: Parameters<typeof getPickup>[0], id: string): Promise<PickupView> {
   try {
-    return getPickup(u, id);
+    return await getPickup(u, id);
   } catch (e) {
     if (e instanceof HttpError && e.status === 404) notFound();
     throw e;
@@ -66,9 +66,9 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
 export default async function PickupPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const u = await requirePage(["store_manager", "partner", "org_admin", "platform"], `/pickups/${id}`);
-  const p = load(u, id);
+  const p = await load(u, id);
   const now = nowIso();
-  const settings = orgSettings(p.orgId);
+  const settings = await orgSettings(p.orgId);
   const releaseOn = settings.releaseOn;
   const liability = settings.shortfallLiability;
   const isManager = u.role === "store_manager";
@@ -77,7 +77,7 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
   const open = p.status === "requested" || p.status === "scheduled";
 
   const itemIds = new Set(p.items.map((i) => i.id));
-  const chargebacks = openChargebacks(u, p.storeId).filter((c) => itemIds.has(c.caseId));
+  const chargebacks = (await openChargebacks(u, p.storeId)).filter((c) => itemIds.has(c.caseId));
   const openByCase = new Map(chargebacks.map((c) => [c.caseId, c.open]));
   const stillOpen = chargebacks.reduce((t, c) => t + c.open, 0);
 

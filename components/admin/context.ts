@@ -19,13 +19,13 @@ export type AdminCtx = {
   badOrg: boolean;
 };
 
-export function adminContext(u: SessionUser, requested?: string | string[] | null): AdminCtx {
+export async function adminContext(u: SessionUser, requested?: string | string[] | null): Promise<AdminCtx> {
   const req = Array.isArray(requested) ? requested[0] : requested;
   if (u.role === "platform") {
-    const clients = clientOrgs(u);
+    const clients = await clientOrgs(u);
     const hit = req ? clients.find((c) => c.id === req) : undefined;
     return { isPlatform: true, orgId: hit?.id ?? null, orgName: hit?.name ?? "", demo: !!hit?.demo, clients, badOrg: !!req && !hit };
   }
-  const org = getOrg(u.orgId);
+  const org = await getOrg(u.orgId);
   return { isPlatform: false, orgId: u.orgId, orgName: org?.name ?? "", demo: !!org?.demo, clients: [], badOrg: false };
 }

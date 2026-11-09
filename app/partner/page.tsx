@@ -23,12 +23,17 @@ export default async function PartnerPage({ searchParams }: { searchParams: SP }
   const u = await requirePage(["partner", "platform"], "/partner");
   const sp = await searchParams;
   const now = nowIso();
-  const report = partnerReport(u);
-  const all = listPickups(u);
+  const report = await partnerReport(u);
+  const all = await listPickups(u);
 
   // Every client this partner serves (from the stores in scope), plus any seen on a pickup.
   const clientMap = new Map(all.map((p) => [p.orgId, p.orgName]));
-  for (const s of storesForUser(u)) if (!clientMap.has(s.org_id)) clientMap.set(s.org_id, getOrg(s.org_id)?.name ?? "");
+  for (const s of await storesForUser(u)) {
+    if (!clientMap.has(s.org_id)) {
+      const orgObj = await getOrg(s.org_id);
+      clientMap.set(s.org_id, orgObj?.name ?? "");
+    }
+  }
   const clients = [...clientMap.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   const client = clients.some(([id]) => id === one(sp.client)) ? one(sp.client) : "";
   const pickups = client ? all.filter((p) => p.orgId === client) : all;

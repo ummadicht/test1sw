@@ -11,8 +11,8 @@ export const metadata = { title: "Team" };
 /** A store manager adds and manages the advisors at their own store (admin.ts mayCreate: advisor only). */
 export default async function StoreTeamPage() {
   const u = await requirePage(["store_manager"], "/store/team");
-  const store = u.storeId ? getStore(u.storeId) : null;
-  const users = listUsers(u);
+  const store = u.storeId ? await getStore(u.storeId) : null;
+  const users = await listUsers(u);
   return (
     <AppShell user={u}>
       {store ? <InviteStaff storeId={store.id} storeName={store.name} /> : null}

@@ -8,9 +8,9 @@ import type { Campaign } from "@/lib/domain/bonus";
 export async function GET(req: Request) {
   return handle(async () => {
     const u = await requireUser(["org_admin", "platform"]);
-    const orgId = adminOrgId(u, new URL(req.url).searchParams.get("orgId"));
-    const s = orgSettings(orgId);
-    return { campaigns: campaigns(orgId), band: { minBp: s.bandMinBp, maxBp: s.bandMaxBp } };
+    const orgId = await adminOrgId(u, new URL(req.url).searchParams.get("orgId"));
+    const s = await orgSettings(orgId);
+    return { campaigns: await campaigns(orgId), band: { minBp: s.bandMinBp, maxBp: s.bandMaxBp } };
   });
 }
 
@@ -76,6 +76,6 @@ export async function POST(req: Request) {
       rules: c.rules.map((r) => ({ id: r.id.slice(0, 40), label: r.label.trim().slice(0, 120), bp: Number(r.bp), when: r.when })),
     };
     if (!clean.fundedBy) throw new HttpError(400, "Say who funds the bonus.");
-    return { campaigns: saveCampaign(u, { orgId: b.orgId, campaign: clean, active: b.active !== false }) };
+    return { campaigns: await saveCampaign(u, { orgId: b.orgId, campaign: clean, active: b.active !== false }) };
   });
 }

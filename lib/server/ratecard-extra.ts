@@ -12,11 +12,11 @@ import { SCREEN_ORDER, BODY_ORDER, SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LA
  */
 
 /** A partner manages its own cards; platform staff name the partner (?partnerId=). Everyone else: no. */
-export function ratecardPartnerId(u: SessionUser, requested?: string | null): string {
+export async function ratecardPartnerId(u: SessionUser, requested?: string | null): Promise<string> {
   if (u.role === "partner") return u.orgId;
   if (u.role === "platform") {
     if (!requested) throw new HttpError(400, "Choose a buyback partner.");
-    const o = getOrg(requested);
+    const o = await getOrg(requested);
     if (!o || o.kind !== "partner") throw new HttpError(404, "Partner not found.");
     return o.id;
   }
@@ -24,9 +24,9 @@ export function ratecardPartnerId(u: SessionUser, requested?: string | null): st
 }
 
 /** "Samsung Galaxy S22" for each catalogue model id — so a card's entries read as phones, not ids. */
-export function tradeModelNames(): Record<string, string> {
+export async function tradeModelNames(): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
-  for (const m of tradeModels()) out[m.id] = `${m.brand} ${m.model}`;
+  for (const m of await tradeModels()) out[m.id] = `${m.brand} ${m.model}`;
   return out;
 }
 
@@ -39,14 +39,14 @@ export function tradeModelNames(): Record<string, string> {
  * prices included; with no card the template is blank — SwapUp never fills in a
  * price of its own.
  */
-export function rateCardTemplateCsv(partnerId: string): { csv: string; filename: string; prefilled: number; rows: number } {
-  const card = activeRateCard(partnerId);
+export async function rateCardTemplateCsv(partnerId: string): Promise<{ csv: string; filename: string; prefilled: number; rows: number }> {
+  const card = await activeRateCard(partnerId);
   const usable = card && card.source.kind === "partner_ratecard" ? card : null;
   const entry = new Map<string, RateEntry>();
   if (usable) for (const e of usable.entries) entry.set(`${e.modelId}|${e.variant}`, e);
   const lines = [RATE_CARD_COLUMNS.join(",")];
   let prefilled = 0;
-  for (const m of tradeModels()) {
+  for (const m of await tradeModels()) {
     for (const v of m.variants) {
       const e = entry.get(`${m.id}|${v}`);
       if (e) prefilled += 1;
@@ -55,7 +55,8 @@ export function rateCardTemplateCsv(partnerId: string): { csv: string; filename:
       lines.push([m.id, v, e?.maxPrice ?? "", g.Good ?? "", g.Fair ?? "", g["Best Value"] ?? ""].join(","));
     }
   }
-  const slug = (getOrg(partnerId)?.name ?? "partner").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "partner";
+  const org = await getOrg(partnerId);
+  const slug = (org?.name ?? "partner").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "partner";
   const day = new Date().toISOString().slice(0, 10);
   return { csv: lines.join("\r\n") + "\r\n", filename: `${slug}-rate-card-template-${day}.csv`, prefilled, rows: lines.length - 1 };
 }

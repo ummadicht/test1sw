@@ -48,9 +48,9 @@ export function navFor(role: SessionUser["role"]): NavItem[] {
   }
 }
 
-export function AppShell({ user, children, wide = false }: { user: SessionUser; children: ReactNode; wide?: boolean }) {
-  const org = getOrg(user.orgId);
-  const store = user.storeId ? getStore(user.storeId) : null;
+export async function AppShell({ user, children, wide = false }: { user: SessionUser; children: ReactNode; wide?: boolean }) {
+  const org = await getOrg(user.orgId);
+  const store = user.storeId ? await getStore(user.storeId) : null;
   const where = store ? store.name : org?.name ?? "";
   return (
     <div className="min-h-screen flex flex-col">

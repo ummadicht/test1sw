@@ -1,4 +1,4 @@
-import { db, nowIso, audit, tx } from "./db";
+import { query, queryOne, execute, nowIso, audit, tx } from "./db";
 import { HttpError, orgSettings, type SessionUser } from "./auth";
 import { storeInScope, type StoreRow } from "./scope";
 import {
@@ -12,54 +12,58 @@ import {
   type HeldDevice,
 } from "../domain/credit";
 
-type LedgerRow = { id: number; store_id: string; case_id: string; kind: CreditEvent["kind"]; amount: number; note: string | null; by_user: string | null; at: string };
+type LedgerRow = { id: number | string; store_id: string; case_id: string; kind: CreditEvent["kind"]; amount: number | string; note: string | null; by_user: string | null; at: string };
 
-export function storeEvents(storeId: string): CreditEvent[] {
-  return (db().prepare(`SELECT * FROM credit_ledger WHERE store_id = ? ORDER BY id`).all(storeId) as LedgerRow[]).map((r) => ({
+export async function storeEvents(storeId: string): Promise<CreditEvent[]> {
+  const rows = await query<LedgerRow>(`SELECT * FROM credit_ledger WHERE store_id = $1 ORDER BY id`, [storeId]);
+  return rows.map((r) => ({
     kind: r.kind,
     caseId: r.case_id,
-    amount: r.amount,
+    amount: Number(r.amount),
     at: r.at,
     note: r.note ?? undefined,
   }));
 }
 
-export function storePolicy(store: StoreRow): CreditPolicy {
-  const s = orgSettings(store.org_id);
+export async function storePolicy(store: StoreRow): Promise<CreditPolicy> {
+  const s = await orgSettings(store.org_id);
   return { limit: store.credit_limit, releaseOn: s.releaseOn, warnAt: s.warnAt, maxAgeDays: s.maxAgeDays, pickupAtCount: s.pickupAtCount };
 }
 
 /** Append ledger events. Callers run this inside their own tx(). */
-export function postEvents(storeId: string, events: CreditEvent[], byUser: string | null): void {
-  const ins = db().prepare(`INSERT INTO credit_ledger (store_id, case_id, kind, amount, note, by_user, at) VALUES (?,?,?,?,?,?,?)`);
-  for (const e of events) ins.run(storeId, e.caseId, e.kind, e.amount, e.note ?? null, byUser, e.at);
-  // Defence in depth: the domain promises these invariants; refuse to commit a ledger that breaks them.
-  const errs = checkLedger(storeEvents(storeId));
+export async function postEvents(storeId: string, events: CreditEvent[], byUser: string | null): Promise<void> {
+  for (const e of events) {
+    await execute(
+      `INSERT INTO credit_ledger (store_id, case_id, kind, amount, note, by_user, at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [storeId, e.caseId, e.kind, e.amount, e.note ?? null, byUser, e.at]
+    );
+  }
+  const currentEvents = await storeEvents(storeId);
+  const errs = checkLedger(currentEvents);
   if (errs.length) throw new HttpError(409, `Credit ledger check failed: ${errs[0]}`);
 }
 
-export function heldDevices(storeId: string): (HeldDevice & { ref: string; label: string; status: string; pickupId: string | null })[] {
-  const rows = db()
-    .prepare(
-      `SELECT c.id, c.ref, c.trade_value, c.locked_at, c.status, c.pickup_id, t.brand, t.model, c.variant
-       FROM cases c LEFT JOIN trade_models t ON t.id = c.model_id
-       WHERE c.store_id = ? AND c.status IN ('locked','in_pickup') ORDER BY c.locked_at`
-    )
-    .all(storeId) as {
+export async function heldDevices(storeId: string): Promise<(HeldDevice & { ref: string; label: string; status: string; pickupId: string | null })[]> {
+  const rows = await query<{
     id: string;
     ref: string;
-    trade_value: number;
+    trade_value: number | string;
     locked_at: string;
     status: string;
     pickup_id: string | null;
     brand: string;
     model: string;
     variant: string;
-  }[];
+  }>(
+    `SELECT c.id, c.ref, c.trade_value, c.locked_at, c.status, c.pickup_id, t.brand, t.model, c.variant
+     FROM cases c LEFT JOIN trade_models t ON t.id = c.model_id
+     WHERE c.store_id = $1 AND c.status IN ('locked','in_pickup') ORDER BY c.locked_at`,
+    [storeId]
+  );
   return rows.map((r) => ({
     caseId: r.id,
     ref: r.ref,
-    value: r.trade_value,
+    value: Number(r.trade_value || 0),
     heldSince: r.locked_at,
     status: r.status,
     pickupId: r.pickup_id,
@@ -72,27 +76,26 @@ export type CreditSummary = {
   policy: CreditPolicy;
   position: CreditPosition;
   advice: PickupAdvice;
-  held: ReturnType<typeof heldDevices>;
+  held: Awaited<ReturnType<typeof heldDevices>>;
   inTransit: { count: number; value: number };
   ledger: (LedgerRow & { case_ref: string | null })[] | null;
 };
 
-export function creditSummary(u: SessionUser, storeId: string, opts: { withLedger?: boolean } = {}): CreditSummary {
-  const store = storeInScope(u, storeId);
-  const policy = storePolicy(store);
-  const events = storeEvents(store.id);
-  const held = heldDevices(store.id);
-  const transit = db()
-    .prepare(`SELECT COUNT(*) n, COALESCE(SUM(trade_value),0) v FROM cases WHERE store_id = ? AND status = 'collected'`)
-    .get(store.id) as { n: number; v: number };
-  // The full ledger is a manager's view; an advisor sees the meter only.
+export async function creditSummary(u: SessionUser, storeId: string, opts: { withLedger?: boolean } = {}): Promise<CreditSummary> {
+  const store = await storeInScope(u, storeId);
+  const policy = await storePolicy(store);
+  const events = await storeEvents(store.id);
+  const held = await heldDevices(store.id);
+  const transit = await queryOne<{ n: string | number; v: string | number }>(
+    `SELECT COUNT(*) n, COALESCE(SUM(trade_value),0) v FROM cases WHERE store_id = $1 AND status = 'collected'`,
+    [store.id]
+  );
   const canLedger = opts.withLedger && u.role !== "advisor";
   const ledger = canLedger
-    ? (db()
-        .prepare(
-          `SELECT l.*, c.ref AS case_ref FROM credit_ledger l LEFT JOIN cases c ON c.id = l.case_id WHERE l.store_id = ? ORDER BY l.id DESC LIMIT 200`
-        )
-        .all(store.id) as (LedgerRow & { case_ref: string | null })[])
+    ? await query<LedgerRow & { case_ref: string | null }>(
+        `SELECT l.*, c.ref AS case_ref FROM credit_ledger l LEFT JOIN cases c ON c.id = l.case_id WHERE l.store_id = $1 ORDER BY l.id DESC LIMIT 200`,
+        [store.id]
+      )
     : null;
   return {
     store: { id: store.id, name: store.name, code: store.code, kind: store.kind, city: store.city },
@@ -100,19 +103,19 @@ export function creditSummary(u: SessionUser, storeId: string, opts: { withLedge
     position: position(policy, events),
     advice: pickupAdvice(policy, events, held, nowIso()),
     held,
-    inTransit: { count: transit.n, value: transit.v },
+    inTransit: { count: Number(transit?.n || 0), value: Number(transit?.v || 0) },
     ledger,
   };
 }
 
-export function setCreditLimit(u: SessionUser, storeId: string, limit: number, reason: string): StoreRow {
+export async function setCreditLimit(u: SessionUser, storeId: string, limit: number, reason: string): Promise<StoreRow> {
   if (!["platform", "org_admin"].includes(u.role)) throw new HttpError(403, "Only the programme admin can change a credit limit.");
-  const store = storeInScope(u, storeId);
+  const store = await storeInScope(u, storeId);
   if (!Number.isInteger(limit) || limit < 0 || limit > 100_000_000) throw new HttpError(400, "Credit limit must be a whole rupee amount between 0 and ₹10 crore.");
   if ((reason || "").trim().length < 4) throw new HttpError(400, "Give a reason for the change.");
-  return tx(() => {
-    db().prepare(`UPDATE stores SET credit_limit = ? WHERE id = ?`).run(limit, store.id);
-    audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "credit_limit.set", entity: "store", entityId: store.id, detail: { from: store.credit_limit, to: limit, reason: reason.trim() } });
+  return tx(async () => {
+    await execute(`UPDATE stores SET credit_limit = $1 WHERE id = $2`, [limit, store.id]);
+    await audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "credit_limit.set", entity: "store", entityId: store.id, detail: { from: store.credit_limit, to: limit, reason: reason.trim() } });
     return { ...store, credit_limit: limit };
   });
 }

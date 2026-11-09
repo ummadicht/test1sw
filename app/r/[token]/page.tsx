@@ -32,7 +32,7 @@ export default async function PublicReportPage({ params, searchParams }: { param
   const v = (await searchParams).v;
   let env: ReportEnvelope;
   try {
-    env = publicReport(token, typeof v === "string" ? v : null);
+    env = await publicReport(token, typeof v === "string" ? v : null);
   } catch (e) {
     if (e instanceof HttpError && e.status === 404) notFound();
     throw e;

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { db, nowIso, parseJson, audit } from "./db";
+import { query, queryOne, execute, nowIso, parseJson, audit } from "./db";
 import * as giq from "./gradeiq";
 import { GradeiqError } from "./gradeiq";
 import { matchModel, type DeviceReport, type Declared, type TestResults, type TradeModelRef } from "../domain/diagnostics";
@@ -115,24 +115,24 @@ const mem: Mem = (g.__swapup_giq ??= { creating: new Map(), createTimers: new Ma
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, 32);
 const message = (e: unknown) => (e instanceof GradeiqError ? e.message : `GradeIQ call failed (${(e as Error)?.message || String(e)}).`);
 
-function row(id: string): GiqRow | null {
-  return (db().prepare(`SELECT * FROM test_sessions WHERE id = ?`).get(id) as GiqRow | undefined) ?? null;
+async function row(id: string): Promise<GiqRow | null> {
+  return queryOne<GiqRow>(`SELECT * FROM test_sessions WHERE id = $1`, [id]);
 }
 
 function live(r: Pick<GiqRow, "gradeiq_screen">): Live {
   return { screen: null, screenError: null, handoffAt: null, pullError: null, ...parseJson<Partial<Live>>(r.gradeiq_screen, {}) };
 }
 
-function saveLive(id: string, next: Live, at: string): void {
-  db().prepare(`UPDATE test_sessions SET gradeiq_screen = ?, gradeiq_screen_at = ? WHERE id = ?`).run(JSON.stringify(next), at, id);
+async function saveLive(id: string, next: Live, at: string): Promise<void> {
+  await execute(`UPDATE test_sessions SET gradeiq_screen = $1, gradeiq_screen_at = $2 WHERE id = $3`, [JSON.stringify(next), at, id]);
 }
 
-function addOrphan(id: string, gradeiqId: string | null, why: string): void {
-  const r = row(id);
+async function addOrphan(id: string, gradeiqId: string | null, why: string): Promise<void> {
+  const r = await row(id);
   if (!r) return;
   const list = parseJson<{ id: string | null; why: string; at: string }[]>(r.gradeiq_orphans, []);
   list.push({ id: gradeiqId, why, at: nowIso() });
-  db().prepare(`UPDATE test_sessions SET gradeiq_orphans = ? WHERE id = ?`).run(JSON.stringify(list.slice(-20)), id);
+  await execute(`UPDATE test_sessions SET gradeiq_orphans = $1 WHERE id = $2`, [JSON.stringify(list.slice(-20)), id]);
 }
 
 /** The state a brand-new test session starts in. */
@@ -142,14 +142,15 @@ export function initialGradeiqState(): GradeiqState {
 
 /* ─────────────────────────── create (call 1) ─────────────────────────── */
 
-function caseModelLabel(caseId: string): string | null {
-  const r = db()
-    .prepare(`SELECT t.brand, t.model FROM cases c JOIN trade_models t ON t.id = c.model_id WHERE c.id = ?`)
-    .get(caseId) as { brand: string; model: string } | undefined;
+async function caseModelLabel(caseId: string): Promise<string | null> {
+  const r = await queryOne<{ brand: string; model: string }>(
+    `SELECT t.brand, t.model FROM cases c JOIN trade_models t ON t.id = c.model_id WHERE c.id = $1`,
+    [caseId]
+  );
   return r ? `${r.brand} ${r.model}` : null;
 }
 
-/** Start the GradeIQ create AFTER the caller's transaction has committed (better-sqlite3 transactions are synchronous). */
+/** Start the GradeIQ create AFTER the caller's transaction has committed. */
 export function kickCreate(id: string): void {
   if (!giq.gradeiqConfig().enabled) return;
   setImmediate(() => void ensureCreated(id));
@@ -164,38 +165,38 @@ function ensureCreated(id: string): Promise<void> {
 }
 
 async function createOnce(id: string): Promise<void> {
-  const r = row(id);
+  const r = await row(id);
   if (!r || r.gradeiq_id || r.gradeiq_state !== "pending") return;
   if (!["waiting", "opened", ...SYNC_STATUSES].includes(r.status)) return;
   const attempt = r.gradeiq_attempts + 1;
-  db().prepare(`UPDATE test_sessions SET gradeiq_attempts = ? WHERE id = ?`).run(attempt, id);
+  await execute(`UPDATE test_sessions SET gradeiq_attempts = $1 WHERE id = $2`, [attempt, id]);
   try {
-    const created = await giq.createSession({ model: caseModelLabel(r.case_id) });
+    const created = await giq.createSession({ model: (await caseModelLabel(r.case_id)) ?? undefined });
     const now = nowIso();
-    const upd = db()
-      .prepare(
-        `UPDATE test_sessions SET gradeiq_id = ?, gradeiq_state = 'ready', gradeiq_error = NULL, updated_at = ?
-         WHERE id = ? AND gradeiq_id IS NULL AND gradeiq_state = 'pending' AND status IN ('waiting','opened','joined','testing','complete')`
-      )
-      .run(created.id, now, id);
-    if (upd.changes !== 1) {
-      addOrphan(id, created.id, "the test session closed before GradeIQ answered");
+    const upd = await execute(
+      `UPDATE test_sessions SET gradeiq_id = $1, gradeiq_state = 'ready', gradeiq_error = NULL, updated_at = $2
+       WHERE id = $3 AND gradeiq_id IS NULL AND gradeiq_state = 'pending' AND status IN ('waiting','opened','joined','testing','complete')`,
+      [created.id, now, id]
+    );
+    if (upd.rowCount !== 1) {
+      await addOrphan(id, created.id, "the test session closed before GradeIQ answered");
       return;
     }
-    audit({ orgId: r.org_id, storeId: r.store_id, action: "test_session.gradeiq_create", entity: "test_session", entityId: id, detail: { gradeiqId: created.id, client: created.client, attempt } });
+    await audit({ orgId: r.org_id, storeId: r.store_id, action: "test_session.gradeiq_create", entity: "test_session", entityId: id, detail: { gradeiqId: created.id, client: created.client, attempt } });
     scheduleSync(id);
   } catch (e) {
     const ge = e instanceof GradeiqError ? e : new GradeiqError("network", message(e));
     // A timed-out create may still have made a session SwapUp never learned the id of.
-    if (ge.ambiguous) addOrphan(id, null, `create timed out on attempt ${attempt} — GradeIQ may hold a session SwapUp never learned`);
-    if (ge.orphanId) addOrphan(id, ge.orphanId, `not used: ${ge.message}`);
+    if (ge.ambiguous) await addOrphan(id, null, `create timed out on attempt ${attempt} — GradeIQ may hold a session SwapUp never learned`);
+    if (ge.orphanId) await addOrphan(id, ge.orphanId, `not used: ${ge.message}`);
     const giveUp = ge.kind === "tenant" || ge.kind === "disabled" || attempt >= MAX_AUTO_CREATES;
-    db()
-      .prepare(`UPDATE test_sessions SET gradeiq_state = ?, gradeiq_error = ?, updated_at = ? WHERE id = ? AND gradeiq_id IS NULL`)
-      .run(giveUp ? "failed" : "pending", giveUp ? ge.message : `${ge.message} Retrying.`, nowIso(), id);
+    await execute(
+      `UPDATE test_sessions SET gradeiq_state = $1, gradeiq_error = $2, updated_at = $3 WHERE id = $4 AND gradeiq_id IS NULL`,
+      [giveUp ? "failed" : "pending", giveUp ? ge.message : `${ge.message} Retrying.`, nowIso(), id]
+    );
     if (ge.kind === "tenant") {
       console.error(`[swapup] GradeIQ tenant mismatch: ${ge.message}`);
-      audit({ orgId: r.org_id, storeId: r.store_id, action: "gradeiq.tenant_mismatch", entity: "test_session", entityId: id, detail: { error: ge.message } });
+      await audit({ orgId: r.org_id, storeId: r.store_id, action: "gradeiq.tenant_mismatch", entity: "test_session", entityId: id, detail: { error: ge.message } });
     }
     if (!giveUp) {
       const t = setTimeout(() => {
@@ -208,11 +209,12 @@ async function createOnce(id: string): Promise<void> {
 }
 
 /** Staff pressed Retry: a fresh create (counts restart). Also creates one for a session that started while grading was off. */
-export function retryCreate(id: string): void {
+export async function retryCreate(id: string): Promise<void> {
   if (!giq.gradeiqConfig().enabled) throw new GradeiqError("disabled", "Camera grading is switched off (GRADEIQ_ENABLED=0).");
-  db()
-    .prepare(`UPDATE test_sessions SET gradeiq_state = 'pending', gradeiq_error = NULL, gradeiq_attempts = 0, updated_at = ? WHERE id = ? AND gradeiq_id IS NULL AND gradeiq_state IN ('failed','disabled','pending')`)
-    .run(nowIso(), id);
+  await execute(
+    `UPDATE test_sessions SET gradeiq_state = 'pending', gradeiq_error = NULL, gradeiq_attempts = 0, updated_at = $1 WHERE id = $2 AND gradeiq_id IS NULL AND gradeiq_state IN ('failed','disabled','pending')`,
+    [nowIso(), id]
+  );
   const t = mem.createTimers.get(id);
   if (t) clearTimeout(t);
   mem.createTimers.delete(id);
@@ -220,8 +222,8 @@ export function retryCreate(id: string): void {
 }
 
 /** Cancel / reissue: stop every call for this session and record the GradeIQ id it leaves behind. */
-export function abandon(id: string, why: string): void {
-  const r = row(id);
+export async function abandon(id: string, why: string): Promise<void> {
+  const r = await row(id);
   const t = mem.createTimers.get(id);
   if (t) clearTimeout(t);
   mem.createTimers.delete(id);
@@ -229,19 +231,24 @@ export function abandon(id: string, why: string): void {
   if (s?.timer) clearTimeout(s.timer);
   mem.sync.delete(id);
   mem.screen.delete(id);
-  if (r?.gradeiq_id) addOrphan(id, r.gradeiq_id, `abandoned: ${why}`);
+  if (r?.gradeiq_id) await addOrphan(id, r.gradeiq_id, `abandoned: ${why}`);
 }
 
 /* ─────────────────────────── forward (calls 2 + 3) ─────────────────────────── */
 
-function tradeModelRefs(): TradeModelRef[] {
-  return (db().prepare(`SELECT id, brand, model, variants, model_codes FROM trade_models`).all() as { id: string; brand: string; model: string; variants: string; model_codes: string }[]).map((r) => ({
+let _cachedRefs: TradeModelRef[] = [];
+async function loadTradeModelRefs(): Promise<TradeModelRef[]> {
+  const rows = await query<{ id: string; brand: string; model: string; variants: string; model_codes: string }>(
+    `SELECT id, brand, model, variants, model_codes FROM trade_models`
+  );
+  _cachedRefs = rows.map((r) => ({
     id: r.id,
     brand: r.brand,
     model: r.model,
     variants: parseJson<string[]>(r.variants, []),
     modelCodes: parseJson<string[]>(r.model_codes, []),
   }));
+  return _cachedRefs;
 }
 
 const STORAGE_GB: Record<string, number> = { "16GB": 16, "32GB": 32, "64GB": 64, "128GB": 128, "256GB": 256, "512GB": 512, "1TB": 1024 };
@@ -251,7 +258,7 @@ const STORAGE_GB: Record<string, number> = { "16GB": 16, "32GB": 32, "64GB": 64,
  * code match — GradeIQ keeps the first model it is given. The declared IMEI
  * rides along; GradeIQ's /device route runs no lookup on it.
  */
-export function deviceForward(r: Pick<GiqRow, "device" | "declared">, models: TradeModelRef[] = tradeModelRefs()): giq.DeviceForward | null {
+export function deviceForward(r: Pick<GiqRow, "device" | "declared">, models: TradeModelRef[] = _cachedRefs): giq.DeviceForward | null {
   const device = parseJson<DeviceReport | null>(r.device, null);
   const declared = parseJson<Declared | null>(r.declared, null);
   if (!device && !declared?.imei) return null;
@@ -309,10 +316,10 @@ async function runSync(id: string): Promise<void> {
   try {
     await syncOnce(id);
     st.failures = 0;
-    db().prepare(`UPDATE test_sessions SET gradeiq_sync_error = NULL WHERE id = ? AND gradeiq_sync_error IS NOT NULL`).run(id);
+    await execute(`UPDATE test_sessions SET gradeiq_sync_error = NULL WHERE id = $1 AND gradeiq_sync_error IS NOT NULL`, [id]);
   } catch (e) {
     st.failures += 1;
-    db().prepare(`UPDATE test_sessions SET gradeiq_sync_error = ? WHERE id = ?`).run(message(e), id);
+    await execute(`UPDATE test_sessions SET gradeiq_sync_error = $1 WHERE id = $2`, [message(e), id]);
     st.running = false;
     if (!(e instanceof GradeiqError && e.kind === "disabled")) scheduleSync(id, Math.min(60_000, 2_000 * 2 ** (st.failures - 1)));
     return;
@@ -322,14 +329,14 @@ async function runSync(id: string): Promise<void> {
 }
 
 async function syncOnce(id: string): Promise<void> {
-  const r = row(id);
+  const r = await row(id);
   if (!r || !r.gradeiq_id || r.gradeiq_state !== "ready" || !SYNC_STATUSES.includes(r.status)) return;
   const dev = deviceForward(r);
   if (dev) {
     const h = hash(dev);
     if (h !== r.gradeiq_device_hash) {
       await giq.postDevice(r.gradeiq_id, dev);
-      db().prepare(`UPDATE test_sessions SET gradeiq_device_hash = ? WHERE id = ?`).run(h, id);
+      await execute(`UPDATE test_sessions SET gradeiq_device_hash = $1 WHERE id = $2`, [h, id]);
     }
   }
   const fn = functionalNow(r);
@@ -339,9 +346,17 @@ async function syncOnce(id: string): Promise<void> {
       await giq.postFunctional(r.gradeiq_id, fn);
       // Compare-and-set: if a new sweep marked the map for re-sending while this
       // request was in flight, keep the marker so the follow-up run sends again.
-      db()
-        .prepare(`UPDATE test_sessions SET gradeiq_forward_hash = ?, gradeiq_forwarded_at = ? WHERE id = ? AND gradeiq_forward_hash IS ?`)
-        .run(h, nowIso(), id, r.gradeiq_forward_hash);
+      if (r.gradeiq_forward_hash === null) {
+        await execute(
+          `UPDATE test_sessions SET gradeiq_forward_hash = $1, gradeiq_forwarded_at = $2 WHERE id = $3 AND gradeiq_forward_hash IS NULL`,
+          [h, nowIso(), id]
+        );
+      } else {
+        await execute(
+          `UPDATE test_sessions SET gradeiq_forward_hash = $1, gradeiq_forwarded_at = $2 WHERE id = $3 AND gradeiq_forward_hash = $4`,
+          [h, nowIso(), id, r.gradeiq_forward_hash]
+        );
+      }
     }
   }
 }
@@ -378,7 +393,7 @@ function refreshScreen(id: string, gradeiqId: string, maxAgeMs: number): Promise
     } catch (e) {
       err = message(e);
     }
-    const r = row(id);
+    const r = await row(id);
     if (!r) return;
     // A read that started before the newest one saved has nothing newer to say.
     const cur = mem.screen.get(id);
@@ -393,12 +408,12 @@ function refreshScreen(id: string, gradeiqId: string, maxAgeMs: number): Promise
       handoffAt: nextHandoffAt(prev.handoffAt, screen, now),
     };
     // Written only when something changed: the customer's phone polls this every 700 ms.
-    if (JSON.stringify(next) !== JSON.stringify(prev) || !r.gradeiq_screen_at) saveLive(id, next, now);
+    if (JSON.stringify(next) !== JSON.stringify(prev) || !r.gradeiq_screen_at) await saveLive(id, next, now);
     if (screen) {
       // The pull window opens when the photos are accepted (and again at the
       // handoff above — pullWindowStart); a retake restarts it.
-      if (screen.cosmeticDone && !r.gradeiq_cosmetic_done_at) db().prepare(`UPDATE test_sessions SET gradeiq_cosmetic_done_at = ? WHERE id = ?`).run(now, id);
-      if (!screen.cosmeticDone && r.gradeiq_cosmetic_done_at) db().prepare(`UPDATE test_sessions SET gradeiq_cosmetic_done_at = NULL WHERE id = ?`).run(id);
+      if (screen.cosmeticDone && !r.gradeiq_cosmetic_done_at) await execute(`UPDATE test_sessions SET gradeiq_cosmetic_done_at = $1 WHERE id = $2`, [now, id]);
+      if (!screen.cosmeticDone && r.gradeiq_cosmetic_done_at) await execute(`UPDATE test_sessions SET gradeiq_cosmetic_done_at = NULL WHERE id = $1`, [id]);
     }
   })().finally(() => {
     const cur = mem.screen.get(id);
@@ -468,28 +483,28 @@ function pullDue(r: GiqRow): boolean {
 
 /** Pull the whole session now and store the snapshot. Returns it, or null when GradeIQ could not be read. */
 async function pullSnapshot(id: string): Promise<GradeiqSnapshot | null> {
-  const r = row(id);
+  const r = await row(id);
   if (!r?.gradeiq_id) return null;
   const now = nowIso();
   try {
     const snap = await giq.getSession(r.gradeiq_id, now);
     const prev = parseJson<GradeiqSnapshot | null>(r.gradeiq_snapshot, null);
-    db().prepare(`UPDATE test_sessions SET gradeiq_snapshot = ?, gradeiq_synced_at = ? WHERE id = ?`).run(JSON.stringify(snap), now, id);
+    await execute(`UPDATE test_sessions SET gradeiq_snapshot = $1, gradeiq_synced_at = $2 WHERE id = $3`, [JSON.stringify(snap), now, id]);
     const l = live(r);
-    if (l.pullError) saveLive(id, { ...l, pullError: null }, now);
+    if (l.pullError) await saveLive(id, { ...l, pullError: null }, now);
     // Every screen sweep rewrites GradeIQ's `display` with its own verdict and
     // drops results posted during its AI call (contract §5 #7). So a new sweep
     // forces a full re-send even when SwapUp's map hashes the same — e.g. a
     // self-test fail with a camera pass leaves GradeIQ saying "pass" otherwise.
     // The marker is unique, so a forward already in flight can't overwrite it.
     if (JSON.stringify(prev?.displayCheck ?? null) !== JSON.stringify(snap.displayCheck ?? null)) {
-      db().prepare(`UPDATE test_sessions SET gradeiq_forward_hash = ? WHERE id = ?`).run(`resend:${randomUUID()}`, id);
+      await execute(`UPDATE test_sessions SET gradeiq_forward_hash = $1 WHERE id = $2`, [`resend:${randomUUID()}`, id]);
       scheduleSync(id);
     }
     return snap;
   } catch (e) {
-    db().prepare(`UPDATE test_sessions SET gradeiq_synced_at = ? WHERE id = ?`).run(now, id);
-    saveLive(id, { ...live(r), pullError: message(e) }, now);
+    await execute(`UPDATE test_sessions SET gradeiq_synced_at = $1 WHERE id = $2`, [now, id]);
+    await saveLive(id, { ...live(r), pullError: message(e) }, now);
     return null;
   }
 }
@@ -503,7 +518,7 @@ async function pullSnapshot(id: string): Promise<GradeiqSnapshot | null> {
 export async function refreshGrading(id: string, waitMs = 1_500): Promise<void> {
   const cfg = giq.gradeiqConfig();
   if (!cfg.enabled) return;
-  const r = row(id);
+  const r = await row(id);
   if (!r) return;
   if (r.gradeiq_state === "pending" && !mem.creating.has(id) && !mem.createTimers.has(id)) void ensureCreated(id);
   // Photos first: pass 1 runs while the session is still waiting/opened (the
@@ -514,7 +529,7 @@ export async function refreshGrading(id: string, waitMs = 1_500): Promise<void> 
   if (SYNC_STATUSES.includes(r.status) && syncStatus(r).state !== "in_sync" && syncStatus(r).state !== "idle" && !st?.running && !st?.timer) scheduleSync(id);
   const work = (async () => {
     await refreshScreen(id, r.gradeiq_id!, SCREEN_EVERY_MS);
-    const r2 = row(id);
+    const r2 = await row(id);
     if (r2 && pullDue(r2) && !mem.pulling.has(id)) {
       const p = pullSnapshot(id).then(() => undefined).finally(() => mem.pulling.delete(id));
       mem.pulling.set(id, p);
@@ -563,7 +578,7 @@ export async function deviceScreen(r: GiqRow): Promise<DeviceScreen> {
   if (r.gradeiq_state === "pending" && !mem.creating.has(r.id) && !mem.createTimers.has(r.id)) void ensureCreated(r.id);
   if (r.gradeiq_state !== "ready" || !r.gradeiq_id) return idle;
   await refreshScreen(r.id, r.gradeiq_id, DEVICE_SCREEN_EVERY_MS);
-  const l = live(row(r.id) ?? r);
+  const l = live((await row(r.id)) ?? r);
   if (l.screenError || !l.screen) {
     // Released by the advisor: the phone goes on whatever GradeIQ says — a camera service that
     // can't be read must not keep it on Scan (it would only ever see the 503).
@@ -606,11 +621,11 @@ export function deviceCameraLink(r: GiqRow): { ok: true; url: string } | { ok: f
 export async function deviceScreenShown(r: GiqRow, shown: string): Promise<void> {
   if (!giq.gradeiqConfig().enabled || r.gradeiq_state !== "ready" || !r.gradeiq_id) throw new GradeiqError("disabled", "The photo check is not running for this session.");
   await giq.postScreenShown(r.gradeiq_id, shown);
-  const fresh = row(r.id);
+  const fresh = await row(r.id);
   if (!fresh) return;
   const l = live(fresh);
   const screen: GiqScreen = { ...(l.screen ?? { pattern: "idle", shown: null, cosmeticDone: false, handoffDone: false, capture: null, connectedAt: null }), shown };
-  saveLive(r.id, { ...l, screen, screenError: null }, nowIso());
+  await saveLive(r.id, { ...l, screen, screenError: null }, nowIso());
   // A /screen read that started before this echo would bring back the old `shown`: it is dropped.
   const m = mem.screen.get(r.id);
   if (m) m.savedFrom = Date.now();
@@ -890,8 +905,8 @@ function releasedOf(r: GiqRow): { by: string; at: string } | null {
 /* ─────────────────────────── staff override + apply ─────────────────────────── */
 
 /** Unlock the camera without the customer's phone echoing — recorded with a name and a reason. */
-export function recordOverride(id: string, info: NonNullable<CameraOverrideInfo>): void {
-  db().prepare(`UPDATE test_sessions SET gradeiq_override = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(info), nowIso(), id);
+export async function recordOverride(id: string, info: NonNullable<CameraOverrideInfo>): Promise<void> {
+  await execute(`UPDATE test_sessions SET gradeiq_override = $1, updated_at = $2 WHERE id = $3`, [JSON.stringify(info), nowIso(), id]);
 }
 
 export type ApplyEvidence = {
@@ -916,7 +931,7 @@ export type ApplyEvidence = {
 export async function evidenceForApply(id: string): Promise<ApplyEvidence> {
   const notes: string[] = [];
   const cfg = giq.gradeiqConfig();
-  let r = row(id)!;
+  let r = (await row(id))!;
   let devicefax = false;
   if (cfg.enabled && r.gradeiq_state === "ready" && r.gradeiq_id) {
     // /screen first: it is what records when the photos were accepted and when
@@ -925,19 +940,19 @@ export async function evidenceForApply(id: string): Promise<ApplyEvidence> {
     await refreshScreen(id, r.gradeiq_id, 0).catch(() => {});
     const snap = await pullSnapshot(id);
     if (!snap) notes.push("Camera unreadable at Apply — only a final result was used.");
-    const now = row(id)!;
+    const now = (await row(id))!;
     if (cameraGradePending(now)) {
       const ev = cameraEvidence(now);
       return { pending: true, state: now.gradeiq_state, gradeiqId: now.gradeiq_id, ...ev, devicefax: false, notes };
     }
     try {
       const fax = await giq.exportDeviceFax(r.gradeiq_id);
-      db().prepare(`UPDATE test_sessions SET gradeiq_devicefax = ? WHERE id = ?`).run(JSON.stringify({ fetchedAt: nowIso(), devicefax: fax }), id);
+      await execute(`UPDATE test_sessions SET gradeiq_devicefax = $1 WHERE id = $2`, [JSON.stringify({ fetchedAt: nowIso(), devicefax: fax }), id]);
       devicefax = true;
     } catch (e) {
       notes.push(`DeviceFax not saved: ${message(e)}`);
     }
-    r = row(id)!;
+    r = (await row(id))!;
   }
   const { snap, fin, mapping, override } = cameraEvidence(r);
   return { pending: false, state: cfg.enabled ? r.gradeiq_state : "disabled", gradeiqId: r.gradeiq_id, snap, fin, mapping, override, devicefax, notes };

@@ -64,11 +64,12 @@ export async function GET(req: Request) {
     const orgId = p.get("orgId");
     const monthRaw = p.get("month");
     const month = monthRaw && /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : null;
-    const rows = bonusClaims(u, { orgId, month });
+    const rows = await bonusClaims(u, { orgId, month });
     const csv = rows.length ? toCsv(rows.map(csvRow)) : HEADER.join(",");
     // Name the file after the caller's own org; only platform staff may name another one.
     const nameOrg = u.role === "platform" && orgId ? orgId : u.orgId;
-    const orgSlug = (getOrg(nameOrg)?.name ?? "programme").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const orgObj = await getOrg(nameOrg);
+    const orgSlug = (orgObj?.name ?? "programme").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const file = `swapup-bonus-claims-${orgSlug || "programme"}-${month ?? "all-months"}.csv`;
     // BOM so Excel opens ₹ and accented names correctly.
     return new NextResponse(`﻿${csv}\n`, {

@@ -4,5 +4,5 @@ import { retryGrading } from "@/lib/server/testSessions";
 
 /** "Camera grading unavailable" → Retry: a fresh GradeIQ session for this test session. → TestSessionView */
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  return handle(async () => retryGrading(await requireUser(), (await ctx.params).id).session);
+  return handle(async () => (await retryGrading(await requireUser(), (await ctx.params).id)).session);
 }

@@ -5,8 +5,8 @@ import { getOrg, getStore } from "@/lib/server/scope";
 export async function GET() {
   return handle(async () => {
     const u = await requireUser();
-    const org = getOrg(u.orgId);
-    const store = u.storeId ? getStore(u.storeId) : null;
+    const org = await getOrg(u.orgId);
+    const store = u.storeId ? await getStore(u.storeId) : null;
     return {
       id: u.id,
       name: u.name,

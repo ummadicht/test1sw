@@ -30,20 +30,25 @@ function Meta({ label, children }: { label: string; children: ReactNode }) {
 
 export default async function PlatformPage() {
   const u = await requirePage(["platform"], "/platform");
-  const orgs = listOrgs(u);
+  const orgs = await listOrgs(u);
   const clients = orgs.filter((o) => o.kind === "client");
   const partners = orgs.filter((o) => o.kind === "partner");
   const staff = orgs.filter((o) => o.kind === "platform");
-  const modes = new Map<string, PartnerMode>(partners.map((p) => [p.id, partnerMode(p.id)]));
+  const modes = new Map<string, PartnerMode>(
+    await Promise.all(partners.map(async (p) => [p.id, await partnerMode(p.id)] as const))
+  );
   const totals = {
     stores: clients.reduce((s, c) => s + c.stores, 0),
     people: orgs.reduce((s, o) => s + o.users, 0),
   };
   const defaults = orgSettingsDefaults();
 
-  /** Active campaigns configured outside the client's current band (the band is only checked when a campaign is saved). */
-  const outsideBand = (c: OrgView) =>
-    campaigns(c.id).filter((cmp) => cmp.active && (cmp.minBp < c.settings.bandMinBp || cmp.maxBp > c.settings.bandMaxBp));
+  const outsideMap = new Map<string, ReturnType<typeof campaigns> extends Promise<infer R> ? R : never>();
+  for (const c of clients) {
+    const cmps = await campaigns(c.id);
+    outsideMap.set(c.id, cmps.filter((cmp) => cmp.active && (cmp.minBp < c.settings.bandMinBp || cmp.maxBp > c.settings.bandMaxBp)) as any);
+  }
+  const outsideBand = (c: OrgView) => outsideMap.get(c.id) ?? [];
 
   return (
     <AppShell user={u}>

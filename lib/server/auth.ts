@@ -1,6 +1,6 @@
 import { cookies, headers } from "next/headers";
 import { createHmac, timingSafeEqual, randomBytes, scryptSync } from "node:crypto";
-import { db, parseJson } from "./db";
+import { queryOne, parseJson } from "./db";
 
 /**
  * Five roles, one tenant rule.
@@ -120,8 +120,8 @@ type UserRow = {
   active: number;
 };
 
-export function authenticate(username: string, password: string): SessionUser | null {
-  const row = db().prepare(`SELECT * FROM users WHERE username = ?`).get((username || "").trim()) as UserRow | undefined;
+export async function authenticate(username: string, password: string): Promise<SessionUser | null> {
+  const row = await queryOne<UserRow>("SELECT * FROM users WHERE username = $1", [(username || "").trim()]);
   // Always run the KDF so a wrong username costs the same as a wrong password.
   const ok = verifyPassword(password || "", row?.password_hash || "scrypt$00$00");
   if (!row || !ok || !row.active) return null;
@@ -171,50 +171,29 @@ export async function clearSession(): Promise<void> {
  * a changed role takes effect on the next request rather than at cookie expiry.
  */
 export async function getSession(): Promise<SessionUser | null> {
-  // The store app sends the same signed token as "Authorization: Bearer …".
-  // An explicit Bearer token wins over the cookie, and is never topped up from
-  // it: the browser store app at /app/store/ is on the desk's own origin, so its
-  // fetches also carry whatever desk cookie that browser has — often a
-  // different person (the manager signed in on the desk, an advisor in the
-  // app). Cookie-first would act as the wrong user; a bad Bearer token is a 401.
   const hs = await headers();
   const h = hs.get("authorization") || "";
-  // "Authorization: Device …" is the store tablet's device token
-  // (docs/STORE-TABLET.md). It is never a session — it can only list the
-  // store's staff and unlock one of them (lib/server/storeTablet.ts) — so it is
-  // not matched below. Nor does it fall through to the cookie: the browser
-  // tablet at /app/store/ shares the desk's origin, and a request that says
-  // "I am the tablet" must not run as whoever is signed in on that browser's desk.
   if (/^Device\s/i.test(h)) return null;
   const m = /^Bearer\s+(\S+)$/i.exec(h);
   const token = m ? m[1] : (await cookies()).get(COOKIE)?.value;
   const u = decode(token);
   if (!u) return null;
-  const row = db().prepare(`SELECT role, org_id, store_id, active, name FROM users WHERE id = ?`).get(u.id) as
-    | Pick<UserRow, "role" | "org_id" | "store_id" | "active" | "name">
-    | undefined;
+  const row = await queryOne<Pick<UserRow, "role" | "org_id" | "store_id" | "active" | "name">>(
+    "SELECT role, org_id, store_id, active, name FROM users WHERE id = $1",
+    [u.id]
+  );
   if (!row || !row.active || row.role !== u.role || row.org_id !== u.orgId || row.store_id !== u.storeId) return null;
-  // Unlocked on a store tablet: only while that tablet is still enrolled (docs/STORE-TABLET.md).
-  if (u.dev && !db().prepare(`SELECT 1 FROM store_devices WHERE id = ? AND revoked_at IS NULL`).get(u.dev)) return null;
-  // Store staff on a Bearer token = SwapUp Store (the app, or its browser version): an old build is
-  // refused here, before the route does anything. The desk (cookie), SwapUp Check (Ticket) and the
-  // tablet's Device token never reach this line.
+  // Unlocked on a store tablet: only while that tablet is still enrolled.
+  if (u.dev) {
+    const dev = await queryOne("SELECT 1 FROM store_devices WHERE id = $1 AND revoked_at IS NULL", [u.dev]);
+    if (!dev) return null;
+  }
   if (m && (u.role === "advisor" || u.role === "store_manager") && storeAppTooOld(hs.get("x-swapup-app"), process.env.SWAPUP_STORE_MIN_VERSION)) {
     throw new HttpError(426, UPDATE_STORE);
   }
   return { ...u, name: row.name };
 }
 
-/**
- * SwapUp Store's minimum version (SUP-27). The apps are sideloaded with no over-the-air updates, so an
- * old tablet would keep showing old screens and totals. SwapUp Store sends
- * "X-SwapUp-App: store/<version>+<versionCode>" (e.g. "store/0.9.3+15") on every call; with
- * SWAPUP_STORE_MIN_VERSION set (e.g. "0.9.3"), a store-staff Bearer call whose header is missing,
- * malformed or names an older version gets 426 UPDATE_STORE. Unset or empty = the gate is off, the
- * default; it is set to the first release that sends the header once that is on /downloads, and from
- * then on refuses every older tablet (README → Deploy). A value that is not x.y.z leaves it off too,
- * and says so in the log once — "update" would send staff to /downloads for nothing.
- */
 export const UPDATE_STORE = "Update SwapUp Store from /downloads.";
 
 const VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})$/;
@@ -238,7 +217,6 @@ export function storeAppTooOld(app: string | null, min: string | undefined): boo
 
 export class HttpError extends Error {
   status: number;
-  /** More fields for the JSON body beside `error` — a machine-readable `reason` the apps branch on. */
   extra?: Record<string, string>;
   constructor(status: number, message: string, extra?: Record<string, string>) {
     super(message);
@@ -254,7 +232,6 @@ export async function requireUser(roles?: Role[]): Promise<SessionUser> {
   return u;
 }
 
-/** Where each role lands after signing in. */
 export function homeFor(role: Role): string {
   switch (role) {
     case "platform":
@@ -279,7 +256,6 @@ export function orgSettingsDefaults() {
     maxAgeDays: 7,
     pickupAtCount: 10,
     shortfallLiability: "store" as "store" | "partner",
-    /** Labour per job by service tier, GST on parts + labour, and the plan fee when a model has none recorded. */
     repairPolicy: { labourByTier: { Z: 525, S: 425, other: 350 } as Record<string, number>, gstBp: 1800, carePlusFeeDefault: 2349 },
     bandMinBp: 200,
     bandMaxBp: 500,
@@ -288,10 +264,9 @@ export function orgSettingsDefaults() {
   };
 }
 
-export function orgSettings(orgId: string): OrgSettings {
-  const row = db().prepare(`SELECT settings FROM orgs WHERE id = ?`).get(orgId) as { settings: string } | undefined;
+export async function orgSettings(orgId: string): Promise<OrgSettings> {
+  const row = await queryOne<{ settings: string }>("SELECT settings FROM orgs WHERE id = $1", [orgId]);
   const d = orgSettingsDefaults();
-  // `priceiq` (a buy spread and an age limit) is retired: the markdown and the 14/90-day rule are the same everywhere.
   const { priceiq: _retired, ...s } = parseJson<Partial<OrgSettings> & { priceiq?: unknown }>(row?.settings, {});
   return {
     ...d,

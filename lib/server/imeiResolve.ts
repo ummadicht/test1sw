@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { HttpError } from "./auth";
-import { db, parseJson } from "./db";
+import { query, queryOne, parseJson } from "./db";
 import { GradeiqError, gradeiqConfig, lookupImei, readImeiScreen, type ImeiLookup } from "./gradeiq";
 import { gsmaLookupName, gsmaModelName, imeiModelNow, isRealLookup, modelForTacName, tacLookup, tacModel, type ImeiModelNow, type TacDb } from "../domain/tac";
 import { kymEarlyStop, luhnValid, type KymStatus } from "../domain/imei";
@@ -39,15 +39,29 @@ import { matchModel, type DeviceReport, type TradeModelRef } from "../domain/dia
  * (blacklistedLookup) — a re-scan that reads the phone's IMEI 2 first must not get it through.
  */
 
+let _cachedRefs: TradeModelRef[] = [];
+
 /** SwapUp's trade models, for matching (each server module that matches keeps its own read). */
-export function tradeModelRefs(): TradeModelRef[] {
-  return (db().prepare(`SELECT id, brand, model, variants, model_codes FROM trade_models`).all() as {
+export async function tradeModelRefs(): Promise<TradeModelRef[]> {
+  const rows = await query<{
     id: string;
     brand: string;
     model: string;
     variants: string;
     model_codes: string;
-  }[]).map((r) => ({ id: r.id, brand: r.brand, model: r.model, variants: parseJson<string[]>(r.variants, []), modelCodes: parseJson<string[]>(r.model_codes, []) }));
+  }>(`SELECT id, brand, model, variants, model_codes FROM trade_models`);
+  _cachedRefs = rows.map((r) => ({
+    id: r.id,
+    brand: r.brand,
+    model: r.model,
+    variants: parseJson<string[]>(r.variants, []),
+    modelCodes: parseJson<string[]>(r.model_codes, []),
+  }));
+  return _cachedRefs;
+}
+
+export function getCachedTradeModelRefs(): TradeModelRef[] {
+  return _cachedRefs;
 }
 
 let TACDB: TacDb | null = null;
@@ -88,7 +102,7 @@ export const IMEI_NAMES_NO_MODEL = "The IMEI doesn't name a model — choose it 
  * only IMEI 1 is ever looked up. none = no IMEI, no answer kept (a misread is never looked up), or an
  * answer that names nothing.
  */
-export function caseImeiModel(c: { imei: string | null; imei_lookup?: string | null }, refs: TradeModelRef[] = tradeModelRefs()): ImeiModelNow {
+export function caseImeiModel(c: { imei: string | null; imei_lookup?: string | null }, refs: TradeModelRef[] = _cachedRefs): ImeiModelNow {
   return imeiModelNow(withTacName(lookupFor(c.imei_lookup, c.imei)), refs);
 }
 
@@ -261,10 +275,11 @@ export function gsmaBlacklisted(c: CaseImeis): boolean {
  * testing."), never "lost or stolen" for a duplicate or in-use IMEI (SUP-17). Both carry reason
  * "blacklisted": the apps stop the trade-in on it and print the sentence.
  */
-export function assertNotBlacklisted(caseId: string): void {
-  const c = db().prepare(`SELECT imei, imei2, imei_lookup, kym_early FROM cases WHERE id = ?`).get(caseId) as
-    | { imei: string | null; imei2: string | null; imei_lookup: string | null; kym_early: string | null }
-    | undefined;
+export async function assertNotBlacklisted(caseId: string): Promise<void> {
+  const c = await queryOne<{ imei: string | null; imei2: string | null; imei_lookup: string | null; kym_early: string | null }>(
+    `SELECT imei, imei2, imei_lookup, kym_early FROM cases WHERE id = $1`,
+    [caseId]
+  );
   if (!c || !isBlacklisted(c)) return;
   if (gsmaBlacklisted(c)) throw new HttpError(409, BLACKLISTED, { reason: "blacklisted" });
   const k = parseJson<KymEarly | null>(c.kym_early, null);

@@ -18,11 +18,11 @@ const ROLES_FOR_KIND: Record<"platform" | "client" | "partner", Role[]> = {
 export default async function PlatformUsersPage({ searchParams }: { searchParams: Promise<{ orgId?: string }> }) {
   const u = await requirePage(["platform"], "/platform/users");
   const { orgId } = await searchParams;
-  const orgs = listOrgs(u);
+  const orgs = await listOrgs(u);
   const org = orgId ? orgs.find((o) => o.id === orgId) ?? null : null;
-  const all = listUsers(u);
+  const all = await listUsers(u);
   const users = org ? all.filter((x) => x.orgId === org.id) : all;
-  const stores = listStores(u).map((s) => ({ id: s.id, name: s.name, orgId: s.org_id }));
+  const stores = (await listStores(u)).map((s) => ({ id: s.id, name: s.name, orgId: s.org_id }));
   const countFor = (id: string) => all.filter((x) => x.orgId === id).length;
   const kindOrder = { client: 0, partner: 1, platform: 2 } as const;
   const sorted = [...orgs].sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || a.name.localeCompare(b.name));
