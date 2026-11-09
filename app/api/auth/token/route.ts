@@ -14,7 +14,7 @@ export async function POST(req: Request) {
     const key = `${(b.username || "").toLowerCase()}|${req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local"}`;
     const f = fails.get(key);
     if (f && f.n >= 8 && f.until > Date.now()) throw new HttpError(429, "Too many attempts — wait a few minutes.");
-    const r = tokenLogin(b.username || "", b.password || "");
+    const r = await tokenLogin(b.username || "", b.password || "");
     if (!r) {
       const cur = f && f.until > Date.now() ? f : { n: 0, until: Date.now() + 10 * 60_000 };
       fails.set(key, { n: cur.n + 1, until: cur.until });

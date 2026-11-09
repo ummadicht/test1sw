@@ -1,0 +1,7 @@
+{
+  "name": "SwapUp",
+  "description": "Repair or upgrade? Trade-in and upgrade desk for SwapUp Experience Centers, with per-store credit lines.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

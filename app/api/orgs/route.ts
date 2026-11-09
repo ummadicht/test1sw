@@ -6,7 +6,7 @@ import { listOrgs, createOrg } from "@/lib/server/admin";
 export async function GET() {
   return handle(async () => {
     const u = await requireUser();
-    return { orgs: listOrgs(u) };
+    return { orgs: await listOrgs(u) };
   });
 }
 
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   return handle(async () => {
     const u = await requireUser(["platform"]);
     const b = await body<{ name?: string; kind?: string; clientType?: string; targetBrand?: string; partnerId?: string | null }>(req);
-    const org = createOrg(u, {
+    const org = await createOrg(u, {
       name: String(b.name ?? ""),
       kind: b.kind as "client" | "partner", // the service rejects anything else with a readable message
       clientType: b.clientType,

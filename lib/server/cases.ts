@@ -479,7 +479,7 @@ async function caseInScope(u: SessionUser, id: string): Promise<{ c: CaseRow; st
   const c = await row(id);
   if (!c) throw new HttpError(404, "Case not found.");
   const store = await getStore(c.store_id);
-  if (!store || !canSeeStore(u, store)) throw new HttpError(404, "Case not found.");
+  if (!store || !(await canSeeStore(u, store))) throw new HttpError(404, "Case not found.");
   // A customer still at the counter (or one who never traded in) is not the
   // partner's business — same rule as listCases, enforced on every read path.
   if (u.role === "partner" && PARTNER_HIDDEN_STATUSES.includes(c.status)) throw new HttpError(404, "Case not found.");
@@ -824,6 +824,8 @@ export function forViewer(u: SessionUser, view: CaseView): CaseView {
   if (u.role !== "partner") return view;
   return {
     ...view,
+    // The seller's identity (name, phone, ID) is the store's — the partner matches phones by case ref and IMEI (SUP-105).
+    customer: null,
     refurbCost: null,
     offer: null,
     refurbEconomics: null,
@@ -888,31 +890,35 @@ export async function listCases(
   const args: unknown[] = [];
   let pIdx = 1;
   if (u.role === "advisor" || u.role === "store_manager") {
-    where.push(`c.store_id = ${pIdx++}`);
+    where.push(`c.store_id = $${pIdx++}`);
     args.push(u.storeId);
   } else if (u.role === "org_admin") {
-    where.push(`c.org_id = ${pIdx++}`);
+    where.push(`c.org_id = $${pIdx++}`);
     args.push(u.orgId);
   } else if (u.role === "partner") {
-    where.push(`c.org_id IN (SELECT id FROM orgs WHERE kind = 'client' AND partner_id = ${pIdx++})`);
+    where.push(`c.org_id IN (SELECT id FROM orgs WHERE kind = 'client' AND partner_id = $${pIdx++})`);
     args.push(u.orgId);
     where.push(`c.status NOT IN (${PARTNER_HIDDEN_STATUSES.map((x) => `'${x}'`).join(",")})`);
   }
   if (opts.storeId) {
     await storeInScope(u, opts.storeId);
-    where.push(`c.store_id = ${pIdx++}`);
+    where.push(`c.store_id = $${pIdx++}`);
     args.push(opts.storeId);
   }
   if (opts.pickupId) {
-    where.push(`c.pickup_id = ${pIdx++}`);
+    where.push(`c.pickup_id = $${pIdx++}`);
     args.push(opts.pickupId);
   }
   if (opts.status?.length) {
-    where.push(`c.status = ANY(${pIdx++}::text[])`);
+    where.push(`c.status = ANY($${pIdx++}::text[])`);
     args.push(opts.status);
   }
   if (opts.q) {
-    where.push(`(c.ref ILIKE ${pIdx} OR c.imei ILIKE ${pIdx} OR c.customer ILIKE ${pIdx} OR t.model ILIKE ${pIdx})`);
+    if (u.role === "partner") {
+      where.push(`(c.ref ILIKE $${pIdx} OR c.imei ILIKE $${pIdx} OR t.model ILIKE $${pIdx})`);
+    } else {
+      where.push(`(c.ref ILIKE $${pIdx} OR c.imei ILIKE $${pIdx} OR c.customer ILIKE $${pIdx} OR t.model ILIKE $${pIdx})`);
+    }
     const like = `%${opts.q.trim()}%`;
     args.push(like);
     pIdx++;
@@ -939,12 +945,13 @@ export async function listCases(
       status: r.status,
       storeId: r.store_id,
       storeName: r.store_name,
-      customerName: cust?.name ?? null,
+      // The seller's name is never sent to the buyback partner (SUP-105).
+      customerName: u.role === "partner" ? null : (cust?.name ?? null),
       device: r.model_name ? `${r.brand} ${r.model_name}${r.variant ? " " + r.variant : ""}` : null,
       imei: r.imei,
       tradeValue: r.trade_value ?? parseJson<PartnerQuote | null>(r.quote, null)?.amount ?? null,
-      bonusValue: r.bonus_value,
-      newDevice: up?.label ?? null,
+      bonusValue: u.role === "partner" ? null : r.bonus_value,
+      newDevice: u.role === "partner" ? null : (up?.label ?? null),
       // The store's answer to its customer is not the partner's business.
       recommendation: u.role === "partner" ? null : (dec?.recommendation ?? null),
       createdAt: r.created_at,
@@ -1538,9 +1545,9 @@ export async function updateCase(u: SessionUser, id: string, patch: CasePatch, i
   if (Object.keys(sets).length) {
     sets.updated_at = nowIso();
     const cols = Object.keys(sets);
-    const setClauses = cols.map((k, idx) => `${k} = ${idx + 1}`).join(", ");
+    const setClauses = cols.map((k, idx) => `${k} = $${idx + 1}`).join(", ");
     await execute(
-      `UPDATE cases SET ${setClauses} WHERE id = ${cols.length + 1} AND status IN ('draft','quoted')`,
+      `UPDATE cases SET ${setClauses} WHERE id = $${cols.length + 1} AND status IN ('draft','quoted')`,
       [...cols.map((k) => sets[k]), id]
     );
   }

@@ -24,7 +24,7 @@ export function CasesListTable({
           <tr>
             <th>Case</th>
             {showStore ? <th>Store</th> : null}
-            <th>Customer</th>
+            {partnerView ? null : <th>Customer</th>}
             <th>Phone</th>
             {partnerView ? null : <th>Recommended</th>}
             {/* The figure is the market price (trade_value): what the partner pays back. */}
@@ -45,7 +45,7 @@ export function CasesListTable({
                   </Link>
                 </td>
                 {showStore ? <td className="text-[13.5px]">{c.storeName}</td> : null}
-                <td>{c.customerName ?? <span className="text-muted">Not named yet</span>}</td>
+                {partnerView ? null : <td>{c.customerName ?? <span className="text-muted">Not named yet</span>}</td>}
                 <td>
                   <div className="font-medium">{c.device ?? <span className="text-muted">Not recorded yet</span>}</div>
                   {c.imei ? <div className="text-[12px] text-muted num">IMEI {maskImei(c.imei)}</div> : null}

@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev -p ${PORT:-4500}",
+    "dev": "next dev --webpack -p 3000 -H 0.0.0.0",
     "build": "next build --webpack",
-    "start": "next start -p ${PORT:-4500}",
+    "start": "next start -p 3000 -H 0.0.0.0",
+    "lint": "tsc --noEmit",
     "test": "node --test --experimental-strip-types --no-warnings lib/domain/*.test.ts components/counter/*.test.ts lib/server/*.test.ts deploy/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -21,13 +22,11 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22",
     "@types/pg": "^8.23.1",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "better-sqlite3": "^12.11.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

@@ -1,0 +1,613 @@
+{
+  "id": "swapup",
+  "realm": "swapup",
+  "displayName": "SwapUp",
+  "displayNameHtml": "<strong>SwapUp</strong> Trade-In &amp; Upgrade Platform",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 600,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 600,
+  "failureFactor": 8,
+  "accessTokenLifespan": 43200,
+  "ssoSessionIdleTimeout": 43200,
+  "ssoSessionMaxLifespan": 86400,
+  "roles": {
+    "realm": [
+      {
+        "name": "platform",
+        "description": "SwapUp platform — onboards clients and partners, sees everything",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "org_admin",
+        "description": "Programme admin — stores, credit limits, campaigns, catalogues, reports",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "store_manager",
+        "description": "Store manager — one store: the counter, its credit line, pickups, its advisors",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "advisor",
+        "description": "Counter advisor — one store: the counter only",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "partner",
+        "description": "Buyback partner — pickups, verification, settlement and rate cards",
+        "composite": false,
+        "clientRole": false
+      }
+    ]
+  },
+  "defaultRoles": [
+    "advisor"
+  ],
+  "clients": [
+    {
+      "clientId": "swapup-web",
+      "name": "SwapUp Web Desk & Admin Console",
+      "description": "Next.js web application and API server for SwapUp Experience Centers",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "ClientAuthenticatorType": "client-secret",
+      "secret": "swapup-keycloak-client-secret-2026",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "frontchannelLogout": true,
+      "rootUrl": "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app",
+      "baseUrl": "/",
+      "redirectUris": [
+        "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/keycloak/callback",
+        "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/keycloak/callback",
+        "http://localhost:3000/api/auth/keycloak/callback",
+        "http://localhost:4500/api/auth/keycloak/callback",
+        "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*",
+        "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*",
+        "http://localhost:3000/*",
+        "http://localhost:4500/*"
+      ],
+      "webOrigins": [
+        "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app",
+        "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app",
+        "http://localhost:3000",
+        "http://localhost:4500",
+        "+"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*##https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*##http://localhost:3000/*##http://localhost:4500/*",
+        "pkce.code.challenge.method": ""
+      },
+      "protocolMappers": [
+        {
+          "name": "swapup-role-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "swapup_role",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "swapup_role",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "swapup-org-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "org_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "org_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "swapup-store-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "store_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "store_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "swapup-user-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "swapup_user_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "swapup_user_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "swapup-realm-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "swapup-mobile",
+      "name": "SwapUp Store Companion App",
+      "description": "Public OIDC client for SwapUp Store Android / tablet companion app",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "swapupstore://*",
+        "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/keycloak/callback",
+        "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/keycloak/callback",
+        "http://localhost:3000/api/auth/keycloak/callback",
+        "http://localhost:4500/api/auth/keycloak/callback",
+        "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*",
+        "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*",
+        "http://localhost:3000/*",
+        "http://localhost:4500/*"
+      ],
+      "webOrigins": [
+        "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app",
+        "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app",
+        "http://localhost:3000",
+        "http://localhost:4500",
+        "+"
+      ],
+      "protocolMappers": [
+        {
+          "name": "swapup-role-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "swapup_role",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "swapup_role",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "swapup-org-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "org_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "org_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "swapup-store-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "store_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "store_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "swapup-user-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "swapup_user_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "swapup_user_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "swapup-realm-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "advisor",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Rahul",
+      "lastName": "Desai",
+      "email": "advisor@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "advisor"
+        ],
+        "org_id": [
+          "org_samsung_svc"
+        ],
+        "swapup_user_id": [
+          "usr_adv_and"
+        ],
+        "store_id": [
+          "st_and"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "advisor"
+      ]
+    },
+    {
+      "username": "advisor.kor",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Divya",
+      "lastName": "Shetty",
+      "email": "advisor.kor@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "advisor"
+        ],
+        "org_id": [
+          "org_samsung_svc"
+        ],
+        "swapup_user_id": [
+          "usr_adv_kor"
+        ],
+        "store_id": [
+          "st_kor"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "advisor"
+      ]
+    },
+    {
+      "username": "manager",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Priya",
+      "lastName": "Nair",
+      "email": "manager@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "store_manager"
+        ],
+        "org_id": [
+          "org_samsung_svc"
+        ],
+        "swapup_user_id": [
+          "usr_mgr_and"
+        ],
+        "store_id": [
+          "st_and"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "store_manager"
+      ]
+    },
+    {
+      "username": "manager.kor",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Kiran",
+      "lastName": "Rao",
+      "email": "manager.kor@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "store_manager"
+        ],
+        "org_id": [
+          "org_samsung_svc"
+        ],
+        "swapup_user_id": [
+          "usr_mgr_kor"
+        ],
+        "store_id": [
+          "st_kor"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "store_manager"
+      ]
+    },
+    {
+      "username": "partner",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Partner",
+      "lastName": "Ops (demo)",
+      "email": "partner@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "partner"
+        ],
+        "org_id": [
+          "ptn_demo"
+        ],
+        "swapup_user_id": [
+          "usr_partner"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "partner"
+      ]
+    },
+    {
+      "username": "platform",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "SwapUp",
+      "lastName": "Ops",
+      "email": "platform@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "platform"
+        ],
+        "org_id": [
+          "org_platform"
+        ],
+        "swapup_user_id": [
+          "usr_platform"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "platform"
+      ]
+    },
+    {
+      "username": "samsung",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Programme",
+      "lastName": "Admin (demo)",
+      "email": "samsung@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "org_admin"
+        ],
+        "org_id": [
+          "org_samsung_svc"
+        ],
+        "swapup_user_id": [
+          "usr_samsung"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "org_admin"
+      ]
+    },
+    {
+      "username": "xc.admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Experience",
+      "lastName": "Admin (demo)",
+      "email": "xc.admin@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "org_admin"
+        ],
+        "org_id": [
+          "org_xc"
+        ],
+        "swapup_user_id": [
+          "usr_xc_admin"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "org_admin"
+      ]
+    },
+    {
+      "username": "xc.advisor",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Sana",
+      "lastName": "Qureshi",
+      "email": "xc.advisor@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "advisor"
+        ],
+        "org_id": [
+          "org_xc"
+        ],
+        "swapup_user_id": [
+          "usr_xc_adv"
+        ],
+        "store_id": [
+          "st_cpx"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "advisor"
+      ]
+    },
+    {
+      "username": "xc.manager",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Arjun",
+      "lastName": "Mehta",
+      "email": "xc.manager@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "store_manager"
+        ],
+        "org_id": [
+          "org_xc"
+        ],
+        "swapup_user_id": [
+          "usr_xc_mgr"
+        ],
+        "store_id": [
+          "st_cpx"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "store_manager"
+      ]
+    },
+    {
+      "username": "buyback.partner",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Buyback",
+      "lastName": "Partner",
+      "email": "buyback.partner@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "partner"
+        ],
+        "org_id": [
+          "ptn_BfpxCIbbL6RTGPMk"
+        ],
+        "swapup_user_id": [
+          "usr_TXaEV70bPAQU_VuD"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "partner"
+      ]
+    }
+  ]
+}

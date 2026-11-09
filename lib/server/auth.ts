@@ -45,6 +45,7 @@ export type SessionUser = {
 };
 
 const COOKIE = "swapup_session";
+const KC_ID_TOKEN_COOKIE = "swapup_kc_id_token";
 const MAX_AGE_S = 60 * 60 * 12; // one shift and a bit
 
 let cachedSecret: string | null = null;
@@ -121,6 +122,18 @@ type UserRow = {
 };
 
 export async function authenticate(username: string, password: string): Promise<SessionUser | null> {
+  const { getKeycloakConfig, authenticateViaKeycloakPassword } = await import("./keycloak");
+  const kcCfg = getKeycloakConfig();
+  if (kcCfg.enabled) {
+    const kcRes = await authenticateViaKeycloakPassword(username, password);
+    if (kcRes.matched && kcRes.user) {
+      return sessionFor(kcRes.user);
+    }
+    if (!kcCfg.allowLocalFallback && !kcRes.unreachable) {
+      return null;
+    }
+  }
+
   const row = await queryOne<UserRow>("SELECT * FROM users WHERE username = $1", [(username || "").trim()]);
   // Always run the KDF so a wrong username costs the same as a wrong password.
   const ok = verifyPassword(password || "", row?.password_hash || "scrypt$00$00");
@@ -150,20 +163,52 @@ export function issueToken(u: SessionUser): string {
   return encode(u);
 }
 
+async function isHttpsRequest(): Promise<boolean> {
+  try {
+    const hs = await headers();
+    const proto = hs.get("x-forwarded-proto") || "";
+    if (proto.toLowerCase().includes("https")) return true;
+    const host = hs.get("x-forwarded-host") || hs.get("host") || "";
+    if (host.endsWith(".run.app")) return true;
+  } catch {
+    // ignore outside request context
+  }
+  return process.env.NODE_ENV === "production";
+}
+
 export async function setSession(u: SessionUser): Promise<void> {
   const jar = await cookies();
+  const https = await isHttpsRequest();
   jar.set(COOKIE, encode(u), {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    sameSite: https ? "none" : "lax",
+    secure: https,
     path: "/",
     maxAge: MAX_AGE_S,
   });
 }
 
+export async function setKeycloakIdTokenCookie(idToken: string): Promise<void> {
+  const jar = await cookies();
+  const https = await isHttpsRequest();
+  jar.set(KC_ID_TOKEN_COOKIE, idToken, {
+    httpOnly: true,
+    sameSite: https ? "none" : "lax",
+    secure: https,
+    path: "/",
+    maxAge: MAX_AGE_S,
+  });
+}
+
+export async function getKeycloakIdTokenCookie(): Promise<string | null> {
+  const jar = await cookies();
+  return jar.get(KC_ID_TOKEN_COOKIE)?.value ?? null;
+}
+
 export async function clearSession(): Promise<void> {
   const jar = await cookies();
   jar.delete(COOKIE);
+  jar.delete(KC_ID_TOKEN_COOKIE);
 }
 
 /**
@@ -176,7 +221,20 @@ export async function getSession(): Promise<SessionUser | null> {
   if (/^Device\s/i.test(h)) return null;
   const m = /^Bearer\s+(\S+)$/i.exec(h);
   const token = m ? m[1] : (await cookies()).get(COOKIE)?.value;
-  const u = decode(token);
+  let u = decode(token);
+
+  // If the caller passed a 3-part Keycloak JWT as Bearer token, verify & map it
+  if (!u && m && token && token.split(".").length === 3) {
+    const { verifyKeycloakJwt, syncKeycloakUserToDb } = await import("./keycloak");
+    const claims = await verifyKeycloakJwt(token);
+    if (claims) {
+      const synced = await syncKeycloakUserToDb(claims);
+      if (synced) {
+        u = sessionFor(synced);
+      }
+    }
+  }
+
   if (!u) return null;
   const row = await queryOne<Pick<UserRow, "role" | "org_id" | "store_id" | "active" | "name">>(
     "SELECT role, org_id, store_id, active, name FROM users WHERE id = $1",

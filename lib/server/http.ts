@@ -6,9 +6,25 @@ import { HttpError } from "./auth";
  * and message; anything else is a 500 whose detail is logged, not leaked.
  * `status` is for a success that isn't a plain 200 (201 when something was created).
  */
+async function resolvePromises(val: unknown): Promise<unknown> {
+  if (val instanceof Promise) {
+    return resolvePromises(await val);
+  }
+  if (Array.isArray(val)) {
+    return Promise.all(val.map(resolvePromises));
+  }
+  if (val && typeof val === "object" && Object.getPrototypeOf(val) === Object.prototype) {
+    const entries = await Promise.all(
+      Object.entries(val as Record<string, unknown>).map(async ([k, v]) => [k, await resolvePromises(v)] as const)
+    );
+    return Object.fromEntries(entries);
+  }
+  return val;
+}
+
 export async function handle<T>(fn: () => Promise<T> | T, status = 200): Promise<NextResponse> {
   try {
-    const data = await fn();
+    const data = await resolvePromises(await fn());
     return NextResponse.json(data ?? { ok: true }, { status, headers: { "cache-control": "no-store" } });
   } catch (e) {
     if (e instanceof HttpError) return NextResponse.json({ error: e.message, ...(e.extra ?? {}) }, { status: e.status });

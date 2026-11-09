@@ -317,7 +317,8 @@ export default async function PickupPage({ params }: { params: Promise<{ id: str
                         </td>
                         <td className="min-w-[170px]">
                           <div className="font-medium">{i.device ?? "—"}</div>
-                          {i.customerName ? <div className="text-[12.5px] text-muted">{i.customerName}</div> : null}
+                          {!isPartner && i.customerName ? <div className="text-[12.5px] text-muted">{i.customerName}</div> : null}
+                          {i.imei ? <div className="text-[12px] text-muted num">IMEI {i.imei}</div> : null}
                           {i.dataClear === "due" ? <div className="text-[12.5px] text-warn font-semibold">Data not cleared</div> : null}
                         </td>
                         <td className="min-w-[130px]">

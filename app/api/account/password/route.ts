@@ -7,7 +7,7 @@ export async function POST(req: Request) {
   return handle(async () => {
     const u = await requireUser();
     const b = await body<{ current?: string; next?: string }>(req);
-    changeOwnPassword(u, String(b.current ?? ""), String(b.next ?? ""));
+    await changeOwnPassword(u, String(b.current ?? ""), String(b.next ?? ""));
     return { ok: true };
   });
 }

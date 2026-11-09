@@ -1,8 +1,8 @@
 /**
  * ACTIVATE A RATE CARD from the server's shell — the same upload the Rate cards page makes
- * (lib/server/catalog.ts uploadRateCard), for the programme's one buyback partner, active at once:
+ * (lib/server/catalog.ts uploadRateCard), for a buyback partner, active at once:
  *
- *   node --experimental-strip-types scripts/activate-rate-card.ts --label "W42 by grade" < card.csv
+ *   node --experimental-strip-types scripts/activate-rate-card.ts --label "W42 by grade" [--partner "Buyback partner"] < card.csv
  *
  * It is opened through the server's db module and booted through its seed, so migrations and
  * boot passes run exactly as the server runs them. The CSV is the page's:
@@ -15,20 +15,34 @@
  */
 // The module hooks the server's tests load lib/server with (extensionless imports, "@/…", next stubs).
 import "../lib/server/testing/register.mjs";
+import fs from "node:fs";
+import path from "node:path";
 
 function fail(message: string): never {
   console.error(message);
   process.exit(1);
 }
 
-const at = process.argv.indexOf("--label");
-const label = (at > 0 ? (process.argv[at + 1] ?? "") : "").trim();
+function argAfter(flag: string): string {
+  const idx = process.argv.indexOf(flag);
+  return (idx > 0 ? (process.argv[idx + 1] ?? "") : "").trim();
+}
+
+const label = argAfter("--label");
+const partnerArg = argAfter("--partner");
 if (!label) fail('Name the card: --label "W42 by grade".');
 if (process.stdin.isTTY) fail("Send the CSV on stdin: … < card.csv");
 const chunks: Buffer[] = [];
 for await (const c of process.stdin) chunks.push(c as Buffer);
 const csv = Buffer.concat(chunks).toString("utf8");
 if (!csv.trim()) fail("The CSV is empty.");
+
+const usePg = Boolean(process.env.DATABASE_URL || process.env.PGHOST);
+const dbFile = process.env.SWAPUP_DB || path.join(process.cwd(), "data", "swapup.db");
+if (!usePg) {
+  if (!fs.existsSync(dbFile)) fail(`No database at ${dbFile} — nothing uploaded.`);
+  console.error(`Database: ${dbFile}`);
+}
 
 // The server's own boot. Its notes go to stderr, so stdout carries only the counts and the id.
 const log = console.log;
@@ -42,9 +56,17 @@ const { rateCards, rateCardDetail, uploadRateCard } = await import("../lib/serve
 const { DEFECT_DEDUCTIONS } = await import("../lib/domain/ratecard.ts");
 const { PRICEIQ_QUOTE_VALIDITY_DAYS } = await import("../lib/server/tradeIn.ts");
 
-const partners = await query<{ id: string }>(`SELECT id FROM orgs WHERE kind = 'partner'`);
-if (partners.length !== 1) fail(`Expected one buyback partner, found ${partners.length} — nothing uploaded.`);
-const partnerId = partners[0].id;
+const partners = await query<{ id: string; name: string }>(`SELECT id, name FROM orgs WHERE kind = 'partner' ORDER BY created_at, id`);
+let partnerId: string;
+if (partnerArg) {
+  const matched = partners.find((p) => p.id === partnerArg || p.name.toLowerCase() === partnerArg.toLowerCase());
+  if (!matched) fail(`No buyback partner matching "${partnerArg}" — nothing uploaded.`);
+  partnerId = matched.id;
+} else {
+  if (partners.length !== 1) fail(`Expected one buyback partner, found ${partners.length} — pass --partner <id-or-name>; nothing uploaded.`);
+  partnerId = partners[0].id;
+}
+
 const login = await queryOne<{ id: string; username: string; name: string }>(
   `SELECT id, username, name FROM users WHERE org_id = $1 AND role = 'partner' ORDER BY created_at, id LIMIT 1`,
   [partnerId]

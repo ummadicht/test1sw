@@ -288,7 +288,7 @@ async function inScope(u: SessionUser, id: string): Promise<{ r: Row; store: Sto
   const r = await rowById(id);
   if (!r) throw new HttpError(404, "Test session not found.");
   const store = await getStore(r.store_id);
-  if (!store || !canSeeStore(u, store) || u.role === "partner") throw new HttpError(404, "Test session not found.");
+  if (!store || !(await canSeeStore(u, store)) || u.role === "partner") throw new HttpError(404, "Test session not found.");
   return { r, store };
 }
 
@@ -897,7 +897,7 @@ export async function cancelTestSession(u: SessionUser, id: string) {
   const { r, store } = await inScope(u, id);
   if (["applied", "cancelled"].includes(r.status)) throw new HttpError(409, "This session is already closed.");
   await execute(`UPDATE test_sessions SET status = 'cancelled', ticket_hash = NULL, updated_at = $1 WHERE id = $2`, [nowIso(), r.id]);
-  abandon(r.id, "test session cancelled");
+  await abandon(r.id, "test session cancelled");
   await audit({ userId: u.id, orgId: r.org_id, storeId: r.store_id, action: "test_session.cancel", entity: "test_session", entityId: r.id });
   return await withLinks(await view((await rowById(r.id))!, { staff: true }), store);
 }
@@ -912,7 +912,7 @@ export async function reissueTestSession(u: SessionUser, id: string, origin?: st
     return await createTestSession(u, { caseId: r.case_id }, origin);
   });
   // A new code is a new GradeIQ session: the photos belong to the phone that joins it.
-  abandon(r.id, "test session reissued");
+  await abandon(r.id, "test session reissued");
   return out;
 }
 
@@ -923,7 +923,7 @@ export async function retryGrading(u: SessionUser, id: string) {
   if (!["waiting", "opened", "joined", "testing", "complete"].includes(r.status)) throw new HttpError(409, "This session is closed.");
   if (r.gradeiq_id) throw new HttpError(409, "Camera grading is already set up for this session.");
   try {
-    retryCreate(r.id);
+    await retryCreate(r.id);
   } catch (e) {
     if (e instanceof GradeiqError) throw new HttpError(409, e.message);
     throw e;
@@ -947,7 +947,7 @@ export async function cameraOverride(u: SessionUser, id: string, raw: { reason?:
   const reason = typeof raw?.reason === "string" ? raw.reason.trim().slice(0, 300) : "";
   if (reason.length < 8) throw new HttpError(400, "Say why the camera starts without the phone's colours.");
   const info = { by: u.name, reason, at: nowIso() };
-  recordOverride(r.id, info);
+  await recordOverride(r.id, info);
   await markLcdOverride(r.case_id, { ...info, userId: u.id, testSessionId: r.id });
   // Going on without the phone's colours lets the phone go on from its Scan step too — the one way an
   // older SwapUp Store (no "release" button) can let a SwapUp Check ≥ 0.8.0 phone past Scan.
@@ -1705,8 +1705,8 @@ export async function deviceStatus(authorization: string | null) {
     progress: v.progress,
     storeName: v.storeName,
     caseRef: v.caseRef,
-    reportPath: applied ? reportPathFor(r0.case_id) : null,
-    grading: applied ? customerGradingFor(r0.case_id) : null,
+    reportPath: applied ? await reportPathFor(r0.case_id) : null,
+    grading: applied ? await customerGradingFor(r0.case_id) : null,
     colours,
     // Once applied, the answer — the server's lines, the customer's whitelist slice (owner, 2026-10-18:
     // the answer on the customer's phone too). Read only: never a re-price or a partner call.
