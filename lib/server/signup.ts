@@ -88,12 +88,12 @@ export async function programmes() {
   return allowed.filter((x): x is NonNullable<typeof x> => x !== null);
 }
 
-async function storeCode(orgId: string, name: string): Promise<string> {
+async function storeCode(name: string): Promise<string> {
   const letters = name.toUpperCase().replace(/[^A-Z]/g, "");
   const base = (letters.slice(0, 3) || "STR").padEnd(3, "X");
   for (let i = 0; i < 50; i++) {
     const code = i === 0 ? base : `${base.slice(0, 3)}${randomInt(10, 99)}`;
-    const clash = await queryOne(`SELECT 1 FROM stores WHERE org_id = $1 AND code = $2`, [orgId, code]);
+    const clash = await queryOne(`SELECT 1 FROM stores WHERE code = $1`, [code]);
     if (!clash) return code;
   }
   throw new HttpError(503, "Could not pick a store code — try again.");
@@ -116,7 +116,7 @@ export async function registerStore(input: Record<string, unknown>) {
   );
   if (dupe) throw new HttpError(409, "That store is already registered — ask its manager for an invite.");
 
-  const code = await storeCode(programmeId, storeName);
+  const code = await storeCode(storeName);
   const ids = await tx(async () => {
     const now = nowIso();
     const storeId = newId("st");

@@ -8,7 +8,7 @@ import { ErrorText } from "@/components/ui";
 export function LoginForm({
   next,
   keycloakEnabled = false,
-  keycloakRealm = "swapup",
+  keycloakRealm = "swapup1",
   initialError = null,
 }: {
   next: string | null;
@@ -76,6 +76,48 @@ export function LoginForm({
     }
   };
 
+  const [copiedJson, setCopiedJson] = useState(false);
+
+  const handleDownloadRealmJson = async () => {
+    setError(null);
+    try {
+      const res = await fetch(`/api/auth/keycloak/realm-export?origin=${encodeURIComponent(window.location.origin)}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error("Failed to generate Keycloak realm JSON.");
+      const text = await res.text();
+      // Validate it is well-formed JSON before saving
+      JSON.parse(text);
+      const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${keycloakRealm}-realm-export.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const handleCopyRealmJson = async () => {
+    setError(null);
+    try {
+      const res = await fetch(`/api/auth/keycloak/realm-export?origin=${encodeURIComponent(window.location.origin)}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error("Failed to generate Keycloak realm JSON.");
+      const text = await res.text();
+      await navigator.clipboard.writeText(text);
+      setCopiedJson(true);
+      setTimeout(() => setCopiedJson(false), 2500);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <div className="space-y-2">
@@ -87,15 +129,24 @@ export function LoginForm({
         >
           {ssoBusy ? "Connecting to Keycloak…" : `Sign in with Keycloak (${keycloakRealm})`}
         </button>
-        <div className="flex items-center justify-between text-[12.5px] text-muted px-0.5">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[12.5px] text-muted px-0.5">
           <span>{keycloakEnabled ? `Keycloak realm '${keycloakRealm}' connected` : `Keycloak realm: ${keycloakRealm}`}</span>
-          <a
-            href="/api/auth/keycloak/realm-export"
-            download="swapup-realm-export.json"
-            className="underline font-medium hover:text-[color:var(--ink)]"
-          >
-            Download {keycloakRealm} realm JSON
-          </a>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleDownloadRealmJson}
+              className="underline font-medium hover:text-[color:var(--ink)] cursor-pointer bg-transparent border-0 p-0"
+            >
+              Download {keycloakRealm} JSON
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyRealmJson}
+              className="underline font-medium hover:text-[color:var(--ink)] cursor-pointer bg-transparent border-0 p-0"
+            >
+              {copiedJson ? "Copied JSON!" : "Copy JSON"}
+            </button>
+          </div>
         </div>
       </div>
 

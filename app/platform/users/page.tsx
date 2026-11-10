@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { TeamManager } from "@/components/TeamManager";
+import { KeycloakDirectorySync } from "@/components/KeycloakDirectorySync";
 import { requirePage } from "@/lib/server/page";
 import { listOrgs, listStores, listUsers } from "@/lib/server/admin";
+import { getKeycloakSyncStatus } from "@/lib/server/keycloakSync";
 import type { Role } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +25,7 @@ export default async function PlatformUsersPage({ searchParams }: { searchParams
   const all = await listUsers(u);
   const users = org ? all.filter((x) => x.orgId === org.id) : all;
   const stores = (await listStores(u)).map((s) => ({ id: s.id, name: s.name, orgId: s.org_id }));
+  const syncStatus = await getKeycloakSyncStatus();
   const countFor = (id: string) => all.filter((x) => x.orgId === id).length;
   const kindOrder = { client: 0, partner: 1, platform: 2 } as const;
   const sorted = [...orgs].sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || a.name.localeCompare(b.name));
@@ -47,6 +50,7 @@ export default async function PlatformUsersPage({ searchParams }: { searchParams
           <div>That organisation was not found — showing everyone.</div>
         </div>
       ) : null}
+      <KeycloakDirectorySync initialStatus={syncStatus} />
       <TeamManager
         title={org ? `People at ${org.name}` : "Everyone on SwapUp"}
         users={users}

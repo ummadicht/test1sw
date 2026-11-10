@@ -1,6 +1,6 @@
 {
-  "id": "swapup",
-  "realm": "swapup",
+  "id": "swapup1",
+  "realm": "swapup1",
   "displayName": "SwapUp",
   "displayNameHtml": "<strong>SwapUp</strong> Trade-In &amp; Upgrade Platform",
   "enabled": true,
@@ -65,7 +65,7 @@
       "description": "Next.js web application and API server for SwapUp Experience Centers",
       "enabled": true,
       "protocol": "openid-connect",
-      "ClientAuthenticatorType": "client-secret",
+      "clientAuthenticatorType": "client-secret",
       "secret": "swapup-keycloak-client-secret-2026",
       "publicClient": false,
       "standardFlowEnabled": true,
@@ -272,6 +272,35 @@
     }
   ],
   "users": [
+    {
+      "username": "buyback.partner",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Buyback",
+      "lastName": "Partner",
+      "email": "buyback.partner@swapup.local",
+      "attributes": {
+        "swapup_role": [
+          "partner"
+        ],
+        "org_id": [
+          "ptn_BfpxCIbbL6RTGPMk"
+        ],
+        "swapup_user_id": [
+          "usr_24G2U2zS1l-B6bF_"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "swapup2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "partner"
+      ]
+    },
     {
       "username": "advisor",
       "enabled": true,
@@ -578,35 +607,6 @@
       ],
       "realmRoles": [
         "store_manager"
-      ]
-    },
-    {
-      "username": "buyback.partner",
-      "enabled": true,
-      "emailVerified": true,
-      "firstName": "Buyback",
-      "lastName": "Partner",
-      "email": "buyback.partner@swapup.local",
-      "attributes": {
-        "swapup_role": [
-          "partner"
-        ],
-        "org_id": [
-          "ptn_BfpxCIbbL6RTGPMk"
-        ],
-        "swapup_user_id": [
-          "usr_TXaEV70bPAQU_VuD"
-        ]
-      },
-      "credentials": [
-        {
-          "type": "password",
-          "value": "swapup2026",
-          "temporary": false
-        }
-      ],
-      "realmRoles": [
-        "partner"
       ]
     }
   ]

@@ -13,7 +13,7 @@ import { ALL_ROLES, hashPassword, generateTempPassword, type Role } from "./auth
  * 5. Dynamic & static Keycloak Realm JSON export for the `swapup` realm
  */
 
-export const DEFAULT_KEYCLOAK_REALM = "swapup";
+export const DEFAULT_KEYCLOAK_REALM = "swapup1";
 export const DEFAULT_KEYCLOAK_CLIENT_ID = "swapup-web";
 export const DEFAULT_KEYCLOAK_MOBILE_CLIENT_ID = "swapup-mobile";
 export const DEFAULT_KEYCLOAK_CLIENT_SECRET = "swapup-keycloak-client-secret-2026";
@@ -190,6 +190,7 @@ export type KeycloakTokenClaims = {
   store_id?: string;
   swapup_user_id?: string;
   roles?: string[];
+  groups?: string[];
   realm_access?: { roles?: string[] };
   resource_access?: Record<string, { roles?: string[] }>;
 };
@@ -251,8 +252,10 @@ function extractRole(claims: KeycloakTokenClaims, fallbackRole?: Role): Role {
     ...(claims.roles ?? []),
     ...(claims.realm_access?.roles ?? []),
     ...(claims.resource_access?.[DEFAULT_KEYCLOAK_CLIENT_ID]?.roles ?? []),
+    ...(claims.groups ?? []).map((g) => g.replace(/^\/+/, "").split("/").pop() || ""),
   ];
-  for (const r of ALL_ROLES) {
+  const priorityOrder: Role[] = ["platform", "partner", "org_admin", "store_manager", "advisor"];
+  for (const r of priorityOrder) {
     if (candidates.includes(r)) return r;
   }
   return fallbackRole ?? "advisor";
@@ -284,53 +287,90 @@ export async function syncKeycloakUserToDb(claims: KeycloakTokenClaims): Promise
   );
 
   const role = extractRole(claims, existing?.role);
+  const expectedKind = role === "platform" ? "platform" : role === "partner" ? "partner" : "client";
+  const orgsOfKind = await query<{ id: string; name: string; demo: number }>(
+    `SELECT id, name, demo FROM orgs WHERE kind = $1 ORDER BY demo ASC, created_at ASC`,
+    [expectedKind]
+  );
+
+  let resolvedOrgId = "";
+  if (claims.org_id) {
+    const match = orgsOfKind.find(
+      (o) => o.id.toLowerCase() === claims.org_id!.toLowerCase() || o.name.toLowerCase() === claims.org_id!.toLowerCase()
+    );
+    if (match) resolvedOrgId = match.id;
+  }
+  if (!resolvedOrgId && Array.isArray(claims.groups)) {
+    for (const g of claims.groups) {
+      for (const seg of g.split("/").map((s) => s.trim()).filter(Boolean)) {
+        const match = orgsOfKind.find((o) => o.id.toLowerCase() === seg.toLowerCase() || o.name.toLowerCase() === seg.toLowerCase());
+        if (match) {
+          resolvedOrgId = match.id;
+          break;
+        }
+      }
+      if (resolvedOrgId) break;
+    }
+  }
+  if (!resolvedOrgId && existing?.org_id && orgsOfKind.some((o) => o.id === existing.org_id)) {
+    resolvedOrgId = existing.org_id;
+  }
+  if (!resolvedOrgId) {
+    resolvedOrgId = orgsOfKind[0]?.id ?? (role === "platform" ? "org_platform" : role === "partner" ? "ptn_demo" : "org_samsung_svc");
+  }
+
+  let resolvedStoreId: string | null = null;
+  if (role === "store_manager" || role === "advisor") {
+    const orgStores = await query<{ id: string; code: string; name: string }>(
+      `SELECT id, code, name FROM stores WHERE org_id = $1 ORDER BY created_at ASC`,
+      [resolvedOrgId]
+    );
+    if (claims.store_id) {
+      const needle = claims.store_id.trim().toLowerCase();
+      const matched = orgStores.find(
+        (s) => s.id.toLowerCase() === needle || s.code.toLowerCase() === needle || s.name.toLowerCase() === needle
+      );
+      if (matched) resolvedStoreId = matched.id;
+    }
+    if (!resolvedStoreId && existing?.store_id && orgStores.some((s) => s.id === existing.store_id)) {
+      resolvedStoreId = existing.store_id;
+    }
+    if (!resolvedStoreId) {
+      resolvedStoreId = orgStores[0]?.id ?? null;
+    }
+  }
+
   const displayName =
     (claims.name || [claims.given_name, claims.family_name].filter(Boolean).join(" ") || existing?.name || rawUsername).trim();
 
   if (existing) {
     if (!existing.active) return null;
-    const nextOrgId = claims.org_id || existing.org_id;
-    const nextStoreId =
-      role === "store_manager" || role === "advisor"
-        ? claims.store_id !== undefined
-          ? claims.store_id || null
-          : existing.store_id
-        : null;
-    if (existing.role !== role || existing.name !== displayName || existing.org_id !== nextOrgId || existing.store_id !== nextStoreId) {
+    if (
+      existing.role !== role ||
+      existing.name !== displayName ||
+      existing.org_id !== resolvedOrgId ||
+      existing.store_id !== resolvedStoreId
+    ) {
       await execute(
         `UPDATE users SET role = $1, name = $2, org_id = $3, store_id = $4 WHERE id = $5`,
-        [role, displayName.slice(0, 80), nextOrgId, nextStoreId, existing.id]
+        [role, displayName.slice(0, 80), resolvedOrgId, resolvedStoreId, existing.id]
       );
     }
     return {
       ...existing,
       role,
       name: displayName.slice(0, 80),
-      org_id: nextOrgId,
-      store_id: nextStoreId,
+      org_id: resolvedOrgId,
+      store_id: resolvedStoreId,
     };
-  }
-
-  // Provision a new SwapUp user record from Keycloak token attributes
-  let orgId = claims.org_id || "";
-  if (!orgId) {
-    if (role === "platform") orgId = "org_platform";
-    else if (role === "partner") orgId = "ptn_demo";
-    else orgId = "org_samsung_svc";
-  }
-
-  let storeId: string | null = claims.store_id || null;
-  if ((role === "store_manager" || role === "advisor") && !storeId) {
-    const firstStore = await queryOne<{ id: string }>(`SELECT id FROM stores WHERE org_id = $1 ORDER BY created_at LIMIT 1`, [orgId]);
-    storeId = firstStore?.id ?? "st_and";
   }
 
   const userId = claims.swapup_user_id || newId("usr");
   await execute(
     `INSERT INTO users (id, org_id, store_id, username, name, role, password_hash, active, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8)
-     ON CONFLICT (username) DO UPDATE SET role = EXCLUDED.role, name = EXCLUDED.name`,
-    [userId, orgId, storeId, rawUsername, displayName.slice(0, 80), role, hashPassword(generateTempPassword()), nowIso()]
+     ON CONFLICT (username) DO UPDATE SET role = EXCLUDED.role, name = EXCLUDED.name, org_id = EXCLUDED.org_id, store_id = EXCLUDED.store_id`,
+    [userId, resolvedOrgId, resolvedStoreId, rawUsername, displayName.slice(0, 80), role, hashPassword(generateTempPassword()), nowIso()]
   );
 
   return await queryOne<SyncedUserRow>(
@@ -562,7 +602,8 @@ function buildProtocolMappers() {
   ];
 }
 
-export async function generateKeycloakRealmJson(extraOrigin?: string | null) {
+export async function generateKeycloakRealmJson(extraOrigin?: string | null, realmOverride?: string | null) {
+  const realmName = (realmOverride || getKeycloakConfig().realm || DEFAULT_KEYCLOAK_REALM).trim();
   let dbUsers: KeycloakRealmUserSeed[] = [];
   try {
     dbUsers = await query<KeycloakRealmUserSeed>(
@@ -595,8 +636,8 @@ export async function generateKeycloakRealmJson(extraOrigin?: string | null) {
   const mappers = buildProtocolMappers();
 
   return {
-    id: DEFAULT_KEYCLOAK_REALM,
-    realm: DEFAULT_KEYCLOAK_REALM,
+    id: realmName,
+    realm: realmName,
     displayName: "SwapUp",
     displayNameHtml: "<strong>SwapUp</strong> Trade-In &amp; Upgrade Platform",
     enabled: true,
@@ -659,7 +700,7 @@ export async function generateKeycloakRealmJson(extraOrigin?: string | null) {
         description: "Next.js web application and API server for SwapUp Experience Centers",
         enabled: true,
         protocol: "openid-connect",
-        ClientAuthenticatorType: "client-secret",
+        clientAuthenticatorType: "client-secret",
         secret: DEFAULT_KEYCLOAK_CLIENT_SECRET,
         publicClient: false,
         standardFlowEnabled: true,

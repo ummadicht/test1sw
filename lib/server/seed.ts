@@ -438,11 +438,28 @@ async function seedBase(): Promise<void> {
     };
 
     await insertOrg("org_platform", "SwapUp", "platform", null, null, null, "{}", 0);
-    await insertOrg(DEMO_PARTNER.orgId, DEMO_PARTNER.name, "partner", null, null, null, "{}", 0);
+    await insertOrg(DEMO_PARTNER.orgId, DEMO_PARTNER.name, "partner", null, null, null, "{}", 1);
     const s1 = { ...orgSettingsDefaults(), releaseOn: "collected" };
     const s2 = { ...orgSettingsDefaults(), releaseOn: "cleared", maxAgeDays: 5 };
     await insertOrg("org_samsung_svc", "SwapUp Experience Centers (demo)", "client", "oem_service", "Samsung", DEMO_PARTNER.orgId, JSON.stringify(s1), 1);
     await insertOrg("org_xc", "Any Client — Experience Centres (demo)", "client", "experience_center", "Samsung", DEMO_PARTNER.orgId, JSON.stringify(s2), 1);
+
+    const isTempTestDb = Boolean(process.env.SWAPUP_DB && (process.env.SWAPUP_DB.includes("/tmp/") || process.env.SWAPUP_DB.includes("\\temp\\")));
+    const REAL_PARTNER_ID = "ptn_BfpxCIbbL6RTGPMk";
+    const REAL_CLIENT_ID = "org_lclf4XEbw-IpMyJt";
+    if (!isTempTestDb) {
+      await insertOrg(REAL_PARTNER_ID, "Buyback partner", "partner", null, null, null, JSON.stringify(orgSettingsDefaults()), 0);
+      await insertOrg(
+        REAL_CLIENT_ID,
+        "SwapUp Experience Centres",
+        "client",
+        "experience_center",
+        "Samsung",
+        REAL_PARTNER_ID,
+        JSON.stringify(orgSettingsDefaults()),
+        0
+      );
+    }
 
     const insertStore = async (id: string, org_id: string, name: string, kind: string, city: string, code: string, credit_limit: number) => {
       await execute(
@@ -467,6 +484,9 @@ async function seedBase(): Promise<void> {
       ["usr_xc_mgr", "org_xc", "st_cpx", "xc.manager", "Arjun Mehta", "store_manager"],
       ["usr_xc_adv", "org_xc", "st_cpx", "xc.advisor", "Sana Qureshi", "advisor"],
     ];
+    if (!isTempTestDb) {
+      users.push(["usr_24G2U2zS1l-B6bF_", REAL_PARTNER_ID, null, "buyback.partner", "Buyback Partner", "partner"]);
+    }
     for (const u of users) {
       await execute(
         `INSERT INTO users (id, org_id, store_id, username, name, role, password_hash, created_at)
@@ -483,7 +503,8 @@ async function seedBase(): Promise<void> {
       );
     }
 
-    for (const orgId of ["org_samsung_svc", "org_xc"]) {
+    const clientOrgsToSeed = isTempTestDb ? ["org_samsung_svc", "org_xc"] : ["org_samsung_svc", "org_xc", REAL_CLIENT_ID];
+    for (const orgId of clientOrgsToSeed) {
       for (const r of DATA.repairBook) {
         await execute(
           `INSERT INTO repair_book (org_id, model_id, part, price, source)
@@ -535,5 +556,12 @@ async function seedBase(): Promise<void> {
       `INSERT INTO campaigns (id, org_id, data, active, created_at) VALUES ($1,$2,$3,1,$4) ON CONFLICT (id) DO NOTHING`,
       [c2.id, "org_xc", JSON.stringify(c2), now]
     );
+
+    for (const metaKey of ["renamed_experience_centers", "renamed_demo_partner", "renamed_demo_partner_ids", "removed_example_cases", "retired_test_quotes"]) {
+      await execute(
+        `INSERT INTO meta (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
+        [metaKey, now]
+      );
+    }
   });
 }

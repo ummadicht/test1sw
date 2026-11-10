@@ -138,6 +138,8 @@ export async function createStore(u: SessionUser, input: { orgId?: string; name:
   if (!/^[A-Z0-9]{2,8}$/.test(code)) throw new HttpError(400, "Store code: 2–8 letters or digits (it prefixes case numbers).");
   if (!["service_center", "experience_center", "retail"].includes(input.kind)) throw new HttpError(400, "Choose the store type.");
   if (!Number.isInteger(limit) || limit < 0 || limit > 100_000_000) throw new HttpError(400, "Credit limit must be a whole rupee amount.");
+  const taken = await queryOne(`SELECT 1 FROM stores WHERE code = $1`, [code]);
+  if (taken) throw new HttpError(409, "Another store already uses that code.");
   const id = newId("st");
   try {
     await execute(
@@ -146,7 +148,7 @@ export async function createStore(u: SessionUser, input: { orgId?: string; name:
     );
   } catch (e) {
     const msg = String((e as Error).message);
-    if (msg.includes("unique") || msg.includes("23505")) throw new HttpError(409, "Another store in this programme already uses that code.");
+    if (msg.includes("unique") || msg.includes("23505") || msg.includes("UNIQUE")) throw new HttpError(409, "Another store already uses that code.");
     throw e;
   }
   await audit({ userId: u.id, orgId, storeId: id, action: "store.create", entity: "store", entityId: id, detail: { name, code, limit } });
