@@ -17,6 +17,7 @@ import { AnswerCard } from "./AnswerCard";
 import { CheckByEye } from "./CheckByEye";
 import { PhonecheckPanel } from "./PhonecheckPanel";
 import { RefurbDecision } from "./RefurbDecision";
+import { RazorpayPaymentPanel } from "./RazorpayPaymentPanel";
 import { StepHeader, StepDock } from "./StepNav";
 import { STEP_ANCHOR, canShow, landingStep, stepDone, stepFromAnchor, stepOrder, testedCase, type StepId } from "./caseSteps";
 import { fmtWhen } from "./shared";
@@ -280,9 +281,21 @@ export function CaseWorkspace({
         <Link href={back.href} className="text-[13px] no-underline hover:underline no-print">
           <span className="text-muted">← {back.label}</span>
         </Link>
-        <div className="flex flex-wrap items-center gap-2 mt-1">
-          <h1 className="text-[24px] font-[760] tracking-tight leading-tight">{showCustomer && view.customer?.name ? view.customer.name : "Case"}</h1>
-          <StatusPill status={view.status} label={CASE_STATUS_LABEL[view.status]} />
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-[24px] font-[760] tracking-tight leading-tight">{showCustomer && view.customer?.name ? view.customer.name : "Case"}</h1>
+            <StatusPill status={view.status} label={CASE_STATUS_LABEL[view.status]} />
+          </div>
+          {!isPartner && (lockedOrLater || view.status === "repair_chosen" || view.offer !== null) ? (
+            <div className="flex flex-wrap items-center gap-1.5 no-print">
+              <Link href={`/cases/${view.id}/receipt`} className="btn btn-sm btn-ghost !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]">
+                🖨 Print receipt
+              </Link>
+              <Link href={`/cases/${view.id}/receipt?email=1`} className="btn btn-sm btn-ghost !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]">
+                ✉ Email receipt
+              </Link>
+            </div>
+          ) : null}
         </div>
         <div className="text-[13px] text-muted mt-0.5">
           <span className="num">{view.ref}</span> · {view.storeName} · opened {fmtWhen(view.createdAt)}
@@ -291,8 +304,37 @@ export function CaseWorkspace({
       </div>
 
       {view.status === "repair_chosen" ? (
-        <div className="mb-4">
-          <Banner tone="info">Closed {fmtWhen(view.closedAt)} — the customer is repairing it.</Banner>
+        <div className="mb-4 space-y-3">
+          <Banner tone="info">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>Closed {fmtWhen(view.closedAt)} — the customer is repairing it.</span>
+              <div className="flex items-center gap-2 no-print">
+                <Link href={`/cases/${view.id}/receipt?autoprint=1`} className="btn btn-sm !min-h-[28px] !py-0.5 !px-2.5 !text-[12px]">
+                  🖨 Print repair receipt
+                </Link>
+                <Link href={`/cases/${view.id}/receipt?email=1`} className="btn btn-sm btn-ghost !min-h-[28px] !py-0.5 !px-2.5 !text-[12px]">
+                  ✉ Email repair receipt
+                </Link>
+              </div>
+            </div>
+          </Banner>
+          {!isPartner ? (
+            <RazorpayPaymentPanel
+              caseId={view.id}
+              caseRef={view.ref}
+              mode="repair"
+              repairAmount={
+                (view.offer?.repair.amount && view.offer.repair.amount > 0
+                  ? view.offer.repair.amount
+                  : view.repair?.customerPays && view.repair.customerPays > 0
+                    ? view.repair.customerPays
+                    : 5000)
+              }
+              swapAmount={null}
+              customerName={view.customer?.name}
+              customerPhone={view.customer?.phone}
+            />
+          ) : null}
         </div>
       ) : null}
       {view.status === "walked_away" ? (

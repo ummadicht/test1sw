@@ -484,8 +484,32 @@ function UploadForm({
           <div className="flex flex-wrap items-end justify-between gap-2 mb-1.5">
             <span className="label !mb-0">Prices (CSV: model_id, variant, max_price, good_price, fair_price, best_value_price — the last three optional)</span>
             <span className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={async () => {
+                  try {
+                    const res = await fetch("/samsung-apple-rate-card.csv", { cache: "no-store" });
+                    if (!res.ok) throw new Error("Could not load Samsung & Apple CSV");
+                    const text = await res.text();
+                    setCsv(normaliseCsv(text));
+                    if (!label.trim()) setLabel(`Samsung & Apple Full Catalogue (${effectiveFrom || localToday()})`);
+                    if (!validity) setValidity("7");
+                  } catch (e) {
+                    setError((e as Error).message);
+                  }
+                }}
+              >
+                Load all Samsung &amp; Apple phones (290 rows)
+              </button>
+              <a className="btn btn-sm no-underline" href="/samsung-apple-rate-card.csv" download="samsung-apple-rate-card.csv">
+                Download Samsung &amp; Apple CSV
+              </a>
+              <a className="btn btn-sm no-underline" href="/postgres-full-seed.sql" download="postgres-full-seed.sql">
+                Download PostgreSQL .sql
+              </a>
               <a className="btn btn-sm no-underline" href={`/api/partner/rate-cards/template${qs}`} download>
-                Download template
+                Download blank template
               </a>
               <button type="button" className="btn btn-sm" onClick={() => fileRef.current?.click()}>
                 Load a .csv file
@@ -737,9 +761,10 @@ function CardDetail({ id, qs, onClose }: { id: string; qs: string; onClose: () =
                       <th>Phone</th>
                       <th>Model id</th>
                       <th>Storage</th>
-                      <th className="text-right">
-                        Best-condition price
-                      </th>
+                      <th className="text-right">Superb (A)</th>
+                      <th className="text-right">Good (B)</th>
+                      <th className="text-right">Fair (C)</th>
+                      <th className="text-right">Best Value (D)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -750,6 +775,15 @@ function CardDetail({ id, qs, onClose }: { id: string; qs: string; onClose: () =
                         <td className="whitespace-nowrap">{e.variant}</td>
                         <td className="text-right whitespace-nowrap">
                           <Money value={e.maxPrice} className="font-semibold" />
+                        </td>
+                        <td className="text-right whitespace-nowrap text-ink-2">
+                          {e.gradePrices?.Good ? <Money value={e.gradePrices.Good} /> : "—"}
+                        </td>
+                        <td className="text-right whitespace-nowrap text-ink-2">
+                          {e.gradePrices?.Fair ? <Money value={e.gradePrices.Fair} /> : "—"}
+                        </td>
+                        <td className="text-right whitespace-nowrap text-ink-2">
+                          {e.gradePrices?.["Best Value"] ? <Money value={e.gradePrices["Best Value"]} /> : "—"}
                         </td>
                       </tr>
                     ))}

@@ -12,6 +12,7 @@ import { idTypeLabel, maskPhone, fmtWhen, faultLabels, conditionSummary, COVER_L
 import type { CaseOps, PickupInfo } from "./ops";
 import { DataClearCard } from "./DataClearCard";
 import { TONE_TEXT, gradeTone } from "./gradingView";
+import { RazorpayPaymentPanel } from "./RazorpayPaymentPanel";
 
 /** After the trade-in is taken: what was agreed, who checked it, and where the phone is now. */
 export function LockedSummary({
@@ -112,6 +113,18 @@ export function LockedSummary({
               </div>
             )}
           </div>
+
+          {!isPartner && view.payable && view.payable > 0 ? (
+            <RazorpayPaymentPanel
+              caseId={view.id}
+              caseRef={view.ref}
+              mode="swap"
+              repairAmount={null}
+              swapAmount={view.payable}
+              customerName={view.customer?.name}
+              customerPhone={view.customer?.phone}
+            />
+          ) : null}
 
           <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-3 text-[14px]">
             <div>
@@ -231,7 +244,10 @@ export function LockedSummary({
 
           <div className="flex flex-wrap gap-2 no-print">
             <Link href={`/cases/${view.id}/receipt`} className="btn btn-sm">
-              Print receipt
+              🖨 Print receipt
+            </Link>
+            <Link href={`/cases/${view.id}/receipt?email=1`} className="btn btn-sm">
+              ✉ Email receipt
             </Link>
             <Link href={`/cases/${view.id}/tag`} className="btn btn-sm">
               Print tag

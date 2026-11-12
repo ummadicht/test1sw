@@ -1,11 +1,10 @@
 import { redirect } from "next/navigation";
 import { getSession, homeFor } from "@/lib/server/auth";
-import { getKeycloakConfig } from "@/lib/server/keycloak";
 import { ensureSeeded } from "@/lib/server/seed";
 import { LoginForm } from "./LoginForm";
 import { BrandMark } from "@/components/ui";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Sign in" };
 
@@ -14,7 +13,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const u = await getSession();
   const { next, error: initialError } = await searchParams;
   if (u) redirect(safeNext(next) ?? homeFor(u.role));
-  const kc = getKeycloakConfig();
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
       <div className="hidden lg:flex flex-col justify-between p-12 bg-[color:var(--ink)] text-white">
@@ -25,7 +23,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <h1 className="text-[40px] leading-[1.08] font-[780] tracking-tight">Repair it, or swap up?</h1>
           <p className="mt-4 text-[17px] text-white/75 leading-relaxed">Repair quote vs trade-in + bonus, side by side.</p>
         </div>
-        <p className="text-white/50 text-sm">Secured with Keycloak ({kc.realm} realm) · Buyback by the programme&apos;s partner.</p>
+        <p className="text-white/50 text-sm">Buyback by the programme&apos;s partner.</p>
       </div>
       <div className="flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
@@ -33,11 +31,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <BrandMark size={18} />
           </div>
           <h2 className="text-2xl font-bold tracking-tight">Sign in</h2>
-          <p className="hint mt-1 mb-6">Sign in with Keycloak SSO ({kc.realm} realm) or your store login.</p>
+          <p className="hint mt-1 mb-6">Enter your username and password to continue.</p>
           <LoginForm
             next={safeNext(next)}
-            keycloakEnabled={kc.enabled}
-            keycloakRealm={kc.realm}
             initialError={initialError ?? null}
           />
         </div>

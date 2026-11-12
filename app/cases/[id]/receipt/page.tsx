@@ -8,6 +8,7 @@ import { gradingReportFor } from "@/lib/server/gradingReport";
 import { originFromHeaders } from "@/lib/server/http";
 import type { CaseView } from "@/lib/server/cases";
 import { getStore, getOrg } from "@/lib/server/scope";
+import { getCaseRazorpaySummary, type RazorpayPaymentPlan } from "@/lib/server/razorpay";
 import { inr, fmtBp } from "@/lib/domain/money";
 import { maskImei } from "@/lib/domain/imei";
 import { PrintBar } from "@/components/counter/PrintBar";
@@ -15,7 +16,15 @@ import { conditionSummary, faultLabels, fmtWhen, idTypeLabel, maskPhone } from "
 import { absoluteUrl, gradeTail, pinnedPath, shortHash, tokenOf } from "@/components/counter/gradingView";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Exchange receipt" };
+export const metadata = { title: "Exchange & Payment Receipt" };
+
+const PLAN_LABELS: Record<RazorpayPaymentPlan, string> = {
+  repair_part_advance: "Repair · Part Advance",
+  repair_remaining: "Repair · Remaining Balance",
+  repair_full: "Repair · Full Payment (100%)",
+  swap_direct: "Swap Up · Direct Payment",
+  swap_emi: "Swap Up · Razorpay EMI",
+};
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -48,8 +57,17 @@ async function reportRow(u: SessionUser, caseId: string): Promise<ReportRow | nu
   }
 }
 
-export default async function ReceiptPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ReceiptPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ paymentId?: string }>;
+}) {
   const { id } = await params;
+  const sp = searchParams ? await searchParams : {};
+  const paymentIdFilter = sp?.paymentId ?? null;
+
   const u = await requirePage(null, `/cases/${id}/receipt`);
   let v: CaseView;
   try {
@@ -69,12 +87,22 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
     throw e;
   }
 
-  if (!v.lockedAt) {
+  const rzpSummary = await getCaseRazorpaySummary(v.id);
+  const paidPayments = rzpSummary.payments.filter((p) => p.status === "paid");
+  const filteredPayments = paymentIdFilter
+    ? paidPayments.filter((p) => p.id === paymentIdFilter || p.razorpay_order_id === paymentIdFilter)
+    : paidPayments;
+  const paymentsToShow = filteredPayments.length > 0 ? filteredPayments : paidPayments;
+
+  const hasRepairQuote = (rzpSummary.repair.totalPayable ?? 0) > 0 || v.status === "repair_chosen";
+  const hasRazorpayPayments = paidPayments.length > 0;
+
+  if (!v.lockedAt && !hasRepairQuote && !hasRazorpayPayments) {
     return (
       <Shell>
         <div className="card card-pad text-center">
-          <div className="text-[18px] font-semibold">Not traded in yet</div>
-          <p className="hint">Printed once the trade-in is taken.</p>
+          <div className="text-[18px] font-semibold">Not traded in or paid yet</div>
+          <p className="hint">Printed once a trade-in is locked, a repair is booked, or a Razorpay payment is completed.</p>
           <Link href={`/cases/${v.id}`} className="btn btn-sm mt-4">
             ← Back
           </Link>
@@ -83,26 +111,56 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
     );
   }
 
+  let defaultCustomerEmail: string | null = null;
+  for (const p of rzpSummary.payments) {
+    if (p.notes) {
+      try {
+        const parsed = JSON.parse(p.notes) as { emailedTo?: string };
+        if (parsed.emailedTo) {
+          defaultCustomerEmail = parsed.emailedTo;
+          break;
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   const store = await getStore(v.storeId);
   const org = await getOrg(v.orgId);
-  // A test programme's receipt says so on its face: no real money changes hands.
   const test = !!org?.demo;
   const priceiq = v.quote?.source.kind === "priceiq";
-  // The customer's copy: what we pay (the market price + the SwapUp premium) in ONE row, its market
-  // price in the answer's own words under it. Never the word "premium", never the partner's name.
   const wePay = v.tradeValue === null ? null : v.tradeValue + (v.premiumValue ?? 0);
-  // The line with its note — "Market price for grade A ₹29,710 · ₹34,960 less ₹5,250 for back glass cracked" —
-  // so a grade price with something taken off is never printed without the working-out.
   const marketLine = v.offer?.answer.lines.find((l) => l.key === "market") ?? null;
-  const marketWords = marketLine ? (marketLine.note ? `${marketLine.text} · ${marketLine.note}` : marketLine.text) : null;
+  const marketWords = marketLine ? (marketLine.text ? (marketLine.note ? `${marketLine.text} · ${marketLine.note}` : marketLine.text) : null) : null;
   const b = v.bonus;
   const bonusBp = b ? (b.override?.bp ?? b.bp) : null;
   const cond = conditionSummary(v.condition);
   const report = await reportRow(u, v.id);
 
+  const isRepairReceipt =
+    v.status === "repair_chosen" ||
+    (!v.lockedAt && hasRepairQuote) ||
+    (paymentsToShow.length > 0 && paymentsToShow.every((p) => p.journey === "repair"));
+
+  const receiptTitle = isRepairReceipt
+    ? "Repair & Payment Receipt"
+    : hasRazorpayPayments && !v.lockedAt
+      ? "SwapUp Payment Receipt"
+      : "Exchange receipt";
+
+  const receiptTimestamp =
+    paymentsToShow[0]?.paid_at || v.lockedAt || v.updatedAt || v.createdAt;
+
   return (
     <Shell>
-      <PrintBar back={`/cases/${v.id}`} label="Print receipt" />
+      <PrintBar
+        back={`/cases/${v.id}`}
+        label="Print receipt"
+        caseId={v.id}
+        paymentId={paymentIdFilter}
+        defaultEmail={defaultCustomerEmail}
+      />
       <article className="relative overflow-hidden bg-white border border-line rounded-[14px] print:border-0 print:rounded-none p-8 print:p-0 text-[13.5px] leading-relaxed text-ink">
         {test ? (
           <div aria-hidden className="pointer-events-none absolute inset-0 grid place-items-center">
@@ -122,9 +180,9 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
             {org ? <div className="text-muted text-[12px]">{org.name}</div> : null}
           </div>
           <div className="text-right">
-            <div className="text-[16px] font-[760] uppercase tracking-wide">Exchange receipt</div>
+            <div className="text-[16px] font-[760] uppercase tracking-wide">{receiptTitle}</div>
             <div className="num text-[15px] font-semibold">{v.ref}</div>
-            <div className="text-ink-2">{fmtWhen(v.lockedAt, "long")}</div>
+            <div className="text-ink-2">{fmtWhen(receiptTimestamp, "long")}</div>
           </div>
         </header>
 
@@ -142,12 +200,14 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
             <div>
               Mobile <span className="num">{maskPhone(v.customer?.phone)}</span>
             </div>
-            <div>
-              {idTypeLabel(v.customer?.idType)} ending <span className="num">{v.customer?.idLast4 ?? "—"}</span>
-            </div>
+            {v.customer?.idLast4 ? (
+              <div>
+                {idTypeLabel(v.customer?.idType)} ending <span className="num">{v.customer?.idLast4 ?? "—"}</span>
+              </div>
+            ) : null}
           </div>
           <div>
-            <h2 className="section-title mb-1.5">Phone traded in</h2>
+            <h2 className="section-title mb-1.5">{isRepairReceipt ? "Customer device" : "Phone traded in"}</h2>
             <div className="font-semibold text-[15px]">{v.device ? `${v.device.brand} ${v.device.model} ${v.device.variant ?? ""}` : "—"}</div>
             <div>
               IMEI <span className="num">{v.imei ? maskImei(v.imei) : "—"}</span>
@@ -163,14 +223,16 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
                 {v.checks.kym.reference ? ` · ${v.checks.kym.reference}` : ""}
               </div>
             ) : null}
-            <div className="text-ink-2">
-              Customer&apos;s data:{" "}
-              {v.dataClear
-                ? `reset, seen by ${v.dataClear.by}, ${fmtWhen(v.dataClear.at)} (not a certified erasure)`
-                : v.dataClearState === "attested"
-                  ? "reset ticked at hand-over (not a certified erasure)"
-                  : "not cleared yet"}
-            </div>
+            {v.lockedAt ? (
+              <div className="text-ink-2">
+                Customer&apos;s data:{" "}
+                {v.dataClear
+                  ? `reset, seen by ${v.dataClear.by}, ${fmtWhen(v.dataClear.at)} (not a certified erasure)`
+                  : v.dataClearState === "attested"
+                    ? "reset ticked at hand-over (not a certified erasure)"
+                    : "not cleared yet"}
+              </div>
+            ) : null}
             <div className="text-ink-2">Faults: {v.faults.length ? faultLabels(v.faults) : "none"}</div>
             {cond.length ? <div className="text-ink-2">Declared condition: {cond.join(" · ")}</div> : null}
           </div>
@@ -193,54 +255,143 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
           </section>
         ) : null}
 
-        <section className="mt-6">
-          <h2 className="section-title mb-1.5">The exchange</h2>
-          <table className="w-full border-collapse">
-            <tbody>
-              <tr className="border-b border-line">
-                <td className="py-2 pr-3">
-                  <div className="font-semibold">New phone: {v.upgrade?.label ?? "—"}</div>
-                </td>
-                <td className="py-2 text-right num whitespace-nowrap">{inr(v.upgrade?.price)}</td>
-              </tr>
-              <tr className="border-b border-line">
-                <td className="py-2 pr-3">
-                  <div>We pay you</div>
-                  <div className="text-[12px] text-muted">{marketWords ?? "Quoted by the buyback partner"}</div>
-                </td>
-                <td className="py-2 text-right num whitespace-nowrap">− {inr(wePay)}</td>
-              </tr>
-              <tr className="border-b border-line">
-                <td className="py-2 pr-3">
-                  <div>Less upgrade bonus{bonusBp !== null ? ` (${fmtBp(bonusBp)})` : ""}</div>
-                  {b ? (
-                    <div className="text-[12px] text-muted">
-                      {b.campaignName} · funded by {b.fundedBy}
-                      {b.override ? " · set by the manager" : ""}
-                    </div>
-                  ) : null}
-                </td>
-                <td className="py-2 text-right num whitespace-nowrap">− {inr(v.bonusValue ?? 0)}</td>
-              </tr>
-              <tr>
-                <td className="py-3 pr-3 text-[16px] font-[760]">Amount payable</td>
-                <td className="py-3 text-right num text-[22px] font-[780] whitespace-nowrap">{inr(v.payable)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
+        {/* Repair Bill Section (when customer opted for repair or paid for repair) */}
+        {isRepairReceipt && rzpSummary.repair.totalPayable ? (
+          <section className="mt-6">
+            <h2 className="section-title mb-1.5">Repair summary</h2>
+            <table className="w-full border-collapse">
+              <tbody>
+                {(v.repair?.lines ?? []).map((line) => (
+                  <tr key={line.part} className="border-b border-line">
+                    <td className="py-1.5 pr-3 text-ink-2">{line.label}</td>
+                    <td className="py-1.5 text-right num whitespace-nowrap">{inr(line.listPrice)}</td>
+                  </tr>
+                ))}
+                <tr className="border-b border-line">
+                  <td className="py-2 pr-3 font-semibold">Total repair estimate</td>
+                  <td className="py-2 text-right num font-semibold whitespace-nowrap">{inr(rzpSummary.repair.totalPayable)}</td>
+                </tr>
+                <tr className="border-b border-line">
+                  <td className="py-2 pr-3 text-up font-semibold">Paid via Razorpay</td>
+                  <td className="py-2 text-right num font-bold text-up whitespace-nowrap">− {inr(rzpSummary.repair.paidAmount)}</td>
+                </tr>
+                <tr>
+                  <td className="py-3 pr-3 text-[16px] font-[760]">Remaining balance due on pickup</td>
+                  <td className="py-3 text-right num text-[20px] font-[780] whitespace-nowrap">
+                    {inr(rzpSummary.repair.remainingBalance)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        ) : null}
+
+        {/* Exchange Section (when customer traded in or chose an upgrade phone) */}
+        {(!isRepairReceipt || v.lockedAt) ? (
+          <section className="mt-6">
+            <h2 className="section-title mb-1.5">The exchange</h2>
+            <table className="w-full border-collapse">
+              <tbody>
+                <tr className="border-b border-line">
+                  <td className="py-2 pr-3">
+                    <div className="font-semibold">New phone: {v.upgrade?.label ?? "—"}</div>
+                  </td>
+                  <td className="py-2 text-right num whitespace-nowrap">{inr(v.upgrade?.price)}</td>
+                </tr>
+                <tr className="border-b border-line">
+                  <td className="py-2 pr-3">
+                    <div>We pay you</div>
+                    <div className="text-[12px] text-muted">{marketWords ?? "Quoted by the buyback partner"}</div>
+                  </td>
+                  <td className="py-2 text-right num whitespace-nowrap">− {inr(wePay)}</td>
+                </tr>
+                <tr className="border-b border-line">
+                  <td className="py-2 pr-3">
+                    <div>Less upgrade bonus{bonusBp !== null ? ` (${fmtBp(bonusBp)})` : ""}</div>
+                    {b ? (
+                      <div className="text-[12px] text-muted">
+                        {b.campaignName} · funded by {b.fundedBy}
+                        {b.override ? " · set by the manager" : ""}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="py-2 text-right num whitespace-nowrap">− {inr(v.bonusValue ?? 0)}</td>
+                </tr>
+                <tr>
+                  <td className="py-3 pr-3 text-[16px] font-[760]">Amount payable</td>
+                  <td className="py-3 text-right num text-[22px] font-[780] whitespace-nowrap">{inr(v.payable ?? rzpSummary.swap.totalPayable)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        ) : null}
+
+        {/* Razorpay Payment Receipt Transactions */}
+        {paymentsToShow.length > 0 ? (
+          <section className="mt-6 print:break-inside-avoid">
+            <h2 className="section-title mb-1.5">Razorpay payment receipt</h2>
+            <table className="w-full border-collapse border border-line rounded-[8px] overflow-hidden text-[13px]">
+              <thead>
+                <tr className="bg-surface-2 text-left text-[12px] text-ink-2 border-b border-line">
+                  <th className="py-2 px-3">Payment Plan &amp; Reference</th>
+                  <th className="py-2 px-3">Method &amp; Date</th>
+                  <th className="py-2 px-3 text-right">Amount Paid</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paymentsToShow.map((p) => (
+                  <tr key={p.id} className="border-b border-line last:border-b-0">
+                    <td className="py-2.5 px-3">
+                      <div className="font-semibold text-ink">
+                        {PLAN_LABELS[p.payment_plan]}
+                        {p.emi_months ? ` (${p.emi_months}M EMI · ${inr(p.emi_monthly_amount)}/mo)` : ""}
+                      </div>
+                      <div className="num text-[11.5px] text-muted">
+                        Order: {p.razorpay_order_id} · Payment: {p.razorpay_payment_id ?? "—"}
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3 text-ink-2">
+                      <div className="uppercase font-semibold text-[12px]">{p.payment_method || "UPI"}</div>
+                      <div className="text-[11.5px] text-muted">{fmtWhen(p.paid_at || p.created_at)}</div>
+                    </td>
+                    <td className="py-2.5 px-3 text-right num">
+                      <div className="font-bold text-up">{inr(p.amount)}</div>
+                      {p.remaining_due > 0 ? (
+                        <div className="text-[11.5px] text-fix font-semibold">
+                          Balance due: {inr(p.remaining_due)}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-muted">Paid in full</div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        ) : null}
 
         <section className="mt-5">
           <h2 className="section-title mb-1.5">Terms</h2>
           <ol className="list-decimal pl-5 space-y-1 text-[12.5px] text-ink-2">
-            <li>
-              {priceiq ? "Trade-in: market price at its grade, less markdown and defects." : <>Trade-in: the buyback partner&apos;s quote for the condition above.</>} If the
-              phone differs, the store may revise or reverse the exchange.
-            </li>
-            <li>The bonus is a promotion; no bank cashback or no-cost EMI with it.</li>
-            <li>The customer owns this phone and removed accounts, SIM, memory card and data.</li>
-            <li>Only the ID&apos;s last four characters are recorded.</li>
-            <li>Not a tax invoice. The GST invoice shows the new phone&apos;s full price.</li>
+            {isRepairReceipt ? (
+              <>
+                <li>Repair spare parts are priced as per the published OEM service schedule for the model above.</li>
+                <li>If paid via Razorpay Part Advance, the remaining balance is payable upon repair completion and device handover.</li>
+                <li>Only the ID&apos;s last four characters are recorded.</li>
+              </>
+            ) : (
+              <>
+                <li>
+                  {priceiq ? "Trade-in: market price at its grade, less markdown and defects." : <>Trade-in: the buyback partner&apos;s quote for the condition above.</>} If the
+                  phone differs, the store may revise or reverse the exchange.
+                </li>
+                <li>The bonus is a promotion; no bank cashback or no-cost EMI with it.</li>
+                <li>The customer owns this phone and removed accounts, SIM, memory card and data.</li>
+                <li>Only the ID&apos;s last four characters are recorded.</li>
+                <li>Not a tax invoice. The GST invoice shows the new phone&apos;s full price.</li>
+              </>
+            )}
           </ol>
         </section>
 
@@ -258,3 +409,4 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
     </Shell>
   );
 }
+

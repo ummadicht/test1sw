@@ -78,22 +78,30 @@
       "redirectUris": [
         "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/keycloak/callback",
         "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/keycloak/callback",
+        "https://swapup-dev2.swapup.in/api/auth/keycloak/callback",
         "http://localhost:3000/api/auth/keycloak/callback",
         "http://localhost:4500/api/auth/keycloak/callback",
+        "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/callback",
+        "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/callback",
+        "https://swapup-dev2.swapup.in/api/auth/callback",
+        "http://localhost:3000/api/auth/callback",
+        "http://localhost:4500/api/auth/callback",
         "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*",
         "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*",
+        "https://swapup-dev2.swapup.in/*",
         "http://localhost:3000/*",
         "http://localhost:4500/*"
       ],
       "webOrigins": [
         "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app",
         "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app",
+        "https://swapup-dev2.swapup.in",
         "http://localhost:3000",
         "http://localhost:4500",
         "+"
       ],
       "attributes": {
-        "post.logout.redirect.uris": "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*##https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*##http://localhost:3000/*##http://localhost:4500/*",
+        "post.logout.redirect.uris": "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*##https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*##https://swapup-dev2.swapup.in/*##http://localhost:3000/*##http://localhost:4500/*",
         "pkce.code.challenge.method": ""
       },
       "protocolMappers": [
@@ -183,16 +191,24 @@
         "swapupstore://*",
         "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/keycloak/callback",
         "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/keycloak/callback",
+        "https://swapup-dev2.swapup.in/api/auth/keycloak/callback",
         "http://localhost:3000/api/auth/keycloak/callback",
         "http://localhost:4500/api/auth/keycloak/callback",
+        "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/callback",
+        "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/api/auth/callback",
+        "https://swapup-dev2.swapup.in/api/auth/callback",
+        "http://localhost:3000/api/auth/callback",
+        "http://localhost:4500/api/auth/callback",
         "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*",
         "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app/*",
+        "https://swapup-dev2.swapup.in/*",
         "http://localhost:3000/*",
         "http://localhost:4500/*"
       ],
       "webOrigins": [
         "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app",
         "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app",
+        "https://swapup-dev2.swapup.in",
         "http://localhost:3000",
         "http://localhost:4500",
         "+"

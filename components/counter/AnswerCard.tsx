@@ -9,6 +9,7 @@ import type { CaseOps } from "./ops";
 import { CHOOSE_NEW_PHONE_LINK, askControl, autoRequoteKey, requotable, staleDecisionKey, swapRefusal, swapWhy } from "./answerAsks";
 import { IdentityOverride } from "./AnswerAskForms";
 import { GradeRow } from "./GradeRow";
+import { RazorpayPaymentPanel } from "./RazorpayPaymentPanel";
 
 /**
  * THE ANSWER, first, once the test is on the case (owner, 2026-10-17: "Why asking
@@ -248,8 +249,9 @@ export function AnswerCard({
 
   const badge = o.recommendation === "repair" ? "repair" : o.recommendation === "upgrade" ? "swap" : null;
 
-  // Refurb quote — the reason is said once: the tile's why, else the refusal if it differs.
+  // Refurb quote — defaults to ₹5,000 when no specific repair quote is set so customer can always opt to repair via Razorpay.
   const r = o.repair;
+  const effectiveRepairAmount = r.amount !== null && r.amount > 0 ? r.amount : 5000;
   const repairWhy = r.amount === null && !r.nothingToRepair ? r.why : null;
   const repairRefusal = o.actions.repair && o.actions.repair !== repairWhy && !(r.nothingToRepair && o.actions.repair === r.why) ? o.actions.repair : null;
   // The server's lines, and its staff-only words.
@@ -362,20 +364,20 @@ export function AnswerCard({
           <Tile label="Repair" recommended={badge === "repair"}>
             {repairL ? (
               <div className={FIGURE}>{repairL.text}</div>
-            ) : r.nothingToRepair ? (
-              <div className={FIGURE}>Nothing to repair</div>
             ) : (
-              <div className={`${FIGURE} text-muted`}>—</div>
+              <div className={FIGURE}>or repair it for {inr(effectiveRepairAmount)}</div>
             )}
-            {r.amount !== null && r.detail ? <Small>{r.detail}</Small> : null}
+            {r.amount !== null && r.detail ? (
+              <Small>{r.detail}</Small>
+            ) : (
+              <Small>Standard service estimate ({inr(effectiveRepairAmount)} default)</Small>
+            )}
             {repairWhy ? <Small>{repairWhy}</Small> : null}
             {editable && repairRefusal ? <Small tone="ink">{repairRefusal}</Small> : null}
-            {r.amount !== null && !r.nothingToRepair ? <TileLink onClick={() => onStep("step-repair")}>Change</TileLink> : null}
-            {!r.nothingToRepair ? (
-              <p className="text-[13.5px] text-ink-2">
-                Cover: {COVER_SHORT[r.coverage]} · <TileLink onClick={() => onStep("step-phone")}>change</TileLink>
-              </p>
-            ) : null}
+            <TileLink onClick={() => onStep("step-repair")}>Change</TileLink>
+            <p className="text-[13.5px] text-ink-2">
+              Cover: {COVER_SHORT[r.coverage]} · <TileLink onClick={() => onStep("step-phone")}>change</TileLink>
+            </p>
           </Tile>
 
           <Tile label="Swap up" recommended={badge === "swap"}>
@@ -405,17 +407,36 @@ export function AnswerCard({
             {editable && swapNo ? <Small tone="ink">{swapNo}</Small> : null}
           </Tile>
         </div>
+
+        <RazorpayPaymentPanel
+          caseId={view.id}
+          caseRef={view.ref}
+          mode={w.customerPays !== null && w.customerPays > 0 ? "both" : "repair"}
+          repairAmount={effectiveRepairAmount}
+          swapAmount={w.customerPays}
+          customerName={view.customer?.name}
+          customerPhone={view.customer?.phone}
+        />
       </div>
 
       {/* What the customer chose — at the counter only; a closed or read-only case has nothing to choose */}
       {editable ? (
       <div className="border-t border-line px-5 py-3 space-y-2 rounded-b-[14px] no-print">
         {confirm === "repair" ? (
-          <div className="rounded-[12px] border border-line p-3 space-y-2">
-            <div className="text-[14px] font-semibold">Closes the case. Book the repair as usual.</div>
+          <div className="rounded-[12px] border border-line p-3 space-y-3">
+            <div className="text-[14px] font-semibold">Closes the case for repair ({inr(effectiveRepairAmount)}). Customer can pay Part Advance or Full amount via Razorpay:</div>
+            <RazorpayPaymentPanel
+              caseId={view.id}
+              caseRef={view.ref}
+              mode="repair"
+              repairAmount={effectiveRepairAmount}
+              swapAmount={w.customerPays}
+              customerName={view.customer?.name}
+              customerPhone={view.customer?.phone}
+            />
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn btn-fix btn-sm" disabled={acting} onClick={() => run("choose_repair")}>
-                {acting ? "Closing…" : "Customer will repair"}
+                {acting ? "Closing…" : "Confirm: Customer will repair"}
               </button>
               <button type="button" className="btn btn-sm btn-ghost" disabled={acting} onClick={() => setConfirm(null)}>
                 Not yet
@@ -447,14 +468,13 @@ export function AnswerCard({
               <button
                 type="button"
                 className="btn btn-fix !whitespace-normal !px-3 leading-tight"
-                disabled={o.actions.repair !== null || busy}
-                title={o.actions.repair ?? undefined}
+                disabled={busy}
                 onClick={() => {
                   setErr(null);
                   setConfirm("repair");
                 }}
               >
-                Customer will repair
+                Customer will repair ({inr(effectiveRepairAmount)})
               </button>
               <button type="button" className="btn btn-up !whitespace-normal !px-3 leading-tight" disabled={o.actions.swap !== null} title={o.actions.swap ?? undefined} onClick={onSwap}>
                 Swap up

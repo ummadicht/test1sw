@@ -20,6 +20,7 @@ export const DEFAULT_KEYCLOAK_CLIENT_SECRET = "swapup-keycloak-client-secret-202
 
 export const DEV_APP_ORIGIN = "https://ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app";
 export const SHARED_APP_ORIGIN = "https://ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app";
+export const SWAPUP_DEV2_ORIGIN = "https://swapup-dev2.swapup.in";
 
 export type KeycloakConfig = {
   enabled: boolean;
@@ -36,19 +37,30 @@ export type KeycloakConfig = {
 };
 
 export function getKeycloakConfig(): KeycloakConfig {
-  const rawUrl = (process.env.KEYCLOAK_URL || process.env.NEXT_PUBLIC_KEYCLOAK_URL || "").trim().replace(/\/$/, "");
-  const realm = (process.env.KEYCLOAK_REALM || process.env.NEXT_PUBLIC_KEYCLOAK_REALM || DEFAULT_KEYCLOAK_REALM).trim();
-  const issuer =
-    (process.env.KEYCLOAK_ISSUER || "").trim().replace(/\/$/, "") ||
-    (rawUrl ? `${rawUrl}/realms/${encodeURIComponent(realm)}` : "");
+  const rawIssuerEnv = (process.env.KEYCLOAK_ISSUER || process.env.OIDC_ISSUER || "").trim().replace(/\/$/, "");
+  const issuerMatch = rawIssuerEnv.match(/^(https?:\/\/[^/]+.*?)\/realms\/([^/]+)$/i);
+  const rawUrl = (
+    process.env.KEYCLOAK_URL ||
+    process.env.NEXT_PUBLIC_KEYCLOAK_URL ||
+    (issuerMatch ? issuerMatch[1] : "")
+  )
+    .trim()
+    .replace(/\/$/, "");
+  const realm = (
+    process.env.KEYCLOAK_REALM ||
+    process.env.NEXT_PUBLIC_KEYCLOAK_REALM ||
+    (issuerMatch ? decodeURIComponent(issuerMatch[2]) : "") ||
+    DEFAULT_KEYCLOAK_REALM
+  ).trim();
+  const issuer = rawIssuerEnv || (rawUrl ? `${rawUrl}/realms/${encodeURIComponent(realm)}` : "");
 
   return {
-    enabled: Boolean(rawUrl || process.env.KEYCLOAK_ISSUER),
+    enabled: Boolean(rawUrl || rawIssuerEnv),
     baseUrl: rawUrl,
     realm,
     issuer,
-    clientId: (process.env.KEYCLOAK_CLIENT_ID || DEFAULT_KEYCLOAK_CLIENT_ID).trim(),
-    clientSecret: (process.env.KEYCLOAK_CLIENT_SECRET || DEFAULT_KEYCLOAK_CLIENT_SECRET).trim(),
+    clientId: (process.env.KEYCLOAK_CLIENT_ID || process.env.OIDC_CLIENT_ID || DEFAULT_KEYCLOAK_CLIENT_ID).trim(),
+    clientSecret: (process.env.KEYCLOAK_CLIENT_SECRET || process.env.OIDC_CLIENT_SECRET || DEFAULT_KEYCLOAK_CLIENT_SECRET).trim(),
     allowLocalFallback: process.env.KEYCLOAK_ALLOW_LOCAL_FALLBACK !== "0",
     adminClientId: (process.env.KEYCLOAK_ADMIN_CLIENT_ID || "admin-cli").trim(),
     adminClientSecret: (process.env.KEYCLOAK_ADMIN_CLIENT_SECRET || "").trim(),
@@ -70,7 +82,12 @@ export function oidcEndpoints(cfg = getKeycloakConfig()) {
 }
 
 function stateSecret(): string {
-  return process.env.SWAPUP_SESSION_SECRET || process.env.KEYCLOAK_CLIENT_SECRET || "swapup-keycloak-state-secret-dev";
+  return (
+    process.env.SWAPUP_SESSION_SECRET ||
+    process.env.KEYCLOAK_CLIENT_SECRET ||
+    process.env.OIDC_CLIENT_SECRET ||
+    "swapup-keycloak-state-secret-dev"
+  );
 }
 
 export type OAuthStatePayload = {
@@ -109,6 +126,11 @@ export function resolveAppOrigin(explicitOrigin?: string | null): string {
 }
 
 export function getKeycloakCallbackUrl(origin?: string | null): string {
+  const explicitRedirect = (process.env.OIDC_REDIRECT_URI || process.env.KEYCLOAK_REDIRECT_URI || "").trim();
+  if (explicitRedirect && !origin) return explicitRedirect;
+  if (explicitRedirect && origin && explicitRedirect.startsWith(origin.replace(/\/$/, ""))) {
+    return explicitRedirect;
+  }
   return `${resolveAppOrigin(origin)}/api/auth/keycloak/callback`;
 }
 
@@ -620,6 +642,7 @@ export async function generateKeycloakRealmJson(extraOrigin?: string | null, rea
       [
         DEV_APP_ORIGIN,
         SHARED_APP_ORIGIN,
+        SWAPUP_DEV2_ORIGIN,
         extraOrigin ? extraOrigin.replace(/\/$/, "") : null,
         "http://localhost:3000",
         "http://localhost:4500",
@@ -629,6 +652,7 @@ export async function generateKeycloakRealmJson(extraOrigin?: string | null, rea
 
   const redirectUris = [
     ...origins.map((o) => `${o}/api/auth/keycloak/callback`),
+    ...origins.map((o) => `${o}/api/auth/callback`),
     ...origins.map((o) => `${o}/*`),
   ];
 

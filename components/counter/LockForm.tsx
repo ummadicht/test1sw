@@ -6,6 +6,7 @@ import { StepCard } from "./StepCard";
 import { ID_TYPES } from "./shared";
 import type { CaseOps } from "./ops";
 import { HANDOVER_HINT, HANDOVER_LABEL, handoverChecks } from "./handover";
+import { RazorpayPaymentPanel } from "./RazorpayPaymentPanel";
 
 const KYM_OPTIONS = [
   ["clear", "No block — OK to buy"],
@@ -338,6 +339,18 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
               ))}
             </ul>
           </Banner>
+        ) : null}
+
+        {view.offer?.swap.customerPays && view.offer.swap.customerPays > 0 ? (
+          <RazorpayPaymentPanel
+            caseId={view.id}
+            caseRef={view.ref}
+            mode="swap"
+            repairAmount={view.offer?.repair.amount ?? null}
+            swapAmount={view.offer.swap.customerPays}
+            customerName={name || view.customer?.name}
+            customerPhone={digits || view.customer?.phone}
+          />
         ) : null}
 
         <button className="btn btn-up w-full sm:w-auto" disabled={!canSubmit}>

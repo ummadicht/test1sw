@@ -387,6 +387,36 @@ CREATE TABLE IF NOT EXISTS phonecheck_records (
   attached_by TEXT,
   attach_override TEXT
 );
+
+CREATE TABLE IF NOT EXISTS razorpay_payments (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL,
+  case_ref TEXT NOT NULL,
+  org_id TEXT NOT NULL,
+  store_id TEXT NOT NULL,
+  journey TEXT NOT NULL,
+  payment_plan TEXT NOT NULL,
+  installment_stage TEXT NOT NULL,
+  total_case_payable INTEGER NOT NULL,
+  amount INTEGER NOT NULL,
+  remaining_due INTEGER NOT NULL DEFAULT 0,
+  emi_months INTEGER,
+  emi_monthly_amount INTEGER,
+  currency TEXT NOT NULL DEFAULT 'INR',
+  razorpay_order_id TEXT NOT NULL UNIQUE,
+  razorpay_payment_id TEXT,
+  razorpay_signature TEXT,
+  payment_method TEXT,
+  status TEXT NOT NULL DEFAULT 'created',
+  customer_name TEXT,
+  customer_phone TEXT,
+  notes TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  paid_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_razorpay_payments_case_id ON razorpay_payments(case_id);
 `;
 
 type G = typeof globalThis & {

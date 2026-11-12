@@ -6,6 +6,7 @@ import type { Campaign } from "../domain/bonus";
 import { cancelEvents } from "../domain/lifecycle";
 import { NOT_ON_CARD, RETIRED_QUOTE_LABEL, RETIRED_SOURCE_KIND, retiredSource } from "../domain/ratecard";
 import { NO_MARKET_PRICE } from "../domain/offer";
+import { ensureDefaultRateCardsSeeded, ensureCompleteRepairBookSeeded } from "./defaultRateCard";
 
 type SeedData = {
   observedAt: string;
@@ -42,6 +43,9 @@ export function ensureSeeded(): Promise<void> {
       await renameDemoCentres();
       await renameDemoPartner();
       await renameDemoPartnerIds();
+      await ensureRealPartnerAndProgramme();
+      await ensureDefaultRateCardsSeeded();
+      await ensureCompleteRepairBookSeeded();
       const removed = await removeExampleCases();
       if (removed.length) console.log(`[swapup] removed ${removed.length} example cases seeded on first boot: ${removed.join(", ")}`);
       const r = await retireOldQuotes();
@@ -53,6 +57,53 @@ export function ensureSeeded(): Promise<void> {
     })();
   }
   return g.__swapup_seed;
+}
+
+async function ensureRealPartnerAndProgramme(): Promise<void> {
+  const isTempTestDb = Boolean(
+    process.env.SWAPUP_DB &&
+      (process.env.SWAPUP_DB.includes("/tmp/") || process.env.SWAPUP_DB.includes("\\temp\\"))
+  );
+  if (isTempTestDb) return;
+
+  const REAL_PARTNER_ID = "ptn_BfpxCIbbL6RTGPMk";
+  const REAL_CLIENT_ID = "org_lclf4XEbw-IpMyJt";
+  const existingPartner = await queryOne<{ id: string }>(`SELECT id FROM orgs WHERE id = $1`, [REAL_PARTNER_ID]);
+  if (existingPartner) return;
+
+  const now = nowIso();
+  const pw = hashPassword(demoPassword());
+  await tx(async () => {
+    await execute(
+      `INSERT INTO orgs (id, name, kind, client_type, target_brand, partner_id, settings, demo, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
+      [REAL_PARTNER_ID, "Buyback partner", "partner", null, null, null, JSON.stringify(orgSettingsDefaults()), 0, now]
+    );
+    await execute(
+      `INSERT INTO orgs (id, name, kind, client_type, target_brand, partner_id, settings, demo, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
+      [REAL_CLIENT_ID, "SwapUp Experience Centres", "client", "experience_center", "Samsung", REAL_PARTNER_ID, JSON.stringify(orgSettingsDefaults()), 0, now]
+    );
+    await execute(
+      `INSERT INTO users (id, org_id, store_id, username, name, role, password_hash, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+      ["usr_24G2U2zS1l-B6bF_", REAL_PARTNER_ID, null, "buyback.partner", "Buyback Partner", "partner", pw, now]
+    );
+    for (const r of DATA.repairBook) {
+      await execute(
+        `INSERT INTO repair_book (org_id, model_id, part, price, source)
+         VALUES ($1,$2,$3,$4,$5) ON CONFLICT (org_id, model_id, part) DO NOTHING`,
+        [REAL_CLIENT_ID, r.modelId, r.part, r.price, JSON.stringify(r.source)]
+      );
+    }
+    for (const n of DATA.newDevices) {
+      await execute(
+        `INSERT INTO new_devices (id, org_id, brand, model, series, variant, price, support_end_year, active, sort, source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$10) ON CONFLICT (id) DO NOTHING`,
+        [newId("nd"), REAL_CLIENT_ID, n.brand, n.model, n.series, n.variant, n.price, n.supportEndYear, n.sort, JSON.stringify(n.source)]
+      );
+    }
+  });
 }
 
 export async function backfillTradeModels(): Promise<string[]> {
