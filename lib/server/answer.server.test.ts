@@ -8,7 +8,6 @@
  * than the report's after-repair grade; a per-grade rate card names its grade; and "All fine" is
  * the three taps in one.
  *
- * Run: node --test --experimental-strip-types --no-warnings lib/server/*.test.ts
  */
 import "./testing/register.mjs";
 import { test, after } from "node:test";
@@ -16,7 +15,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Database from "better-sqlite3";
+import { DatabaseSync as Database } from "node:sqlite";
 
 const dir = mkdtempSync(join(tmpdir(), "swapup-answer-"));
 process.env.SWAPUP_DB = join(dir, "test.db");

@@ -46,7 +46,7 @@ export const MIGRATIONS: readonly string[] = [
   "017_gradeiq_devicefax",
 ];
 
-const SQLITE_SCHEMA = `
+export const SQLITE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -449,6 +449,19 @@ export function db(): SqliteCompatDb {
     raw.exec("PRAGMA journal_mode = WAL");
     raw.exec("PRAGMA busy_timeout = 5000");
     raw.exec(SQLITE_SCHEMA);
+
+    const currentVerRow = raw.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value?: string } | undefined;
+    if (currentVerRow && Number(currentVerRow.value) < MIGRATIONS.length) {
+      raw.exec(`
+        DELETE FROM market_listings WHERE source LIKE '%vendor_in_sell%';
+        DELETE FROM meta WHERE key = 'priceiq_vendor_sell';
+        DELETE FROM rate_cards WHERE data LIKE '%"kind":"sample"%' OR data LIKE '%"kind": "sample"%';
+        UPDATE trade_models SET source = json_set(source, '$.kind', 'approximate') WHERE json_extract(source, '$.kind') = 'sample';
+        UPDATE meta SET value = '${MIGRATIONS.length}' WHERE key = 'schema_version';
+      `);
+    } else if (!currentVerRow) {
+      raw.exec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '${MIGRATIONS.length}')`);
+    }
 
     const compat: SqliteCompatDb = {
       raw,

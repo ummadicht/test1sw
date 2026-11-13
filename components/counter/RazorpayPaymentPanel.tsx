@@ -107,22 +107,21 @@ export function RazorpayPaymentPanel({
     try {
       const s = await api<CaseRazorpaySummary>(`/api/cases/${encodeURIComponent(caseId)}/razorpay`);
       setSummary(s);
-      if (s.repair.suggestedAdvance && !customAdvance) {
-        setCustomAdvance(String(s.repair.suggestedAdvance));
+      if (s.repair.suggestedAdvance) {
+        setCustomAdvance((prev) => (prev ? prev : String(s.repair.suggestedAdvance)));
       }
-      if (!receiptEmail) {
+      setReceiptEmail((prev) => {
+        if (prev) return prev;
         for (const p of s.payments) {
           const n = parseReceiptEmailNote(p.notes);
-          if (n.emailedTo) {
-            setReceiptEmail(n.emailedTo);
-            break;
-          }
+          if (n.emailedTo) return n.emailedTo;
         }
-      }
+        return prev;
+      });
     } catch (e) {
       setErr((e as Error).message);
     }
-  }, [caseId, customAdvance, receiptEmail]);
+  }, [caseId]);
 
   useEffect(() => {
     void refresh();

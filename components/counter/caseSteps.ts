@@ -289,31 +289,28 @@ type RepairInput = Pick<CaseView, "device" | "faults" | "condition" | "repair" |
 export function repairStep(v: RepairInput): RepairStep {
   const book: RepairSourceId[] = ["job_sheet", "bench"];
   const r = v.repair;
-  if (!v.device) return { amount: null, headline: "Choose the phone first", line: null, form: null, sources: [] };
+  if (!v.device) return { amount: null, headline: "Choose the phone first", line: "Pick the phone and variant on Step 1.", form: null, sources: [] };
   if (v.manualRepair) {
     const who = v.repairNotServiced ? "Customer's outside quote" : "Service centre's quote";
     return { amount: v.manualRepair.amount, headline: null, line: `${who} · ${v.manualRepair.reason}`, form: null, sources: [] };
   }
-  if (v.repairNotServiced)
-    return { amount: null, headline: "Needs the customer's outside quote", line: v.repairNotServiced, form: "needed", sources: ["outside"] };
-  // A defect in the condition with no fault recorded (no power, liquid, a dead display, Wi-Fi…): the
-  // answer asks for the service centre's quote (offer.ts, SUP-96), so this is where it is entered.
-  const unrecorded = unrecordedDefect(v.faults.length, v.condition);
-  if (unrecorded) return { amount: null, headline: "Needs the service centre's quote", line: `No fault recorded (${unrecorded}).`, form: "needed", sources: ["bench", "job_sheet"] };
-  if ((v.faults.length === 0 && !v.manualRepair) || r?.status === "nothing_to_repair")
-    return {
-      amount: null,
-      headline: "Nothing to repair",
-      line: v.condition ? "A straight trade-in." : "No faults ticked yet.",
-      form: null,
-      sources: [],
-    };
-  if (!r) return { amount: null, headline: "Not priced yet", line: "Record the model and faults first.", form: null, sources: [] };
-  if (r.status === "quoted") {
+  if (r && r.status === "quoted" && r.customerPays !== null && (r.customerPays > 0 || r.coverage !== "none")) {
     const free = r.customerPays === 0 && r.coverage !== "none";
     const line = free ? `Covered by ${r.coverage === "warranty" ? "the warranty" : "Care+"}.` : "Price book: parts, labour, GST.";
     return { amount: r.customerPays, headline: null, line, form: "optional", sources: book };
   }
+  if (v.repairNotServiced)
+    return { amount: null, headline: "Needs the customer's outside quote", line: v.repairNotServiced, form: "needed", sources: ["outside"] };
+  const unrecorded = unrecordedDefect(v.faults.length, v.condition);
+  if (unrecorded) return { amount: null, headline: "Needs the service centre's quote", line: `No fault recorded (${unrecorded}).`, form: "needed", sources: ["bench", "job_sheet"] };
+  if ((v.faults.length === 0 && !v.manualRepair) || r?.status === "nothing_to_repair" || !r)
+    return {
+      amount: null,
+      headline: "Nothing to repair",
+      line: "A straight trade-in.",
+      form: null,
+      sources: [],
+    };
   if (r.status === "needs_inspection") {
     const what = r.inspectionFaults.map((f) => FAULT_BY_ID[f]?.label ?? f).join(", ");
     return { amount: null, headline: "Needs the service centre's quote", line: `${what} can only be priced on the bench.`, form: "needed", sources: ["bench", "job_sheet"] };

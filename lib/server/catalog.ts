@@ -1,4 +1,4 @@
-import { query, queryOne, execute, tx, nowIso, newId, parseJson, audit } from "./db";
+import { query, queryOne, execute, tx, nowIso, newId, parseJson, audit, db } from "./db";
 import { HttpError, orgSettings, type SessionUser } from "./auth";
 import { adminOrgId, getOrg } from "./scope";
 import { validateCampaign, type Campaign } from "../domain/bonus";
@@ -251,12 +251,94 @@ async function partnerIdFor(u: SessionUser, requested?: string | null): Promise<
   throw new HttpError(403, "Only the buyback partner manages its rate card.");
 }
 
-export async function uploadRateCard(
+export function uploadRateCardSync(
+  u: SessionUser,
+  input: { partnerId?: string; label: string; effectiveFrom: string; quoteValidityDays: number; csv: string; deductions?: RateCard["deductions"]; activate?: boolean }
+): void {
+  if (process.env.DATABASE_URL || process.env.PGHOST) return;
+  const partnerId = u.role === "partner" ? u.orgId : input.partnerId;
+  if (!partnerId) throw new HttpError(400, "Choose a buyback partner.");
+  const label = String(input.label || "").trim();
+  if (label.length < 3) throw new HttpError(400, "Name the rate card (e.g. sheet name and week).");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveFrom || "")) throw new HttpError(400, "Effective date must be YYYY-MM-DD.");
+  const validity = Number(input.quoteValidityDays);
+  if (!Number.isInteger(validity) || validity < 1 || validity > 30) throw new HttpError(400, "Quote validity must be 1–30 days.");
+  
+  const sqlite = db();
+  const tmRows = sqlite.prepare("SELECT id, variants FROM trade_models").all() as { id: string; variants: string }[];
+  const known = new Map(tmRows.map((r) => [r.id, parseJson<string[]>(r.variants, [])]));
+  
+  const entries: RateEntry[] = [];
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  String(input.csv || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .forEach((line, i) => {
+      const [modelId, variant, priceRaw, ...gradeRaw] = line.split(",").map((x) => (x ?? "").trim());
+      if (i === 0 && /model/i.test(modelId)) return;
+      const price = Number(String(priceRaw).replace(/[₹\s]/g, ""));
+      if (!known.has(modelId)) return void errors.push(`Line ${i + 1}: unknown model id "${modelId}".`);
+      if (!known.get(modelId)!.includes(variant)) return void errors.push(`Line ${i + 1}: "${variant}" is not a variant of ${modelId}.`);
+      if (!Number.isInteger(price) || price <= 0) return void errors.push(`Line ${i + 1}: price must be a whole rupee amount.`);
+      const key = `${modelId}|${variant}`;
+      if (seen.has(key)) return void errors.push(`Line ${i + 1}: ${modelId} ${variant} appears twice.`);
+      const gradePrices: GradePrices = {};
+      for (const [j, g] of (["Good", "Fair", "Best Value"] as const).entries()) {
+        const raw = String(gradeRaw[j] ?? "").replace(/[₹\s]/g, "");
+        if (raw !== "") gradePrices[g] = Number(raw);
+      }
+      const entry: RateEntry = { modelId, variant, maxPrice: price, ...(Object.keys(gradePrices).length ? { gradePrices } : {}) };
+      const bad = gradePricesProblem(entry);
+      if (bad) return void errors.push(`Line ${i + 1}: ${bad}.`);
+      seen.add(key);
+      entries.push(entry);
+    });
+  if (errors.length) throw new HttpError(400, `${errors.length} problem${errors.length > 1 ? "s" : ""} in the sheet — ${errors.slice(0, 3).join(" ")}`);
+  if (!entries.length) throw new HttpError(400, "The sheet has no prices.");
+
+  const current = sqlite.prepare(
+    `SELECT data FROM rate_cards WHERE partner_id = ? AND active = 1 ORDER BY created_at DESC LIMIT 1`
+  ).get(partnerId) as { data: string } | undefined;
+  const base = current ? parseJson<RateCard>(current.data, {} as RateCard) : null;
+  const inherited = base?.source?.kind === "partner_ratecard" ? base.deductions : undefined;
+  const deductions = input.deductions ?? inherited;
+  if (!deductions) throw new HttpError(400, "No deduction rules — supply them with the first rate card.");
+  const id = newId("rc");
+  const partnerOrg = sqlite.prepare(`SELECT name FROM orgs WHERE id = ?`).get(partnerId) as { name?: string } | undefined;
+  const partnerName = partnerOrg?.name ?? "Partner";
+  const card: RateCard = {
+    id,
+    partner: partnerName,
+    source: { kind: "partner_ratecard", label, effectiveFrom: input.effectiveFrom },
+    quoteValidityDays: validity,
+    roundTo: base?.roundTo ?? 10,
+    maxDeductionBp: base?.maxDeductionBp ?? 8500,
+    floorBp: base?.floorBp ?? 500,
+    deductions,
+    entries,
+  };
+  if (input.activate !== false) {
+    sqlite.prepare("UPDATE rate_cards SET active = 0 WHERE partner_id = ?").run(partnerId);
+  }
+  sqlite.prepare(
+    `INSERT INTO rate_cards (id, partner_id, data, active, created_by, created_at) VALUES (?,?,?,?,?,?)`
+  ).run(id, partnerId, JSON.stringify(card), input.activate === false ? 0 : 1, u.id, nowIso());
+}
+
+export function uploadRateCard(
   u: SessionUser,
   input: { partnerId?: string; label: string; effectiveFrom: string; quoteValidityDays: number; csv: string; deductions?: RateCard["deductions"]; activate?: boolean }
 ): Promise<RateCardSummary[]> {
-  const partnerId = await partnerIdFor(u, input.partnerId);
-  const label = String(input.label || "").trim();
+  uploadRateCardSync(u, input);
+  if (!process.env.DATABASE_URL && !process.env.PGHOST) {
+    const partnerId = u.role === "partner" ? u.orgId : input.partnerId!;
+    return Promise.resolve(rateCards(partnerId));
+  }
+  return (async () => {
+    const partnerId = await partnerIdFor(u, input.partnerId);
+    const label = String(input.label || "").trim();
   if (label.length < 3) throw new HttpError(400, "Name the rate card (e.g. sheet name and week).");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveFrom || "")) throw new HttpError(400, "Effective date must be YYYY-MM-DD.");
   const validity = Number(input.quoteValidityDays);
@@ -327,7 +409,8 @@ export async function uploadRateCard(
     );
     await audit({ userId: u.id, orgId: partnerId, action: "ratecard.upload", entity: "rate_card", entityId: id, detail: { label, entries: entries.length } });
   });
-  return rateCards(partnerId);
+    return rateCards(partnerId);
+  })();
 }
 
 export async function activateRateCard(u: SessionUser, id: string, partnerIdReq?: string | null): Promise<RateCardSummary[]> {

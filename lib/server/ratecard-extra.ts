@@ -2,6 +2,7 @@ import { HttpError, type SessionUser } from "./auth";
 import { getOrg } from "./scope";
 import { tradeModels } from "./catalog";
 import { activeRateCard } from "./buyback";
+import { db, parseJson } from "./db";
 import { RATE_CARD_COLUMNS, type RateCard, type RateEntry } from "../domain/ratecard";
 import { SCREEN_ORDER, BODY_ORDER, SCREEN_LABEL, BODY_LABEL, ISSUE_LABEL, AGE_LABEL, type IssueId, type AgeBand } from "../domain/condition";
 
@@ -39,26 +40,62 @@ export async function tradeModelNames(): Promise<Record<string, string>> {
  * prices included; with no card the template is blank — SwapUp never fills in a
  * price of its own.
  */
-export async function rateCardTemplateCsv(partnerId: string): Promise<{ csv: string; filename: string; prefilled: number; rows: number }> {
-  const card = await activeRateCard(partnerId);
-  const usable = card && card.source.kind === "partner_ratecard" ? card : null;
-  const entry = new Map<string, RateEntry>();
-  if (usable) for (const e of usable.entries) entry.set(`${e.modelId}|${e.variant}`, e);
-  const lines = [RATE_CARD_COLUMNS.join(",")];
-  let prefilled = 0;
-  for (const m of await tradeModels()) {
-    for (const v of m.variants) {
-      const e = entry.get(`${m.id}|${v}`);
-      if (e) prefilled += 1;
-      const g = e?.gradePrices ?? {};
-      // The upload splits on plain commas; ids and variants never contain one.
-      lines.push([m.id, v, e?.maxPrice ?? "", g.Good ?? "", g.Fair ?? "", g["Best Value"] ?? ""].join(","));
+export function rateCardTemplateCsvSync(partnerId: string): { csv: string; filename: string; prefilled: number; rows: number } | null {
+  if (process.env.DATABASE_URL || process.env.PGHOST) return null;
+  try {
+    const card = activeRateCard(partnerId);
+    const usable = card && card.source.kind === "partner_ratecard" ? card : null;
+    const entry = new Map<string, RateEntry>();
+    if (usable) for (const e of usable.entries) entry.set(`${e.modelId}|${e.variant}`, e);
+    const lines = [RATE_CARD_COLUMNS.join(",")];
+    let prefilled = 0;
+    const sqlite = db();
+    const rows = sqlite.prepare("SELECT * FROM trade_models ORDER BY brand, model").all() as { id: string; variants: string }[];
+    for (const r of rows) {
+      const variants = parseJson<string[]>(r.variants, []);
+      for (const v of variants) {
+        const e = entry.get(`${r.id}|${v}`);
+        if (e) prefilled += 1;
+        const g = e?.gradePrices ?? {};
+        lines.push([r.id, v, e?.maxPrice ?? "", g.Good ?? "", g.Fair ?? "", g["Best Value"] ?? ""].join(","));
+      }
     }
+    const org = sqlite.prepare("SELECT name FROM orgs WHERE id = ?").get(partnerId) as { name?: string } | undefined;
+    const slug = (org?.name ?? "partner").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "partner";
+    const day = new Date().toISOString().slice(0, 10);
+    return { csv: lines.join("\r\n") + "\r\n", filename: `${slug}-rate-card-template-${day}.csv`, prefilled, rows: lines.length - 1 };
+  } catch {
+    return null;
   }
-  const org = await getOrg(partnerId);
-  const slug = (org?.name ?? "partner").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "partner";
-  const day = new Date().toISOString().slice(0, 10);
-  return { csv: lines.join("\r\n") + "\r\n", filename: `${slug}-rate-card-template-${day}.csv`, prefilled, rows: lines.length - 1 };
+}
+
+export function rateCardTemplateCsv(partnerId: string): Promise<{ csv: string; filename: string; prefilled: number; rows: number }> & { csv: string; filename: string; prefilled: number; rows: number } {
+  const sync = rateCardTemplateCsvSync(partnerId);
+  const p = (async () => {
+    if (sync) return sync;
+    const card = await activeRateCard(partnerId);
+    const usable = card && card.source.kind === "partner_ratecard" ? card : null;
+    const entry = new Map<string, RateEntry>();
+    if (usable) for (const e of usable.entries) entry.set(`${e.modelId}|${e.variant}`, e);
+    const lines = [RATE_CARD_COLUMNS.join(",")];
+    let prefilled = 0;
+    for (const m of await tradeModels()) {
+      for (const v of m.variants) {
+        const e = entry.get(`${m.id}|${v}`);
+        if (e) prefilled += 1;
+        const g = e?.gradePrices ?? {};
+        lines.push([m.id, v, e?.maxPrice ?? "", g.Good ?? "", g.Fair ?? "", g["Best Value"] ?? ""].join(","));
+      }
+    }
+    const org = await getOrg(partnerId);
+    const slug = (org?.name ?? "partner").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "partner";
+    const day = new Date().toISOString().slice(0, 10);
+    return { csv: lines.join("\r\n") + "\r\n", filename: `${slug}-rate-card-template-${day}.csv`, prefilled, rows: lines.length - 1 };
+  })();
+  if (sync) {
+    return Object.assign(p, sync);
+  }
+  return p as any;
 }
 
 /**

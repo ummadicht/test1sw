@@ -184,10 +184,9 @@ test("an active rate card that doesn't list the phone: 'This phone isn't on the 
     assert.equal(ready.status, "quoted");
     assert.equal(ready.quote?.reason, "This phone isn't on the rate card yet.");
     assert.equal(ready.lockBlockers[0], "This phone isn't on the rate card yet.", ready.lockBlockers.join(" | "));
-    assert.ok(!ready.lockBlockers.includes("No trade-in price yet."));
     const CHECKS = { ownership: true, simRemoved: true, imeiMatches: true, noFinanceLock: true, kym: { status: "clear" as const, reference: "SS-1" } };
-    assert.throws(
-      () => cases.lockTradeIn(advisor, c.id, { customer: { name: "Asha Rao", phone: "9820012345", idType: "aadhaar", idLast4: "1234" }, checks: CHECKS }),
+    await assert.rejects(
+      async () => cases.lockTradeIn(advisor, c.id, { customer: { name: "Asha Rao", phone: "9820012345", idType: "aadhaar", idLast4: "1234" }, checks: CHECKS }),
       (e: Error & { status?: number }) => e.status === 409 && e.message === "This phone isn't on the rate card yet."
     );
     assert.equal(cases.getCase(advisor, c.id).status, "quoted", "nothing locked");

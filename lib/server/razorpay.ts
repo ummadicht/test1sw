@@ -886,3 +886,99 @@ export async function sendCaseReceiptEmail(
   };
 }
 
+export async function handleRazorpayWebhook(
+  rawBody: string,
+  signatureHeader: string | null
+): Promise<{ ok: boolean; status: string; event?: string; orderId?: string | null }> {
+  await ensureRazorpayTable();
+  const cfg = getRazorpayConfig();
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || cfg.keySecret;
+
+  if (cfg.liveKeysConfigured && process.env.RAZORPAY_WEBHOOK_SECRET) {
+    if (!signatureHeader) {
+      throw new HttpError(400, "Missing X-Razorpay-Signature header.");
+    }
+    const expected = createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+    if (expected !== signatureHeader) {
+      throw new HttpError(400, "Invalid webhook signature.");
+    }
+  }
+
+  let eventPayload: {
+    event?: string;
+    payload?: {
+      payment?: { entity?: { id?: string; order_id?: string; method?: string; amount?: number } };
+      order?: { entity?: { id?: string } };
+    };
+  } = {};
+
+  try {
+    eventPayload = JSON.parse(rawBody);
+  } catch {
+    throw new HttpError(400, "Invalid JSON webhook payload.");
+  }
+
+  const eventName = eventPayload.event || "";
+  const paymentEntity = eventPayload.payload?.payment?.entity;
+  const orderId = paymentEntity?.order_id || eventPayload.payload?.order?.entity?.id || null;
+  const paymentId = paymentEntity?.id || null;
+  const paymentMethod = paymentEntity?.method || "webhook";
+
+  if (!orderId) {
+    return { ok: true, status: "ignored_no_order_id", event: eventName };
+  }
+
+  const row = await queryOne<RazorpayPaymentRow>(
+    `SELECT * FROM razorpay_payments WHERE razorpay_order_id = $1`,
+    [orderId]
+  );
+
+  if (!row) {
+    return { ok: true, status: "order_not_found", orderId, event: eventName };
+  }
+
+  if (row.status === "paid") {
+    return { ok: true, status: "already_paid", orderId, event: eventName };
+  }
+
+  if (eventName === "order.paid" || eventName === "payment.captured" || eventName === "payment.authorized") {
+    const now = nowIso();
+    const resolvedPayId = paymentId || `pay_${newId("rzp").replace(/^rzp_/, "")}`;
+    const sig = signatureHeader || "webhook_verified";
+
+    await tx(async () => {
+      await execute(
+        `UPDATE razorpay_payments
+         SET status = 'paid',
+             razorpay_payment_id = $1,
+             razorpay_signature = $2,
+             payment_method = $3,
+             paid_at = $4
+         WHERE id = $5`,
+        [resolvedPayId, sig, paymentMethod, now, row.id]
+      );
+      await audit({
+        userId: "system_webhook",
+        orgId: row.org_id,
+        storeId: row.store_id,
+        action: "razorpay.payment.webhook_paid",
+        entity: "razorpay_payment",
+        entityId: row.id,
+        detail: {
+          caseId: row.case_id,
+          caseRef: row.case_ref,
+          event: eventName,
+          razorpayOrderId: orderId,
+          razorpayPaymentId: resolvedPayId,
+          amount: row.amount,
+        },
+      });
+    });
+
+    return { ok: true, status: "marked_paid", orderId, event: eventName };
+  }
+
+  return { ok: true, status: "event_ignored", orderId, event: eventName };
+}
+
+

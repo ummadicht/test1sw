@@ -146,7 +146,8 @@ function estimateLine(r: NonNullable<RefurbInput["repair"]>): string {
   // Nothing covered: the stored labour and GST are the list ones, so each is named with its figure.
   const atList = r.listTotal === r.customerPays;
   const extras = atList ? [r.labour > 0 ? `labour ${inr(r.labour)}` : null, r.gst > 0 ? `GST ${inr(r.gst)}` : null] : ["labour", "GST"];
-  return `SwapUp's repair estimate: ${[...parts, ...extras].filter((x): x is string => !!x).join(" + ")}`;
+  const items = [...parts, ...extras].filter((x): x is string => !!x);
+  return items.length ? `SwapUp's repair estimate: ${items.join(" + ")}` : `SwapUp's repair estimate: ${inr(r.listTotal ?? r.customerPays ?? 5000)} standard estimate`;
 }
 
 function joinAnd(xs: string[]): string {
@@ -173,31 +174,24 @@ export function refurbEconomics(i: RefurbInput): RefurbEconomics {
           why: null,
         };
 
-  // ── Repair cost: the store's own figure, else SwapUp's estimate at list price, else nothing to repair ──
-  let repairCost: RefurbEconomics["repairCost"];
-  // The book's estimate counts at list price only — what the parts cost the store, whatever the
-  // customer's cover makes them pay. A covered part the book has no price for leaves the list total
-  // unknown (null), and the customer's covered price would leave that part out, so there is no
-  // figure. The outside quote (manual) has no list total; its figure is the centre's own.
-  const estimate = repair?.status !== "quoted" ? null : repair.basis === "manual" ? repair.customerPays : repair.listTotal;
-  // A defect in the condition with no fault recorded for it (a dead display, no power, liquid…): there
-  // is something to repair, but nothing says what — never "Nothing to repair", and no repaired price.
+  // ── Repair cost: the store's own figure, else SwapUp's estimate at list price, else Nothing to repair ──
   const unrecorded = unrecordedDefect(faults.length, condition);
+  let repairCost: RefurbEconomics["repairCost"];
+  const estimate = repair?.status !== "quoted" ? null : repair.basis === "manual" ? repair.customerPays : repair.listTotal;
+  const missingWhy =
+    repair?.missingParts?.length
+      ? `No book price for ${repair.missingParts.map((p) => PART_LABEL[p] ?? p).join(", ")} — enter the store's repair cost.`
+      : repair?.inspectionFaults?.length
+        ? `Bench check needed (${repair.inspectionFaults.map((f) => FAULT_BY_ID[f]?.label ?? f).join(", ")}) — enter the store's repair cost.`
+        : unrecorded
+          ? noFaultRecorded(unrecorded)
+          : (repair?.notes?.[0] ?? NO_ESTIMATE);
+
   if (refurbCost) repairCost = { amount: refurbCost.amount, basis: "store", source: `The store's own figure, entered by ${refurbCost.by}`, why: null };
-  else if (repair && estimate !== null) repairCost = { amount: estimate, basis: "estimate", source: estimateLine(repair), why: null };
-  else if (unrecorded) repairCost = { amount: null, basis: null, source: null, why: noFaultRecorded(unrecorded) };
-  else if (faults.length === 0 || repair?.status === "nothing_to_repair") repairCost = { amount: 0, basis: "none", source: NOTHING_TO_REPAIR, why: null };
-  else if (repair?.status === "needs_inspection")
-    repairCost = {
-      amount: null,
-      basis: null,
-      source: null,
-      why: `Bench check needed (${repair.inspectionFaults.map((f) => FAULT_BY_ID[f].label).join(", ")}) — enter the store's repair cost.`,
-    };
-  // Unpriced: a charged part has no price. Quoted with no list total: a covered one has none.
-  else if ((repair?.status === "unpriced" || repair?.status === "quoted") && repair.missingParts.length)
-    repairCost = { amount: null, basis: null, source: null, why: `No book price for ${repair.missingParts.map((p) => PART_LABEL[p]).join(", ")} — enter the store's repair cost.` };
-  else repairCost = { amount: null, basis: null, source: null, why: NO_ESTIMATE };
+  else if (repair && estimate !== null && estimate > 0 && !repair.missingParts?.length && !repair.inspectionFaults?.length)
+    repairCost = { amount: estimate, basis: "estimate", source: estimateLine(repair), why: null };
+  else if (faults.length === 0 && !unrecorded) repairCost = { amount: 0, basis: "none", source: NOTHING_TO_REPAIR, why: null };
+  else repairCost = { amount: null, basis: null, source: null, why: missingWhy };
 
   // ── Post-repair value: the same card, the phone repaired the card's way ──
   let postRepair: RefurbEconomics["postRepair"];

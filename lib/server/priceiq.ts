@@ -1,4 +1,4 @@
-import { query, execute, tx, nowIso } from "./db";
+import { query, execute, tx, nowIso, db } from "./db";
 import { isMarketGrade, priceiqModelName, storageGb, NO_MARKET_YET, type ListingRow, type MarketAnswer } from "../domain/marketSell";
 
 export const PRICEIQ_TIMEOUT_MS = 6_000;
@@ -116,24 +116,55 @@ export async function askPriceiq(cfg: Extract<PriceiqConfig, { ok: true }>, q: {
 
 type CacheRow = { grade: string; price: number; week: string; points: number | null; fetched_at: string; observed_at: string | null };
 
-export async function readCache(modelId: string, variant: string): Promise<MarketAnswer | null> {
-  const rows = await query<CacheRow>(
-    `SELECT grade, price, week, points, fetched_at, observed_at FROM market_listings WHERE source = $1 AND model_id = $2 AND variant = $3 AND fetched_at IS NOT NULL`,
-    [PRICEIQ_SOURCE, modelId, variant]
-  );
-  if (!rows.length) return null;
-  const fetchedAt = rows.map((r) => r.fetched_at).sort().pop()!;
-  const listed = rows.filter((r) => r.fetched_at === fetchedAt && r.grade !== "");
-  return {
-    rows: listed.map((r) => ({ grade: r.grade, price: Number(r.price), week: r.week, ...(r.points ? { points: Number(r.points) } : {}) })),
-    week: listed[0]?.week || null,
-    observedAt: listed[0]?.observed_at ?? null,
-    fetchedAt,
-    unreachable: false,
-  };
+export function readCacheSync(modelId: string, variant: string): MarketAnswer | null {
+  if (process.env.DATABASE_URL || process.env.PGHOST) return null;
+  try {
+    const rows = db().prepare(
+      `SELECT grade, price, week, points, fetched_at, observed_at FROM market_listings WHERE source = ? AND model_id = ? AND variant = ? AND fetched_at IS NOT NULL`
+    ).all(PRICEIQ_SOURCE, modelId, variant) as CacheRow[];
+    if (!rows.length) return null;
+    const fetchedAt = rows.map((r) => r.fetched_at).sort().pop()!;
+    const listed = rows.filter((r) => r.fetched_at === fetchedAt && r.grade !== "");
+    return {
+      rows: listed.map((r) => ({ grade: r.grade, price: Number(r.price), week: r.week, ...(r.points ? { points: Number(r.points) } : {}) })),
+      week: listed[0]?.week || null,
+      observedAt: listed[0]?.observed_at ?? null,
+      fetchedAt,
+      unreachable: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function readCache(modelId: string, variant: string): MarketAnswer | null {
+  return readCacheSync(modelId, variant);
+}
+
+export function writeCacheSync(ask: MarketAsk, f: Exclude<Fetched, { kind: "failed" }>, fetchedAt = nowIso()): void {
+  if (process.env.DATABASE_URL || process.env.PGHOST) return;
+  try {
+    const sqlite = db();
+    const listedAs = `${ask.brand} ${priceiqModelName(ask.brand, ask.model)} ${ask.variant}`;
+    sqlite.prepare(`DELETE FROM market_listings WHERE source = ? AND model_id = ? AND variant = ?`).run(PRICEIQ_SOURCE, ask.modelId, ask.variant);
+    if (f.kind === "none") {
+      sqlite.prepare(
+        `INSERT INTO market_listings (source, model_id, variant, grade, price, week, listed_as, fetched_at, observed_at, points) VALUES (?,?,?,?,?,?,?,?,?,?)`
+      ).run(PRICEIQ_SOURCE, ask.modelId, ask.variant, "", 0, "", listedAs, fetchedAt, null, null);
+    } else {
+      const ins = sqlite.prepare(
+        `INSERT INTO market_listings (source, model_id, variant, grade, price, week, listed_as, fetched_at, observed_at, points) VALUES (?,?,?,?,?,?,?,?,?,?)`
+      );
+      for (const r of f.rows) {
+        ins.run(PRICEIQ_SOURCE, ask.modelId, ask.variant, r.grade, r.price, r.week, listedAs, fetchedAt, f.observedAt, r.points ?? null);
+      }
+    }
+  } catch {}
 }
 
 export async function writeCache(ask: MarketAsk, f: Exclude<Fetched, { kind: "failed" }>, fetchedAt = nowIso()): Promise<void> {
+  writeCacheSync(ask, f, fetchedAt);
+  if (!process.env.DATABASE_URL && !process.env.PGHOST) return;
   const listedAs = `${ask.brand} ${priceiqModelName(ask.brand, ask.model)} ${ask.variant}`;
   await tx(async () => {
     await execute(`DELETE FROM market_listings WHERE source = $1 AND model_id = $2 AND variant = $3`, [PRICEIQ_SOURCE, ask.modelId, ask.variant]);
@@ -192,22 +223,26 @@ export type MarketRead = {
   why: string | null;
 };
 
-async function current(ask: MarketAsk): Promise<MarketRead> {
-  const cached = await readCache(ask.modelId, ask.variant);
+export function currentSync(ask: MarketAsk): MarketRead {
+  const cached = readCacheSync(ask.modelId, ask.variant);
   const failed = state.failed.get(keyOf(ask));
   if (!cached) return { answer: null, why: failed ? `${NO_MARKET_YET.replace(/\.$/, "")} — ${failed.why}.` : NO_MARKET_YET };
   const unreachable = !!failed && failed.at > Date.parse(cached.fetchedAt);
   return { answer: { ...cached, unreachable }, why: null };
 }
 
+async function current(ask: MarketAsk): Promise<MarketRead> {
+  return currentSync(ask);
+}
+
 type Plan = { read: MarketRead } | { cfg: Extract<PriceiqConfig, { ok: true }>; gb: number; due: boolean };
 
-async function plan(ask: MarketAsk): Promise<Plan> {
+function planSync(ask: MarketAsk): Plan {
   const cfg = priceiqConfig();
   if (!cfg.ok) return { read: { answer: null, why: cfg.why } };
   const gb = storageGb(ask.variant);
   if (gb === null) return { read: { answer: null, why: NO_MARKET_YET } };
-  const cached = await readCache(ask.modelId, ask.variant);
+  const cached = readCacheSync(ask.modelId, ask.variant);
   const age = cached ? Date.now() - Date.parse(cached.fetchedAt) : Infinity;
   const failed = state.failed.get(keyOf(ask));
   const backingOff = !!failed && Date.now() - failed.at < PRICEIQ_RETRY_AFTER_FAILURE_MS;
@@ -215,15 +250,15 @@ async function plan(ask: MarketAsk): Promise<Plan> {
 }
 
 export async function freshMarket(ask: MarketAsk): Promise<MarketRead> {
-  const p = await plan(ask);
+  const p = planSync(ask);
   if ("read" in p) return p.read;
   if (p.due) await refresh(p.cfg, ask, p.gb);
   return current(ask);
 }
 
-export async function cachedMarket(ask: MarketAsk): Promise<MarketRead> {
-  const p = await plan(ask);
+export function cachedMarket(ask: MarketAsk): MarketRead {
+  const p = planSync(ask);
   if ("read" in p) return p.read;
   if (p.due) void refresh(p.cfg, ask, p.gb).catch(() => {});
-  return current(ask);
+  return currentSync(ask);
 }

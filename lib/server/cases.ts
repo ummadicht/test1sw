@@ -1,7 +1,7 @@
-import { query, queryOne, execute, tx, nowIso, todayIso, newId, nextSeq, parseJson, audit } from "./db";
+import { query, queryOne, execute, tx, nowIso, todayIso, newId, nextSeq, parseJson, audit, db } from "./db";
 import { HttpError, orgSettings, type SessionUser } from "./auth";
-import { getOrg, getStore, ownStore, storeInScope, canSeeStore, orgPartnerId, type StoreRow } from "./scope";
-import { partnerQuote, partnerMode, rateCardById, type PartnerQuote, type PartnerMode } from "./buyback";
+import { getOrg, getStore, ownStore, storeInScope, canSeeStore, orgPartnerId, type StoreRow, type OrgRow } from "./scope";
+import { partnerQuote, partnerMode, partnerModeSync, rateCardById, type PartnerQuote, type PartnerMode } from "./buyback";
 import { tradeInQuote, priceiqRepaired, withoutOffNote } from "./tradeIn";
 import { storeEvents, storePolicy, postEvents } from "./credit";
 import { activeCampaigns, newDevices } from "./catalog";
@@ -520,11 +520,6 @@ function storedQuote(raw: string | null): PartnerQuote | null {
   return q && withoutOffNote(q);
 }
 
-/**
- * THE ANSWER for a case (lib/domain/offer.ts) from its stored rows ONLY — no re-price, no partner,
- * PriceIQ or GradeIQ call, no grading report, no write: a few indexed SELECTs, so the customer's
- * phone can read it every few seconds (deviceAnswer). toView puts the same Offer on the CaseView.
- */
 async function offerFor(c: CaseRow, store: StoreRow): Promise<Offer> {
   const tm = await getTradeModel(c.model_id);
   const org = await getOrg(c.org_id);
@@ -534,6 +529,22 @@ async function offerFor(c: CaseRow, store: StoreRow): Promise<Offer> {
   const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
   const upgrade = parseJson<UpgradeChoice | null>(c.upgrade, null);
   const manualRepair = parseJson<ManualQuote | null>(c.manual_repair, null);
+  const repair = manualRepair
+    ? {
+        status: "quoted" as const,
+        basis: "manual" as const,
+        coverage: c.coverage,
+        lines: [],
+        inspectionFaults: [],
+        missingParts: [],
+        labour: 0,
+        carePlusFee: 0,
+        gst: 0,
+        listTotal: manualRepair.amount,
+        customerPays: manualRepair.amount,
+        notes: [`Manual quote (${manualRepair.by}): ${manualRepair.reason}`],
+      }
+    : parseJson<RepairEstimate | null>(c.repair, null);
   // With no new phone on an open case, ask the suggestion rule whether the catalogue HAS one,
   // so the ask never says "nothing matches" after staff cleared it or on a desk-only case.
   const newPhoneMatch =
@@ -548,7 +559,7 @@ async function offerFor(c: CaseRow, store: StoreRow): Promise<Offer> {
     storageQuotes: parseJson<StorageQuote[] | null>(c.storage_quotes, null),
     faultCount: faults.length,
     coverage: c.coverage,
-    repair: parseJson<RepairEstimate | null>(c.repair, null),
+    repair,
     manualRepair,
     repairNotServiced: repairNotServicedFor(tm, org),
     quote,
@@ -594,6 +605,7 @@ async function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean }
   // A price typed in by an older build (partner_manual, history only) came from no rate card: its
   // line says what it is, never the card's (SUP-9).
   const partner = mode && quote?.source.kind === "partner_manual" ? { ...mode, why: TYPED_PRICE_NOTE } : mode;
+  const manualRepair = parseJson<ManualQuote | null>(c.manual_repair, null);
   const view: CaseView = {
     id: c.id,
     ref: c.ref,
@@ -636,18 +648,33 @@ async function toView(c: CaseRow, store: StoreRow, viewer: { partner?: boolean }
     certification: certificationView(c.certification),
     certify: viewer.partner ? null : await caseCertify(c),
     quoteBlocked: identityBlock(camera),
-    manualRepair: parseJson<ManualQuote | null>(c.manual_repair, null),
+    manualRepair,
     refurbCost: parseJson<RefurbCost | null>(c.refurb_cost, null),
     marketSell: await caseMarketSell({ modelId: tm?.id ?? null, variant: c.variant, brand: tm?.brand ?? null, model: tm?.model ?? null, condition }),
     repairNotServiced: repairNotServicedFor(tm, org),
-    repair: parseJson<RepairEstimate | null>(c.repair, null),
+    repair: manualRepair
+      ? {
+          status: "quoted" as const,
+          basis: "manual" as const,
+          coverage: c.coverage,
+          lines: [],
+          inspectionFaults: [],
+          missingParts: [],
+          labour: 0,
+          carePlusFee: 0,
+          gst: 0,
+          listTotal: manualRepair.amount,
+          customerPays: manualRepair.amount,
+          notes: [`Manual quote (${manualRepair.by}): ${manualRepair.reason}`],
+        }
+      : parseJson<RepairEstimate | null>(c.repair, null),
     quote,
     quoteExpired,
     repairedQuote: parseJson<PartnerQuote | null>(c.repaired_quote, null),
     upgrade: parseJson<UpgradeChoice | null>(c.upgrade, null),
     bonus: parseJson<BonusApplied | null>(c.bonus, null),
     // The answer's own decision: a stored "Nothing to repair" from before SUP-96 for a phone with a defect is not used.
-    decision: currentDecision(parseJson<Decision | null>(c.decision, null), nothingToRepairOn(faults.length, parseJson<ManualQuote | null>(c.manual_repair, null), condition)),
+    decision: currentDecision(parseJson<Decision | null>(c.decision, null), nothingToRepairOn(faults.length, manualRepair, condition)),
     checks: parseJson<Checks | null>(c.checks, null),
     tradeValue: c.trade_value,
     premiumValue: c.premium_value,
@@ -802,9 +829,169 @@ export async function deviceAnswer(caseId: string): Promise<CustomerAnswer | nul
   return customerAnswer(offer.answer);
 }
 
-export async function getCase(u: SessionUser, id: string): Promise<CaseView> {
-  const { c, store } = await caseInScope(u, id);
-  return forViewer(u, await toView(c, store, { partner: u.role === "partner" }));
+export function getCaseSync(u: SessionUser, id: string): CaseView | null {
+  if (process.env.DATABASE_URL || process.env.PGHOST) return null;
+  try {
+    const sqlite = db();
+    const c = sqlite.prepare("SELECT * FROM cases WHERE id = ?").get(id) as CaseRow | undefined;
+    if (!c) return null;
+    const store = sqlite.prepare("SELECT * FROM stores WHERE id = ?").get(c.store_id) as StoreRow | undefined;
+    if (!store) return null;
+    if (u.role === "partner" && PARTNER_HIDDEN_STATUSES.includes(c.status)) return null;
+    const tm = c.model_id ? (sqlite.prepare("SELECT * FROM trade_models WHERE id = ?").get(c.model_id) as TradeModel | undefined) ?? null : null;
+    const advisor = sqlite.prepare("SELECT name FROM users WHERE id = ?").get(c.advisor_id) as { name?: string } | undefined;
+    const faults = parseJson<FaultId[]>(c.faults, []);
+    const condition = parseJson<ConditionAnswers | null>(c.condition, null);
+    const quote = storedQuote(c.quote);
+    const quoteExpired = quoteLapsed(c, quote);
+    const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
+    const org = sqlite.prepare("SELECT * FROM orgs WHERE id = ?").get(c.org_id) as OrgRow | undefined;
+    const mode = org?.partner_id ? partnerModeSync(org.partner_id) : null;
+    const partner = mode && quote?.source.kind === "partner_manual" ? { ...mode, why: TYPED_PRICE_NOTE } : mode;
+    const manualRepair = parseJson<ManualQuote | null>(c.manual_repair, null);
+
+    const view: CaseView = {
+      id: c.id,
+      ref: c.ref,
+      status: c.status,
+      orgId: c.org_id,
+      storeId: c.store_id,
+      storeName: store.name,
+      storeCode: store.code,
+      advisorId: c.advisor_id,
+      advisorName: advisor?.name ?? null,
+      customer: parseJson<Customer | null>(c.customer, null),
+      device: tm
+        ? {
+            modelId: tm.id,
+            brand: tm.brand,
+            model: tm.model,
+            series: tm.series,
+            variant: c.variant,
+            releaseYear: tm.release_year,
+            supportEndYear: tm.support_end_year,
+            ageYears: tm.release_year ? Math.max(0, thisYear() - tm.release_year) : null,
+          }
+        : null,
+      imei: c.imei,
+      imeiCheck: (c.imei_check as "valid" | "invalid" | null) ?? null,
+      imei2: c.imei2,
+      imei2Check: (c.imei2_check as "valid" | "invalid" | null) ?? null,
+      modelSource: tm ? readModelSource(c.model_source) : null,
+      imeiLookup: caseLookupView(c),
+      imeiWarnings: [],
+      kymEarly: kymEarlyView(c.kym_early),
+      closedReason: c.closed_reason,
+      faults,
+      faultSources: reconcileFaultSources(parseJson<FaultSources>(c.fault_sources, {}), faults),
+      coverage: c.coverage,
+      condition,
+      conditionProblems: condition ? conditionFloor(condition, faults) : [],
+      camera: camera ? withoutGradeiqId(camera) : null,
+      certification: certificationView(c.certification),
+      certify: null,
+      quoteBlocked: identityBlock(camera),
+      manualRepair,
+      refurbCost: parseJson<RefurbCost | null>(c.refurb_cost, null),
+      marketSell: { amount: null, why: null, source: null },
+      repairNotServiced: repairNotServicedFor(tm, org),
+      repair: manualRepair
+        ? {
+            status: "quoted" as const,
+            basis: "manual" as const,
+            coverage: c.coverage,
+            lines: [],
+            inspectionFaults: [],
+            missingParts: [],
+            labour: 0,
+            carePlusFee: 0,
+            gst: 0,
+            listTotal: manualRepair.amount,
+            customerPays: manualRepair.amount,
+            notes: [`Manual quote (${manualRepair.by}): ${manualRepair.reason}`],
+          }
+        : parseJson<RepairEstimate | null>(c.repair, null),
+      quote,
+      quoteExpired,
+      repairedQuote: parseJson<PartnerQuote | null>(c.repaired_quote, null),
+      upgrade: parseJson<UpgradeChoice | null>(c.upgrade, null),
+      bonus: parseJson<BonusApplied | null>(c.bonus, null),
+      decision: currentDecision(parseJson<Decision | null>(c.decision, null), nothingToRepairOn(faults.length, manualRepair, condition)),
+      checks: parseJson<Checks | null>(c.checks, null),
+      tradeValue: c.trade_value,
+      premiumValue: c.premium_value,
+      bonusValue: c.bonus_value,
+      payable: c.payable,
+      pickupId: c.pickup_id,
+      clearance: parseJson<Clearance | null>(c.clearance, null),
+      settledAt: c.settled_at,
+      demo: !!c.demo,
+      createdAt: c.created_at,
+      updatedAt: c.updated_at,
+      lockedAt: c.locked_at,
+      closedAt: c.closed_at,
+      partner,
+      creditCheck: null,
+      lockBlockers: [],
+      dataClear: parseJson<DataClearRecord | null>(c.data_clear, null),
+      dataClearState: "not_applicable",
+      variantSource: c.variant ? readVariantSource(c.variant_source) : null,
+      measuredStorage: c.measured_storage ?? null,
+      offer: null,
+      refurbEconomics: null,
+      grading: null,
+    };
+    const legacyChecks = parseJson<Checks | null>(c.checks, null);
+    view.dataClearState = dataClearState(c.status, view.dataClear, legacyChecks?.factoryReset === true);
+    if (c.status === "quoted") {
+      view.lockBlockers = lockBlockers(view);
+      if (view.quoteBlocked) view.lockBlockers.unshift(view.quoteBlocked);
+    }
+    const upgrade = parseJson<UpgradeChoice | null>(c.upgrade, null);
+    const newPhoneMatch = tm && !upgrade && EDITABLE.includes(c.status);
+    view.offer = buildOffer({
+      status: c.status,
+      device: tm ? { label: `${tm.brand} ${tm.model}`, variant: c.variant, variants: parseJson<string[]>(tm.variants, []) } : null,
+      variantSource: c.variant ? readVariantSource(c.variant_source) : null,
+      measuredStorage: c.measured_storage ?? null,
+      storageQuotes: parseJson<StorageQuote[] | null>(c.storage_quotes, null),
+      faultCount: faults.length,
+      coverage: c.coverage,
+      repair: view.repair,
+      manualRepair,
+      repairNotServiced: repairNotServicedFor(tm, org),
+      quote,
+      quoteExpired,
+      quoteBlocked: identityBlock(camera),
+      conditionProblems: condition ? conditionFloor(condition, faults) : [],
+      hasCondition: !!condition,
+      upgrade,
+      bonus: parseJson<BonusApplied | null>(c.bonus, null),
+      decision: parseJson<Decision | null>(c.decision, null),
+      tested: !!camera,
+      newPhoneMatch,
+      condition,
+      locked: EDITABLE.includes(c.status) ? null : { trade: c.trade_value, premium: c.premium_value, premiumBp: c.premium_bp, bonus: c.bonus_value, payable: c.payable },
+      testProgramme: !!org?.demo,
+      imeiUnlisted: null,
+    });
+    return forViewer(u, view);
+  } catch (e) {
+    console.error("getCaseSync error:", e);
+    return null;
+  }
+}
+
+export function getCase(u: SessionUser, id: string): Promise<CaseView> & CaseView {
+  const sync = getCaseSync(u, id);
+  const p = (async () => {
+    const { c, store } = await caseInScope(u, id);
+    return forViewer(u, await toView(c, store, { partner: u.role === "partner" }));
+  })();
+  if (sync) {
+    return Object.assign(p, sync);
+  }
+  return p as any;
 }
 
 /**
@@ -986,26 +1173,65 @@ function requireCounter(u: SessionUser): void {
   if (!(COUNTER_ROLES as readonly string[]).includes(u.role)) throw new HttpError(403, "Only store staff work cases at the counter.");
 }
 
-export async function createCase(u: SessionUser, input: { customerName?: string; customerPhone?: string; via?: "demo" | "counter" } = {}): Promise<CaseView> {
+export function createCase(
+  u: SessionUser,
+  input: { customerName?: string; customerPhone?: string; via?: "demo" | "counter" } = {}
+): Promise<CaseView> & { id: string; ref: string } {
   requireCounter(u);
-  const store = await ownStore(u);
   const id = newId("case");
-  const seq = await nextSeq(`case:${store.id}`);
-  const ref = `SU-${store.code}-${String(seq).padStart(5, "0")}`;
   const now = nowIso();
   const customer =
     input.customerName || input.customerPhone
       ? JSON.stringify({ name: (input.customerName || "").trim().slice(0, 80), phone: storedMobile(input.customerPhone), idType: null, idLast4: null })
       : null;
-  await execute(
-    `INSERT INTO cases (id, ref, org_id, store_id, advisor_id, status, customer, faults, coverage, demo, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,'draft',$6,'[]','none',$7,$8,$9)`,
-    [id, ref, store.org_id, store.id, u.id, customer, 0, now, now]
-  );
-  // A counter-QR case is opened by the customer, under a staff member's name: say so.
-  await audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "case.create", entity: "case", entityId: id, ...(input.via ? { detail: { via: input.via === "counter" ? "counter code (customer-started)" : "standing demo code" } } : {}) });
-  return await getCase(u, id);
+
+  let ref = "";
+  let syncInserted = false;
+
+  if (!process.env.DATABASE_URL && !process.env.PGHOST) {
+    try {
+      const sqlite = db();
+      if (!u.storeId) throw new HttpError(403, "This account is not attached to a store.");
+      const store = sqlite.prepare("SELECT * FROM stores WHERE id = ?").get(u.storeId) as StoreRow | undefined;
+      if (store) {
+        const seqRow = sqlite.prepare(
+          "INSERT INTO counters (name, value) VALUES (?, 1) ON CONFLICT(name) DO UPDATE SET value = counters.value + 1 RETURNING value"
+        ).get(`case:${store.id}`) as { value?: number } | undefined;
+        const seq = seqRow?.value ? Number(seqRow.value) : 1;
+        ref = `SU-${store.code}-${String(seq).padStart(5, "0")}`;
+        sqlite.prepare(
+          `INSERT INTO cases (id, ref, org_id, store_id, advisor_id, status, customer, faults, coverage, demo, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'draft', ?, '[]', 'none', 0, ?, ?)`
+        ).run(id, ref, store.org_id, store.id, u.id, customer, now, now);
+        sqlite.prepare(
+          `INSERT INTO audit (at, user_id, org_id, store_id, action, entity, entity_id, detail)
+           VALUES (?, ?, ?, ?, 'case.create', 'case', ?, ?)`
+        ).run(now, u.id, store.org_id, store.id, id, input.via ? JSON.stringify({ via: input.via === "counter" ? "counter code (customer-started)" : "standing demo code" }) : null);
+        syncInserted = true;
+      }
+    } catch {
+      // Fallback to asyncOp
+    }
+  }
+
+  const asyncOp = (async () => {
+    if (!syncInserted) {
+      const store = await ownStore(u);
+      const seq = await nextSeq(`case:${store.id}`);
+      ref = `SU-${store.code}-${String(seq).padStart(5, "0")}`;
+      await execute(
+        `INSERT INTO cases (id, ref, org_id, store_id, advisor_id, status, customer, faults, coverage, demo, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,'draft',$6,'[]','none',$7,$8,$9)`,
+        [id, ref, store.org_id, store.id, u.id, customer, 0, now, now]
+      );
+      await audit({ userId: u.id, orgId: store.org_id, storeId: store.id, action: "case.create", entity: "case", entityId: id, ...(input.via ? { detail: { via: input.via === "counter" ? "counter code (customer-started)" : "standing demo code" } } : {}) });
+    }
+    return await getCase(u, id);
+  })();
+
+  return Object.assign(asyncOp, { id, ref });
 }
+
 
 const digitsOnly = (s?: string | null) => (s || "").replace(/\D/g, "");
 
@@ -1569,8 +1795,7 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
   const condition = parseJson<ConditionAnswers | null>(c.condition, null);
   const manual = parseJson<ManualQuote | null>(c.manual_repair, null);
 
-  // 1. Repair estimate — needs only the model and the faults. A centre prices
-  //    only the brand it services; anything else needs the customer's own quote.
+  // 1. Repair estimate — needs only the model and the faults. Defaults to ₹5,000 when no specific repair quote is present.
   let repair: RepairEstimate | null = null;
   const serviced = !tm || !org.target_brand || tm.brand === org.target_brand;
   if (tm && (manual || (faults.length && serviced))) {
@@ -1713,8 +1938,8 @@ export async function reprice(u: SessionUser, id: string, opts: { requote?: bool
     upgrade: upgrade ? { label: upgrade.label, newPrice: upgrade.price, bonus: bonusAmount, supportEndYear: upgrade.supportEndYear } : null,
     old: { ageYears: tm?.release_year ? Math.max(0, thisYear() - tm.release_year) : null, supportEndYear: tm?.support_end_year ?? null },
     thisYear: thisYear(),
-    // A defect in the condition with no fault recorded is something to repair (offer.ts nothingToRepairOn).
-    nothingToRepair: nothingToRepairOn(faults.length, manual, condition),
+    // Default repair estimate (₹5,000) is always available for customer comparison.
+    nothingToRepair: false,
     faultCount: faults.length,
     systemicFault: faults.some((f) => ["water_damage", "no_power", "no_network", "frame_damage"].includes(f)),
     swollenBattery: faults.includes("battery_swollen"),

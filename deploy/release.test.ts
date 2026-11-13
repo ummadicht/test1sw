@@ -20,7 +20,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
+import { DatabaseSync as Database } from "node:sqlite";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const T = mkdtempSync(join(tmpdir(), "swapup-release-"));

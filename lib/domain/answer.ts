@@ -187,11 +187,13 @@ export function unrecordedDefect(faultCount: number, c: AnswerInput["condition"]
   return faultCount === 0 ? defectNote(c) : null;
 }
 
+export const DEFAULT_REPAIR_AMOUNT: Rupees = 5000;
+
 function repairText(r: AnswerInput["repair"], chosen: boolean): string {
   const cover = COVER_WORD[r.coverage] || "warranty";
   if (r.covered) return chosen ? `Repair — covered by ${cover}` : `or repair it free — covered by ${cover}`;
-  if (r.amount !== null) return chosen ? `Repair ${inr(r.amount)}` : `or repair it for ${inr(r.amount)}`;
-  return chosen ? "Repair — the advisor will quote the price" : "or repair it — the advisor will quote the price";
+  if (r.amount === null) return chosen ? "Repair — the advisor will quote the price" : "or repair it — the advisor will quote the price";
+  return chosen ? `Repair ${inr(r.amount)}` : `or repair it for ${inr(r.amount)}`;
 }
 
 /* ─────────────────────────── the answer ─────────────────────────── */
@@ -288,19 +290,27 @@ export function buildAnswer(i: AnswerInput): Answer {
         : { key: "bonus", text: `+ ${inr(bonus.amount)} bonus if you exchange with a new device`, note: i.newPhone.label, amount: bonus.amount }
     );
   }
-  if (!i.repair.nothingToRepair && !traded && !cancelled)
-    lines.push({ key: "repair", text: repairText(i.repair, chosen), note: null, amount: i.repair.covered ? 0 : i.repair.amount });
+  const repairAmount = i.repair.covered ? 0 : i.repair.amount;
+  if (!i.repair.nothingToRepair && !traded && !cancelled) {
+    lines.push({
+      key: "repair",
+      text: repairText(i.repair, chosen),
+      note: null,
+      amount: repairAmount,
+    });
+  }
 
   // ── The headline the customer reads ──
+  const rec: Recommendation = i.recommendation ?? "cannot_say";
   const headline = traded
     ? "Traded in"
     : chosen
       ? "Repair chosen"
       : cancelled
         ? "Trade-in cancelled"
-        : i.recommendation === "repair" && i.repair.covered
+        : rec === "repair" && i.repair.covered
           ? "Repair it — it's covered"
-          : HEADLINE[i.recommendation ?? "cannot_say"];
+          : HEADLINE[rec];
 
   // ── Staff-only words ──
   // The grade the price is for, when a lower one priced it: "Priced at grade C (₹30,672) — none listed at grade B."
@@ -328,7 +338,7 @@ export function buildAnswer(i: AnswerInput): Answer {
     wePay,
     bonus,
     newPhone: i.newPhone ? { label: i.newPhone.label, price: i.newPhone.price } : null,
-    repair: { amount: i.repair.amount, covered: i.repair.covered, coverage: i.repair.coverage, nothingToRepair: i.repair.nothingToRepair },
+    repair: i.repair,
     lines,
     staffNotes,
     test: i.testProgramme,

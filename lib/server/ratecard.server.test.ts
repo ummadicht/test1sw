@@ -104,9 +104,8 @@ test("scripts/activate-rate-card.ts: the page's upload from the shell — active
   assert.match(id, /^rc_[\w-]+$/);
   assert.deepEqual(rest, [], "nothing else on stdout");
   assert.doesNotMatch(out.stdout, /34960|34,960|33574/, "never a price");
-  // Through the server's own module, on the database the script wrote.
-  const Database = (await import("better-sqlite3")).default;
-  const other = new Database(file, { readonly: true });
+  const Database = (await import("node:sqlite")).DatabaseSync;
+  const other = new Database(file, { readOnly: true });
   try {
     const rows = other.prepare(`SELECT id, active, data FROM rate_cards`).all() as { id: string; active: number; data: string }[];
     assert.deepEqual(rows.map((x) => [x.id, x.active]), [[id, 1]]);

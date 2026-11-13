@@ -323,26 +323,25 @@ export function nothingToRepairOn(faultCount: number, manualRepair: unknown, con
  * straight trade-in" is not used. The next re-price decides again.
  */
 export function currentDecision<D extends Pick<Decision, "recommendation">>(decision: D | null, nothingToRepair: boolean): D | null {
-  return decision?.recommendation === "no_repair" && !nothingToRepair ? null : decision;
+  if (!decision) return null;
+  // A decision stored before SUP-96 that called a phone with a defect but no fault "Nothing to repair — a straight trade-in" is not used.
+  if (decision.recommendation === "no_repair" && !nothingToRepair) return null;
+  return decision;
 }
 
 export function buildOffer(i: OfferInput): Offer {
   const open = i.status === "draft" || i.status === "quoted";
   const device = i.device;
   const variant = device?.variant ?? null;
-  // No fault recorded, but the condition has a defect: the trade-in doesn't move; the repair needs the
-  // service centre's quote, asked for like any other repair nothing prices.
-  const unrecorded = unrecordedDefect(i.faultCount, i.condition ?? null);
   const nothingToRepair = nothingToRepairOn(i.faultCount, i.manualRepair, i.condition ?? null);
   const decision = currentDecision(i.decision, nothingToRepair);
 
   // ── The refurb quote ──
   const r = i.repair;
-  const repairAmount = r?.status === "quoted" ? r.customerPays : null;
   const covered = r?.status === "quoted" && r.customerPays === 0 && r.coverage !== "none" && r.basis === "book";
-  const repairNote = r?.notes[0] ?? i.repairNotServiced;
+  const repairAmount = covered ? 0 : r?.status === "quoted" ? r.customerPays : null;
   let detail: string | null = null;
-  if (r && repairAmount !== null) {
+  if (r && repairAmount !== null && (repairAmount > 0 || covered)) {
     if (covered) detail = r.coverage === "warranty" ? "Covered by warranty" : "Covered by Care+";
     else if (r.basis === "manual") detail = `Quote: ${(i.manualRepair?.reason ?? r.notes[0] ?? "").trim()}`;
     else {
@@ -355,13 +354,17 @@ export function buildOffer(i: OfferInput): Offer {
       detail = parts.length ? parts.join(" + ") : null;
     }
   }
-  // Why nothing prices the repair, said once (the tile, the ask, the refusal): another brand's outside
-  // quote first — recording a fault never prices a brand this centre doesn't repair — then the defect
-  // no fault says, then the estimate's note.
-  const unpricedWhy = unrecorded ? (i.repairNotServiced ?? noFaultRecorded(unrecorded)) : (repairNote ?? NO_REPAIR_PRICE);
   // No model because the IMEI names a phone SwapUp doesn't list: that sentence, never "Choose the phone first".
   const imeiUnlisted = !device && i.imeiUnlisted ? i.imeiUnlisted : null;
-  const repairWhy = repairAmount !== null ? null : nothingToRepair ? NOTHING_TO_REPAIR : !device ? (imeiUnlisted ?? CHOOSE_PHONE) : unpricedWhy;
+  const unrecorded = unrecordedDefect(i.faultCount, i.condition ?? null);
+  const repairWhy =
+    repairAmount !== null
+      ? null
+      : nothingToRepair
+        ? NOTHING_TO_REPAIR
+        : !device
+          ? (imeiUnlisted ?? CHOOSE_PHONE)
+          : (i.repairNotServiced ?? (unrecorded ? noFaultRecorded(unrecorded) : (r?.notes[0] ?? NO_REPAIR_PRICE)));
 
   // ── Trade-in + bonus ──
   const q = i.quote;
@@ -453,9 +456,8 @@ export function buildOffer(i: OfferInput): Offer {
     // Nothing priced it: the reason, said once under the title — no form, no button.
     if (device && variant && !i.quoteBlocked && q && q.status !== "priced")
       asks.push({ kind: "no_price", title: ASK_TITLE.no_price, text: noPriceWhy(q.reason) ?? REQUOTE_FOR_WHY });
-    // A defect no fault records is quoted the same way: the desk's and the app's quote form, one tap away.
-    if (device && !nothingToRepair && repairAmount === null && (unrecorded || r?.status === "needs_inspection" || r?.status === "unpriced" || (!r && i.repairNotServiced)))
-      asks.push({ kind: "repair_quote", title: ASK_TITLE.repair_quote, text: unpricedWhy });
+    if (device && repairAmount === null && !nothingToRepair)
+      asks.push({ kind: "repair_quote", title: ASK_TITLE.repair_quote, text: repairWhy! });
     if (device && !up) asks.push({ kind: "new_phone", title: ASK_TITLE.new_phone, text: i.newPhoneMatch ? NO_NEW_PHONE : NEW_PHONE_TEXT });
   }
 
@@ -489,7 +491,7 @@ export function buildOffer(i: OfferInput): Offer {
     repair: {
       amount: repairAmount,
       covered,
-      basis: repairAmount !== null ? (r?.basis ?? null) : null,
+      basis: r?.basis ?? "book",
       detail,
       why: repairWhy,
       nothingToRepair,
@@ -511,7 +513,15 @@ export function buildOffer(i: OfferInput): Offer {
       vsRepair: customerPays !== null && repairAmount !== null ? customerPays - repairAmount : null,
     },
     actions: {
-      repair: !open ? CLOSED : nothingToRepair ? NOTHING_TO_REPAIR : repairAmount === null ? repairWhy : status === "draft" ? NOT_PRICED : null,
+      repair: !open
+        ? CLOSED
+        : nothingToRepair
+          ? NOTHING_TO_REPAIR
+          : repairAmount === null
+            ? repairWhy
+            : status === "draft"
+              ? NOT_PRICED
+              : null,
       // A swap the Lock screen is certain to refuse for a reason it can't fix there is refused
       // here, with that reason: no new phone to swap up to.
       swap: !open

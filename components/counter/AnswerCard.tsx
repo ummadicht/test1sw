@@ -362,7 +362,7 @@ export function AnswerCard({
         {/* Repair | Swap up — the same weight, side by side even on a phone */}
         <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
           <Tile label="Repair" recommended={badge === "repair"}>
-            {repairL ? (
+            {repairL && repairL.amount !== null && (repairL.amount > 0 || r.covered) ? (
               <div className={FIGURE}>{repairL.text}</div>
             ) : (
               <div className={FIGURE}>or repair it for {inr(effectiveRepairAmount)}</div>
@@ -374,7 +374,10 @@ export function AnswerCard({
             )}
             {repairWhy ? <Small>{repairWhy}</Small> : null}
             {editable && repairRefusal ? <Small tone="ink">{repairRefusal}</Small> : null}
-            <TileLink onClick={() => onStep("step-repair")}>Change</TileLink>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <TileLink onClick={() => onStep("step-repair")}>Open full case</TileLink>
+              <TileLink onClick={() => onStep("step-repair")}>Change</TileLink>
+            </div>
             <p className="text-[13.5px] text-ink-2">
               Cover: {COVER_SHORT[r.coverage]} · <TileLink onClick={() => onStep("step-phone")}>change</TileLink>
             </p>

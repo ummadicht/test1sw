@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
+import { DatabaseSync as Database } from "node:sqlite";
 import { startFakePriceiq, S23U_256, type FakePriceiq } from "./testing/fakePriceiq.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "swapup-priceiq-"));
@@ -25,13 +25,12 @@ process.env.SWAPUP_DB = DB_FILE;
 process.env.GRADEIQ_ENABLED = "0";
 for (const k of Object.keys(process.env)) if (k.startsWith("PRICEIQ_")) delete process.env[k];
 
-const { MIGRATIONS } = await import("./db.ts");
+const { SQLITE_SCHEMA, MIGRATIONS } = await import("./db.ts");
 
 /* ── a database as an older SwapUp left it: schema 14, the bundled snapshot imported, the sample card on file ── */
 {
   const old = new Database(DB_FILE);
-  old.exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
-  for (const step of MIGRATIONS.slice(0, 14)) old.exec(step);
+  old.exec(SQLITE_SCHEMA);
   old.prepare(`INSERT INTO meta (key, value) VALUES ('schema_version', '14')`).run();
   old.prepare(`INSERT INTO meta (key, value) VALUES ('priceiq_vendor_sell', '{"file":"x.csv"}')`).run();
   old.prepare(`INSERT INTO meta (key, value) VALUES ('priceiq_keep_me', 'unrelated')`).run();

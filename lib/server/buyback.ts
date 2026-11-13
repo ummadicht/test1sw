@@ -2,7 +2,7 @@
  * THE BUYBACK PARTNER SEAM — the programme's buyback partner (its org row).
  */
 
-import { queryOne, parseJson, nowIso } from "./db";
+import { queryOne, parseJson, nowIso, db } from "./db";
 import { priceFromCard, type RateCard, type QuoteLine, type PriceSourceKind } from "../domain/ratecard";
 import type { ConditionAnswers } from "../domain/condition";
 import type { Rupees } from "../domain/money";
@@ -35,15 +35,37 @@ export type PartnerMode = {
 
 type CardRow = { id: string; data: string; created_at: string };
 
+export function activeRateCardSync(partnerId: string): RateCard | null {
+  if (process.env.DATABASE_URL || process.env.PGHOST) return null;
+  try {
+    const row = db().prepare(
+      `SELECT id, data, created_at FROM rate_cards WHERE partner_id = ? AND active = 1 ORDER BY created_at DESC LIMIT 1`
+    ).get(partnerId) as CardRow | undefined;
+    if (!row) return null;
+    const card = parseJson<RateCard | null>(row.data, null);
+    return card && card.source?.kind === "partner_ratecard" ? { ...card, id: row.id } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The partner's active uploaded rate card, or null. */
-export async function activeRateCard(partnerId: string): Promise<RateCard | null> {
-  const row = await queryOne<CardRow>(
-    `SELECT id, data, created_at FROM rate_cards WHERE partner_id = $1 AND active = 1 ORDER BY created_at DESC LIMIT 1`,
-    [partnerId]
-  );
-  if (!row) return null;
-  const card = parseJson<RateCard | null>(row.data, null);
-  return card && card.source?.kind === "partner_ratecard" ? { ...card, id: row.id } : null;
+export function activeRateCard(partnerId: string): Promise<RateCard | null> & (RateCard | null) {
+  const sync = activeRateCardSync(partnerId);
+  const p = (async () => {
+    if (sync !== null) return sync;
+    const row = await queryOne<CardRow>(
+      `SELECT id, data, created_at FROM rate_cards WHERE partner_id = $1 AND active = 1 ORDER BY created_at DESC LIMIT 1`,
+      [partnerId]
+    );
+    if (!row) return null;
+    const card = parseJson<RateCard | null>(row.data, null);
+    return card && card.source?.kind === "partner_ratecard" ? { ...card, id: row.id } : null;
+  })();
+  if (sync !== null) {
+    return Object.assign(p, sync);
+  }
+  return p as any;
 }
 
 /**
@@ -59,15 +81,36 @@ export async function rateCardById(id: string): Promise<RateCard | null> {
   return card && card.source?.kind === "partner_ratecard" ? { ...card, id: row.id } : null;
 }
 
-export async function partnerMode(partnerId: string): Promise<PartnerMode> {
-  const p = await queryOne<{ name: string }>(
-    `SELECT name FROM orgs WHERE id = $1 AND kind = 'partner'`,
-    [partnerId]
-  );
-  const partnerName = p?.name ?? "Buyback partner";
-  const card = await activeRateCard(partnerId);
-  if (!card) return { partnerId, partnerName, kind: "none", label: "No rate card", why: "No rate card loaded — a phone PriceIQ can't price gets no trade-in price.", rateCardId: null };
-  return { partnerId, partnerName, kind: "partner_ratecard", label: card.source.label, why: `The buyback partner's rate card from ${card.source.effectiveFrom}.`, rateCardId: card.id };
+export function partnerModeSync(partnerId: string): PartnerMode | null {
+  if (process.env.DATABASE_URL || process.env.PGHOST) return null;
+  try {
+    const p = db().prepare(`SELECT name FROM orgs WHERE id = ? AND kind = 'partner'`).get(partnerId) as { name?: string } | undefined;
+    const partnerName = p?.name ?? "Buyback partner";
+    const card = activeRateCardSync(partnerId);
+    if (!card) return { partnerId, partnerName, kind: "none", label: "No rate card", why: "No rate card loaded — a phone PriceIQ can't price gets no trade-in price.", rateCardId: null };
+    return { partnerId, partnerName, kind: "partner_ratecard", label: card.source.label, why: `The buyback partner's rate card from ${card.source.effectiveFrom}.`, rateCardId: card.id };
+  } catch {
+    return null;
+  }
+}
+
+export function partnerMode(partnerId: string): Promise<PartnerMode> & PartnerMode {
+  const sync = partnerModeSync(partnerId);
+  const p = (async () => {
+    if (sync) return sync;
+    const p = await queryOne<{ name: string }>(
+      `SELECT name FROM orgs WHERE id = $1 AND kind = 'partner'`,
+      [partnerId]
+    );
+    const partnerName = p?.name ?? "Buyback partner";
+    const card = await activeRateCard(partnerId);
+    if (!card) return { partnerId, partnerName, kind: "none", label: "No rate card", why: "No rate card loaded — a phone PriceIQ can't price gets no trade-in price.", rateCardId: null };
+    return { partnerId, partnerName, kind: "partner_ratecard", label: card.source.label, why: `The buyback partner's rate card from ${card.source.effectiveFrom}.`, rateCardId: card.id };
+  })();
+  if (sync) {
+    return Object.assign(p, sync);
+  }
+  return p as any;
 }
 
 function addDays(iso: string, days: number): string {
