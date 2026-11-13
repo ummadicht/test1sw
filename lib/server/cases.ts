@@ -845,7 +845,7 @@ export function getCaseSync(u: SessionUser, id: string): CaseView | null {
     const quote = storedQuote(c.quote);
     const quoteExpired = quoteLapsed(c, quote);
     const camera = parseJson<CaseCameraCheck | null>(c.camera_check, null);
-    const org = sqlite.prepare("SELECT * FROM orgs WHERE id = ?").get(c.org_id) as OrgRow | undefined;
+    const org = (sqlite.prepare("SELECT * FROM orgs WHERE id = ?").get(c.org_id) as OrgRow | undefined) ?? null;
     const mode = org?.partner_id ? partnerModeSync(org.partner_id) : null;
     const partner = mode && quote?.source.kind === "partner_manual" ? { ...mode, why: TYPED_PRICE_NOTE } : mode;
     const manualRepair = parseJson<ManualQuote | null>(c.manual_repair, null);
@@ -893,7 +893,7 @@ export function getCaseSync(u: SessionUser, id: string): CaseView | null {
       quoteBlocked: identityBlock(camera),
       manualRepair,
       refurbCost: parseJson<RefurbCost | null>(c.refurb_cost, null),
-      marketSell: { amount: null, why: null, source: null },
+      marketSell: { amount: null, why: "No refurbished market price yet.", source: "PriceIQ · refurbished market" },
       repairNotServiced: repairNotServicedFor(tm, org),
       repair: manualRepair
         ? {
@@ -948,7 +948,7 @@ export function getCaseSync(u: SessionUser, id: string): CaseView | null {
       if (view.quoteBlocked) view.lockBlockers.unshift(view.quoteBlocked);
     }
     const upgrade = parseJson<UpgradeChoice | null>(c.upgrade, null);
-    const newPhoneMatch = tm && !upgrade && EDITABLE.includes(c.status);
+    const newPhoneMatch = Boolean(tm && !upgrade && EDITABLE.includes(c.status));
     view.offer = buildOffer({
       status: c.status,
       device: tm ? { label: `${tm.brand} ${tm.model}`, variant: c.variant, variants: parseJson<string[]>(tm.variants, []) } : null,

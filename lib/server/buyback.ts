@@ -96,7 +96,7 @@ export function partnerModeSync(partnerId: string): PartnerMode | null {
 
 export function partnerMode(partnerId: string): Promise<PartnerMode> & PartnerMode {
   const sync = partnerModeSync(partnerId);
-  const p = (async () => {
+  const p: Promise<PartnerMode> = (async (): Promise<PartnerMode> => {
     if (sync) return sync;
     const p = await queryOne<{ name: string }>(
       `SELECT name FROM orgs WHERE id = $1 AND kind = 'partner'`,
@@ -110,7 +110,7 @@ export function partnerMode(partnerId: string): Promise<PartnerMode> & PartnerMo
   if (sync) {
     return Object.assign(p, sync);
   }
-  return p as any;
+  return p as Promise<PartnerMode> & PartnerMode;
 }
 
 function addDays(iso: string, days: number): string {
