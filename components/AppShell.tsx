@@ -4,6 +4,7 @@ import { BrandMark } from "./ui";
 import { NavLinks, LogoutButton } from "./ShellClient";
 import { ROLE_LABEL, type SessionUser } from "@/lib/server/auth";
 import { getOrg, getStore } from "@/lib/server/scope";
+import { listPayoutRequests } from "@/lib/server/payouts";
 
 export type NavItem = { href: string; label: string };
 
@@ -52,6 +53,18 @@ export async function AppShell({ user, children, wide = false }: { user: Session
   const org = await getOrg(user.orgId);
   const store = user.storeId ? await getStore(user.storeId) : null;
   const where = store ? store.name : org?.name ?? "";
+  let pendingPayouts = 0;
+  let alertPayouts = 0;
+  if (user.role === "store_manager" && user.storeId) {
+    try {
+      const p = await listPayoutRequests(user, { storeId: user.storeId });
+      pendingPayouts = p.pendingCount;
+      alertPayouts = p.alertCount;
+    } catch {
+      pendingPayouts = 0;
+      alertPayouts = 0;
+    }
+  }
   return (
     <div className="min-h-screen flex flex-col">
       <header className="no-print sticky top-0 z-30 bg-[color:var(--surface)]/95 backdrop-blur border-b border-line">
@@ -77,6 +90,16 @@ export async function AppShell({ user, children, wide = false }: { user: Session
             <LogoutButton />
           </div>
         </div>
+        {user.role === "store_manager" && (pendingPayouts > 0 || alertPayouts > 0) ? (
+          <div className="bg-[color:var(--warn-bg)] text-[color:var(--warn)] text-[13px] font-semibold text-center py-1.5 border-t border-line px-4">
+            <Link href="/store#payout-approvals" className="underline">
+              {pendingPayouts > 0
+                ? `${pendingPayouts} customer payout ${pendingPayouts === 1 ? "request awaits" : "requests await"} your approval`
+                : `${alertPayouts} payout ${alertPayouts === 1 ? "alert requires" : "alerts require"} manager attention`}{" "}
+              → Review &amp; approve via Razorpay
+            </Link>
+          </div>
+        ) : null}
         {store?.status === "pending" ? (
           <div className="bg-[color:var(--warn-bg)] text-[color:var(--warn)] text-[13px] font-semibold text-center py-1.5 border-t border-line px-4">
             {store.name} awaits approval — trade-ins start after it.

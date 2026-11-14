@@ -18,6 +18,8 @@ import { listPickups, openChargebacks } from "@/lib/server/pickups";
 import { programmeReport } from "@/lib/server/reports";
 import { getOrg, getStore, storesForUser } from "@/lib/server/scope";
 import { dataClearDueIds } from "@/lib/server/cases";
+import { listPayoutRequests, type ManagerPayoutView } from "@/lib/server/payouts";
+import { ManagerPayoutQueue } from "@/components/store/ManagerPayoutQueue";
 import { nowIso } from "@/lib/server/db";
 import { SIGN, type CreditEventKind } from "@/lib/domain/credit";
 import { CASE_STATUS_LABEL } from "@/lib/domain/lifecycle";
@@ -86,6 +88,7 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
   const pickupOfCase = new Map<string, { id: string; ref: string }>();
   for (const p of pickups) for (const i of p.items) if (!pickupOfCase.has(i.id)) pickupOfCase.set(i.id, { id: p.id, ref: p.ref });
   const chargebacks = await openChargebacks(u, cs.store.id);
+  const payoutData = await listPayoutRequests(u, { storeId: cs.store.id });
   // Newest first by when it happened (demo data back-dates some holds, so posting order alone reads oddly).
   const ledger = [...(cs.ledger ?? [])].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : Number(b.id) - Number(a.id)));
 
@@ -177,6 +180,15 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
             </div>
           </div>
         </Card>
+
+        {/* ── customer payout approval queue & ledger ────── */}
+        <ManagerPayoutQueue
+          storeId={cs.store.id}
+          initialPayouts={payoutData.payouts as ManagerPayoutView[]}
+          initialBalance={payoutData.storeBalance?.availableBalance ?? pos.available}
+          initialLedger={payoutData.ledger}
+          showLedger
+        />
 
         {/* ── pickup advice ───────────────────────────────── */}
         <section className="space-y-3" aria-label="Pickup advice">

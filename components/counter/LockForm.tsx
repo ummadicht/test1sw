@@ -7,6 +7,7 @@ import { ID_TYPES } from "./shared";
 import type { CaseOps } from "./ops";
 import { HANDOVER_HINT, HANDOVER_LABEL, handoverChecks } from "./handover";
 import { RazorpayPaymentPanel } from "./RazorpayPaymentPanel";
+import { PayoutRequestPanel } from "./PayoutRequestPanel";
 
 const KYM_OPTIONS = [
   ["clear", "No block — OK to buy"],
@@ -22,7 +23,7 @@ type Kym = (typeof KYM_OPTIONS)[number][0];
  * The IMEI is asked here, first, when the case has none — only taking the phone needs it.
  * The forwarded ref is the first field (the IMEI when it is asked, else the name).
  */
-export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function LockForm({ ops }, nameRef) {
+export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps; isManager?: boolean }>(function LockForm({ ops, isManager = false }, nameRef) {
   const { view, editable, busy, act, save } = ops;
   const [name, setName] = useState(view.customer?.name ?? "");
   const [phone, setPhone] = useState(view.customer?.phone ?? "");
@@ -309,11 +310,11 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
           </div>
         </fieldset>
 
-        {/* Credit */}
-        <div>
-          <div className="label">Store credit</div>
-          {cc ? (
-            cc.ok ? (
+        {/* Store credit balance is visible ONLY to Store Managers */}
+        {isManager && cc ? (
+          <div>
+            <div className="label">Store credit</div>
+            {cc.ok ? (
               <div className="text-[14.5px]">
                 <Money value={cc.availableAfter} className="font-bold" /> credit left after this.
                 {cc.warn ? (
@@ -324,11 +325,9 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
               </div>
             ) : (
               <Banner tone="bad">{cc.reason}</Banner>
-            )
-          ) : (
-            <p className="text-[14px] text-muted">Checked once priced.</p>
-          )}
-        </div>
+            )}
+          </div>
+        ) : null}
 
         {blockers.length ? (
           <Banner tone="warn">
@@ -339,6 +338,22 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps }>(function 
               ))}
             </ul>
           </Banner>
+        ) : null}
+
+        {view.offer?.swap.wePay && view.offer.swap.wePay > 0 ? (
+          <PayoutRequestPanel
+            caseId={view.id}
+            caseRef={view.ref}
+            payoutAmount={view.offer.swap.wePay}
+            customerName={name || view.customer?.name}
+            customerPhone={digits || view.customer?.phone}
+            deviceLabel={
+              view.device
+                ? `${view.device.brand} ${view.device.model}${view.device.variant ? ` ${view.device.variant}` : ""}`
+                : null
+            }
+            isManager={isManager}
+          />
         ) : null}
 
         {view.offer?.swap.customerPays && view.offer.swap.customerPays > 0 ? (

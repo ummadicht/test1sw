@@ -1,5 +1,5 @@
 import { handle, body } from "@/lib/server/http";
-import { getCaseForViewer } from "@/lib/server/counter-extra";
+import { getCaseForViewer, redactCaseForCounter } from "@/lib/server/counter-extra";
 import { requireUser, HttpError } from "@/lib/server/auth";
 import { updateCase, type CasePatch } from "@/lib/server/cases";
 
@@ -18,6 +18,6 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     const { id } = await ctx.params;
     const patch = await body<CasePatch>(req);
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new HttpError(400, "Expected the changes as a JSON object.");
-    return updateCase(u, id, patch);
+    return redactCaseForCounter(u, await updateCase(u, id, patch));
   });
 }

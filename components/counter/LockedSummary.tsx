@@ -13,6 +13,7 @@ import type { CaseOps, PickupInfo } from "./ops";
 import { DataClearCard } from "./DataClearCard";
 import { TONE_TEXT, gradeTone } from "./gradingView";
 import { RazorpayPaymentPanel } from "./RazorpayPaymentPanel";
+import { PayoutRequestPanel } from "./PayoutRequestPanel";
 
 /** After the trade-in is taken: what was agreed, who checked it, and where the phone is now. */
 export function LockedSummary({
@@ -113,6 +114,22 @@ export function LockedSummary({
               </div>
             )}
           </div>
+
+          {!isPartner && wePay && wePay > 0 ? (
+            <PayoutRequestPanel
+              caseId={view.id}
+              caseRef={view.ref}
+              payoutAmount={wePay}
+              customerName={view.customer?.name}
+              customerPhone={view.customer?.phone}
+              deviceLabel={
+                view.device
+                  ? `${view.device.brand} ${view.device.model}${view.device.variant ? ` ${view.device.variant}` : ""}`
+                  : null
+              }
+              isManager={isManager}
+            />
+          ) : null}
 
           {!isPartner && view.payable && view.payable > 0 ? (
             <RazorpayPaymentPanel

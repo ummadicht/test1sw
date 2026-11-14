@@ -81,7 +81,23 @@ export type CreditSummary = {
   ledger: (LedgerRow & { case_ref: string | null })[] | null;
 };
 
+export async function storePayoutNetDebit(storeId: string): Promise<number> {
+  try {
+    const row = await queryOne<{ net: string | number | null }>(
+      `SELECT COALESCE(SUM(CASE WHEN entry_type = 'DEBIT' THEN amount WHEN entry_type = 'REVERSAL' THEN -amount ELSE 0 END), 0) AS net
+       FROM payout_ledger WHERE store_id = $1`,
+      [storeId]
+    );
+    return Number(row?.net ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
 export async function creditSummary(u: SessionUser, storeId: string, opts: { withLedger?: boolean } = {}): Promise<CreditSummary> {
+  if (u.role === "advisor") {
+    throw new HttpError(403, "Store counter users are not permitted to view store balance or wallet figures.");
+  }
   const store = await storeInScope(u, storeId);
   const policy = await storePolicy(store);
   const events = await storeEvents(store.id);
@@ -90,17 +106,34 @@ export async function creditSummary(u: SessionUser, storeId: string, opts: { wit
     `SELECT COUNT(*) n, COALESCE(SUM(trade_value),0) v FROM cases WHERE store_id = $1 AND status = 'collected'`,
     [store.id]
   );
-  const canLedger = opts.withLedger && u.role !== "advisor";
+  const canLedger = Boolean(opts.withLedger);
   const ledger = canLedger
     ? await query<LedgerRow & { case_ref: string | null }>(
         `SELECT l.*, c.ref AS case_ref FROM credit_ledger l LEFT JOIN cases c ON c.id = l.case_id WHERE l.store_id = $1 ORDER BY l.id DESC LIMIT 200`,
         [store.id]
       )
     : null;
+  const basePos = position(policy, events);
+  const payoutDebit = await storePayoutNetDebit(store.id);
+  const adjExposure = basePos.exposure + payoutDebit;
+  const adjAvailable = policy.limit - adjExposure;
+  const adjUtil = policy.limit > 0 ? Math.max(0, adjExposure / policy.limit) : adjExposure > 0 ? Infinity : 0;
+  const adjState: CreditPosition["state"] =
+    adjExposure > policy.limit ? "over" : adjExposure === policy.limit && policy.limit > 0 ? "full" : adjUtil >= policy.warnAt ? "warn" : "ok";
+
   return {
     store: { id: store.id, name: store.name, code: store.code, kind: store.kind, city: store.city },
     policy,
-    position: position(policy, events),
+    position:
+      payoutDebit === 0
+        ? basePos
+        : {
+            ...basePos,
+            exposure: adjExposure,
+            available: adjAvailable,
+            utilisation: adjUtil,
+            state: adjState,
+          },
     advice: pickupAdvice(policy, events, held, nowIso()),
     held,
     inTransit: { count: Number(transit?.n || 0), value: Number(transit?.v || 0) },

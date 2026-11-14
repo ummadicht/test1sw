@@ -417,6 +417,66 @@ CREATE TABLE IF NOT EXISTS razorpay_payments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_razorpay_payments_case_id ON razorpay_payments(case_id);
+
+CREATE TABLE IF NOT EXISTS payout_requests (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL,
+  case_ref TEXT NOT NULL,
+  org_id TEXT NOT NULL,
+  store_id TEXT NOT NULL,
+  customer_name TEXT NOT NULL,
+  customer_phone TEXT NOT NULL,
+  device_label TEXT,
+  payout_mode TEXT NOT NULL DEFAULT 'upi',
+  fund_account_upi TEXT,
+  fund_account_bank_name TEXT,
+  fund_account_number TEXT,
+  fund_account_ifsc TEXT,
+  amount INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'INR',
+  status TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+  idempotency_key TEXT NOT NULL UNIQUE,
+  requested_by TEXT NOT NULL,
+  requested_by_name TEXT,
+  requested_by_role TEXT NOT NULL,
+  requested_at TEXT NOT NULL,
+  reviewed_by TEXT,
+  reviewed_by_name TEXT,
+  reviewed_by_role TEXT,
+  reviewed_at TEXT,
+  rejection_reason TEXT,
+  razorpay_payout_id TEXT UNIQUE,
+  razorpay_fund_account_id TEXT,
+  razorpay_status TEXT,
+  razorpay_response TEXT,
+  failure_reason TEXT,
+  completed_at TEXT,
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_payout_requests_store_id ON payout_requests(store_id);
+CREATE INDEX IF NOT EXISTS idx_payout_requests_case_id ON payout_requests(case_id);
+CREATE INDEX IF NOT EXISTS idx_payout_requests_status ON payout_requests(status);
+
+CREATE TABLE IF NOT EXISTS payout_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payout_id TEXT NOT NULL,
+  case_id TEXT NOT NULL,
+  store_id TEXT NOT NULL,
+  org_id TEXT NOT NULL,
+  entry_type TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  balance_before INTEGER NOT NULL,
+  balance_after INTEGER NOT NULL,
+  razorpay_payout_id TEXT,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  note TEXT,
+  UNIQUE(payout_id, entry_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payout_ledger_store_id ON payout_ledger(store_id);
+CREATE INDEX IF NOT EXISTS idx_payout_ledger_payout_id ON payout_ledger(payout_id);
 `;
 
 type G = typeof globalThis & {

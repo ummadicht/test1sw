@@ -1,5 +1,6 @@
 import { handle, body } from "@/lib/server/http";
 import { requireUser, HttpError } from "@/lib/server/auth";
+import { redactCaseForCounter } from "@/lib/server/counter-extra";
 import {
   reprice,
   chooseRepair,
@@ -59,31 +60,32 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const u = await requireUser();
     const { id } = await ctx.params;
     const b = await body<ActionBody>(req);
-    switch (b.action) {
-      case "reprice":
-        if (u.role !== "advisor" && u.role !== "store_manager") throw new HttpError(403, "Only store staff re-price a case.");
-        return reprice(u, id, { requote: b.requote === true });
-      case "choose_repair":
-        return transition(() => chooseRepair(u, id));
-      case "walk_away":
-        return transition(() => walkAway(u, id, str(b.reason)?.trim() || undefined));
-      case "lock":
-        if (!b.customer || !b.checks) throw new HttpError(400, "Send the customer and the hand-over checks.");
-        return transition(() => lockTradeIn(u, id, { customer: b.customer!, checks: b.checks! }));
-      case "cancel":
-        return transition(() => cancelTradeIn(u, id, str(b.reason) ?? ""));
-      case "data_clear":
-        return recordDataClear(u, id, { ...(b.steps ?? {}), note: b.note });
-      // The advisor certifies one row of "Check the phone" by eye: {row: screen|body|liquid, value, testSessionId?},
-      // or all three at once — "All fine — screen OK, body like new": {allFine: true, testSessionId?}.
-      case "certify":
-        return certifyCase(u, id, { row: b.row, value: b.value, testSessionId: b.testSessionId, allFine: b.allFine, legacyStore: legacyStoreBuild(req) });
-      case "bonus_override": {
-        if (b.bp !== null && typeof b.bp !== "number") throw new HttpError(400, "Send the bonus in basis points, or null to reset it.");
-        return setBonusOverride(u, id, { bp: b.bp, reason: str(b.reason) });
+    const runAction = async (): Promise<CaseView> => {
+      switch (b.action) {
+        case "reprice":
+          if (u.role !== "advisor" && u.role !== "store_manager") throw new HttpError(403, "Only store staff re-price a case.");
+          return reprice(u, id, { requote: b.requote === true });
+        case "choose_repair":
+          return transition(() => chooseRepair(u, id));
+        case "walk_away":
+          return transition(() => walkAway(u, id, str(b.reason)?.trim() || undefined));
+        case "lock":
+          if (!b.customer || !b.checks) throw new HttpError(400, "Send the customer and the hand-over checks.");
+          return transition(() => lockTradeIn(u, id, { customer: b.customer!, checks: b.checks! }));
+        case "cancel":
+          return transition(() => cancelTradeIn(u, id, str(b.reason) ?? ""));
+        case "data_clear":
+          return recordDataClear(u, id, { ...(b.steps ?? {}), note: b.note });
+        case "certify":
+          return certifyCase(u, id, { row: b.row, value: b.value, testSessionId: b.testSessionId, allFine: b.allFine, legacyStore: legacyStoreBuild(req) });
+        case "bonus_override": {
+          if (b.bp !== null && typeof b.bp !== "number") throw new HttpError(400, "Send the bonus in basis points, or null to reset it.");
+          return setBonusOverride(u, id, { bp: b.bp, reason: str(b.reason) });
+        }
+        default:
+          throw new HttpError(400, `Unknown action${typeof b.action === "string" ? `: ${b.action}` : ""}.`);
       }
-      default:
-        throw new HttpError(400, `Unknown action${typeof b.action === "string" ? `: ${b.action}` : ""}.`);
-    }
+    };
+    return redactCaseForCounter(u, await runAction());
   });
 }

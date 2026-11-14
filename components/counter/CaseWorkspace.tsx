@@ -384,7 +384,7 @@ export function CaseWorkspace({
           ) : null}
           {canLock && lockOpen ? (
             <div hidden={current !== "lock"} data-step="lock">
-              <LockForm ops={ops} ref={lockName} />
+              <LockForm ops={ops} isManager={isManager} ref={lockName} />
             </div>
           ) : null}
           <StepDock steps={steps} current={current} onGo={goTo} />

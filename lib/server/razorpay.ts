@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { query, queryOne, execute, tx, nowIso, newId, audit } from "./db";
 import { HttpError, type SessionUser } from "./auth";
+import { handleRazorpayPayoutWebhook, type PayoutStatus } from "./payouts";
 
 export type RazorpayJourney = "repair" | "swap";
 
@@ -889,7 +890,15 @@ export async function sendCaseReceiptEmail(
 export async function handleRazorpayWebhook(
   rawBody: string,
   signatureHeader: string | null
-): Promise<{ ok: boolean; status: string; event?: string; orderId?: string | null }> {
+): Promise<{
+  ok: boolean;
+  status: string;
+  event?: string;
+  orderId?: string | null;
+  payoutId?: string | null;
+  payoutStatus?: PayoutStatus | null;
+  idempotent?: boolean;
+}> {
   await ensureRazorpayTable();
   const cfg = getRazorpayConfig();
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || cfg.keySecret;
@@ -909,6 +918,7 @@ export async function handleRazorpayWebhook(
     payload?: {
       payment?: { entity?: { id?: string; order_id?: string; method?: string; amount?: number } };
       order?: { entity?: { id?: string } };
+      payout?: { entity?: { id?: string; status?: string; failure_reason?: string } };
     };
   } = {};
 
@@ -919,6 +929,26 @@ export async function handleRazorpayWebhook(
   }
 
   const eventName = eventPayload.event || "";
+  if (
+    eventName === "payout.processed" ||
+    eventName === "payout.failed" ||
+    eventName === "payout.reversed"
+  ) {
+    const res = await handleRazorpayPayoutWebhook(
+      eventPayload as Record<string, unknown>,
+      rawBody,
+      signatureHeader
+    );
+    return {
+      ok: true,
+      status: res.status || "payout_webhook_handled",
+      event: res.event,
+      payoutId: res.payoutId,
+      payoutStatus: res.status,
+      idempotent: res.idempotent,
+    };
+  }
+
   const paymentEntity = eventPayload.payload?.payment?.entity;
   const orderId = paymentEntity?.order_id || eventPayload.payload?.order?.entity?.id || null;
   const paymentId = paymentEntity?.id || null;

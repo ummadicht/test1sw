@@ -13,6 +13,23 @@ import { getCase, forViewer, type CaseView } from "./cases";
  * market listing, the store's margin (it used to reach the partner: spec §9). The
  * grade the partner sees is the report frozen at lock, never the live one.
  */
+/**
+ * Strips all store balance, credit limit, and available wallet figures from a CaseView
+ * when the viewer is a store counter login (`advisor`). Only `store_manager` (and higher admins)
+ * may see store balance figures.
+ */
+export function redactCaseForCounter(u: SessionUser, view: CaseView): CaseView {
+  if (u.role !== "advisor") return view;
+  return {
+    ...view,
+    creditCheck: null,
+    lockBlockers: view.lockBlockers.map((b) =>
+      /credit limit|free\)/i.test(b) ? "Requires store manager approval to proceed." : b
+    ),
+  };
+}
+
 export async function getCaseForViewer(u: SessionUser, id: string): Promise<CaseView> {
-  return forViewer(u, await getCase(u, id));
+  const v = forViewer(u, await getCase(u, id));
+  return redactCaseForCounter(u, v);
 }
