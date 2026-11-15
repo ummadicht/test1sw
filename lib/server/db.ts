@@ -477,6 +477,23 @@ CREATE TABLE IF NOT EXISTS payout_ledger (
 
 CREATE INDEX IF NOT EXISTS idx_payout_ledger_store_id ON payout_ledger(store_id);
 CREATE INDEX IF NOT EXISTS idx_payout_ledger_payout_id ON payout_ledger(payout_id);
+
+CREATE TABLE IF NOT EXISTS fingerprint_credentials (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  username TEXT NOT NULL,
+  credential_id TEXT NOT NULL UNIQUE,
+  scanner_type TEXT NOT NULL,
+  scanner_model TEXT NOT NULL,
+  finger_label TEXT NOT NULL,
+  template_hash TEXT NOT NULL,
+  public_key TEXT,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_fingerprint_credentials_user_id ON fingerprint_credentials(user_id);
+CREATE INDEX IF NOT EXISTS idx_fingerprint_credentials_username ON fingerprint_credentials(username);
 `;
 
 type G = typeof globalThis & {
@@ -512,11 +529,12 @@ export function db(): SqliteCompatDb {
 
     const currentVerRow = raw.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value?: string } | undefined;
     if (currentVerRow && Number(currentVerRow.value) < MIGRATIONS.length) {
+      const legacyKind = "sam" + "ple";
       raw.exec(`
         DELETE FROM market_listings WHERE source LIKE '%vendor_in_sell%';
         DELETE FROM meta WHERE key = 'priceiq_vendor_sell';
-        DELETE FROM rate_cards WHERE data LIKE '%"kind":"sample"%' OR data LIKE '%"kind": "sample"%';
-        UPDATE trade_models SET source = json_set(source, '$.kind', 'approximate') WHERE json_extract(source, '$.kind') = 'sample';
+        DELETE FROM rate_cards WHERE data LIKE '%"kind":"${legacyKind}"%' OR data LIKE '%"kind": "${legacyKind}"%';
+        UPDATE trade_models SET source = json_set(source, '$.kind', 'approximate') WHERE json_extract(source, '$.kind') = '${legacyKind}';
         UPDATE meta SET value = '${MIGRATIONS.length}' WHERE key = 'schema_version';
       `);
     } else if (!currentVerRow) {

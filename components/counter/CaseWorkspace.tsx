@@ -16,6 +16,7 @@ import { LockedSummary } from "./LockedSummary";
 import { AnswerCard } from "./AnswerCard";
 import { CheckByEye } from "./CheckByEye";
 import { PhonecheckPanel } from "./PhonecheckPanel";
+import { BluetoothGradingPanel } from "./BluetoothGradingPanel";
 import { RefurbDecision } from "./RefurbDecision";
 import { RazorpayPaymentPanel } from "./RazorpayPaymentPanel";
 import { StepHeader, StepDock } from "./StepNav";
@@ -286,16 +287,27 @@ export function CaseWorkspace({
             <h1 className="text-[24px] font-[760] tracking-tight leading-tight">{showCustomer && view.customer?.name ? view.customer.name : "Case"}</h1>
             <StatusPill status={view.status} label={CASE_STATUS_LABEL[view.status]} />
           </div>
-          {!isPartner && (lockedOrLater || view.status === "repair_chosen" || view.offer !== null) ? (
-            <div className="flex flex-wrap items-center gap-1.5 no-print">
-              <Link href={`/cases/${view.id}/receipt`} className="btn btn-sm btn-ghost !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]">
-                🖨 Print receipt
-              </Link>
-              <Link href={`/cases/${view.id}/receipt?email=1`} className="btn btn-sm btn-ghost !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]">
-                ✉ Email receipt
-              </Link>
-            </div>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-1.5 no-print">
+            {editable ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]"
+                onClick={() => goTo("faults")}
+              >
+                ᛒ Bluetooth grade test
+              </button>
+            ) : null}
+            {!isPartner && (lockedOrLater || view.status === "repair_chosen" || view.offer !== null) ? (
+              <>
+                <Link href={`/cases/${view.id}/receipt`} className="btn btn-sm btn-ghost !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]">
+                  🖨 Print receipt
+                </Link>
+                <Link href={`/cases/${view.id}/receipt?email=1`} className="btn btn-sm btn-ghost !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]">
+                  ✉ Email receipt
+                </Link>
+              </>
+            ) : null}
+          </div>
         </div>
         <div className="text-[13px] text-muted mt-0.5">
           <span className="num">{view.ref}</span> · {view.storeName} · opened {fmtWhen(view.createdAt)}
@@ -365,7 +377,16 @@ export function CaseWorkspace({
           <div hidden={current !== "phone"} data-step="phone">
             <StepPhone ops={ops} brands={brands} initialModel={initialModel} />
           </div>
-          <div hidden={current !== "faults"} data-step="faults">
+          <div hidden={current !== "faults"} data-step="faults" className="space-y-4">
+            {editable ? (
+              <BluetoothGradingPanel
+                caseId={view.id}
+                onCaseUpdated={(next) => {
+                  setView(next);
+                  goTo("answer");
+                }}
+              />
+            ) : null}
             {/* Phonecheck changes the faults, so it sits in this step's details (store staff, at the counter only). */}
             <StepFaults ops={ops} phonecheck={<PhonecheckPanel ops={ops} role={role} run={run} />} />
             {held && editable ? <CameraReason key={held.why} held={held} onSave={save} /> : null}

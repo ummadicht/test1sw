@@ -5,6 +5,15 @@ const nextConfig: NextConfig = {
   // Database driver configuration
   serverExternalPackages: ["pg"],
   poweredByHeader: false,
+  async rewrites() {
+    return [
+      { source: "/app/check", destination: "/app/check/index.html" },
+      { source: "/app/check/", destination: "/app/check/index.html" },
+      { source: "/app/store", destination: "/app/store/index.html" },
+      { source: "/app/store/", destination: "/app/store/index.html" },
+    ];
+  },
 };
 
 export default nextConfig;
+

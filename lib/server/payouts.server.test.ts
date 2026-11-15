@@ -29,6 +29,8 @@ const { getCaseForViewer } = await import("./counter-extra.ts");
 const { uploadRateCard } = await import("./catalog.ts");
 const { DEFECT_DEDUCTIONS } = await import("../domain/ratecard.ts");
 const { luhnCheckDigit } = await import("../domain/imei.ts");
+const { runBluetoothGradingTest } = await import("./bluetoothGrading.ts");
+const { listFingerprintProfiles, authenticateByFingerprint } = await import("./fingerprintAuth.ts");
 const {
   createPayoutRequest,
   approvePayoutRequest,
@@ -445,3 +447,148 @@ test("Processing, Failure & Webhook handling (payout.processed, payout.failed, p
   assert.equal(whFail.payoutStatus, "FAILED");
   assert.equal(whFail.idempotent, true);
 });
+
+test("Bluetooth connectivity & device grading: evaluates Grade A, Grade B, Grade C, and Grade D over BLE GATT and redacts balance for counter role", async () => {
+  const c = await createPricedCase(adv);
+
+  // 1. Grade A (Like New): 19/19 pass, 94% battery, screen ok, body like_new, liquid clean
+  const resA = await runBluetoothGradingTest(
+    adv,
+    {
+      caseId: c.id,
+      bluetoothDevice: {
+        deviceId: "ble-s23-ultra-01",
+        name: "Samsung Galaxy S23 Ultra (BLE)",
+        manufacturer: "Samsung Electronics",
+        modelNumber: "SM-S918B",
+        firmwareRevision: "OneUI-6.1-BLE5.3",
+        batteryLevelPct: 94,
+        rssiDbm: -46,
+        gattServices: ["battery_service", "device_information", "generic_access"],
+        connectionMode: "web_bluetooth",
+      },
+      checks: {},
+      screen: "ok",
+      body: "like_new",
+      liquid: "clean",
+    },
+    "http://localhost:3000"
+  );
+  assert.equal(resA.grading?.swapupGrade, "A");
+  assert.equal(resA.grading?.swapupLabel, "Grade A");
+  assert.equal(resA.grading?.letter, "A");
+  assert.equal(resA.bluetoothTelemetry.passedCount, 19);
+  assert.equal(resA.bluetoothTelemetry.failedCount, 0);
+  assert.equal(resA.case.creditCheck, null, "advisor response from bluetooth grading must strip creditCheck");
+
+  // 2. Grade B (Good): 19/19 hardware pass, 86% battery, light body scuffs
+  const resB = await runBluetoothGradingTest(
+    adv,
+    {
+      caseId: c.id,
+      bluetoothDevice: {
+        deviceId: "ble-s23-ultra-02",
+        name: "Samsung Galaxy S23 Ultra (BLE)",
+        batteryLevelPct: 86,
+        rssiDbm: -51,
+        connectionMode: "web_bluetooth",
+      },
+      checks: {},
+      screen: "ok",
+      body: "scuffs",
+      liquid: "clean",
+    },
+    "http://localhost:3000"
+  );
+  assert.equal(resB.grading?.swapupGrade, "B");
+  assert.equal(resB.grading?.swapupLabel, "Grade B");
+  assert.equal(resB.grading?.letter, "B");
+
+  // 3. Grade C (Fair): Bluetooth radio issue + frame dents -> Grade C (Fair)
+  const resC = await runBluetoothGradingTest(
+    adv,
+    {
+      caseId: c.id,
+      bluetoothDevice: {
+        deviceId: "ble-s23-ultra-03",
+        name: "Samsung Galaxy S23 Ultra (BLE)",
+        batteryLevelPct: 84,
+        rssiDbm: -68,
+        connectionMode: "ble_bridge",
+      },
+      checks: {},
+      screen: "scratches",
+      body: "dents",
+      liquid: "clean",
+    },
+    "http://localhost:3000"
+  );
+  assert.equal(resC.grading?.swapupGrade, "C");
+  assert.equal(resC.grading?.swapupLabel, "Grade C");
+  assert.equal(resC.grading?.letter, "C");
+
+  // 4. Grade D (Faults / Needs Repair): Cracked screen + battery < 80% + touch dead spot + Bluetooth fail -> Grade D
+  const resD = await runBluetoothGradingTest(
+    mgr,
+    {
+      caseId: c.id,
+      bluetoothDevice: {
+        deviceId: "ble-s23-ultra-04",
+        name: "Samsung Galaxy S23 Ultra (BLE)",
+        batteryLevelPct: 71,
+        rssiDbm: -74,
+        connectionMode: "ble_bridge",
+      },
+      checks: {
+        bluetooth: "fail",
+        touch: "fail",
+        rear_camera: "fail",
+      },
+      screen: "cracked",
+      body: "dents",
+      liquid: "clean",
+    },
+    "http://localhost:3000"
+  );
+  assert.equal(resD.grading?.swapupGrade, "D");
+  assert.equal(resD.grading?.swapupLabel, "Grade D");
+  assert.equal(resD.grading?.status, "needs_repair");
+  assert.ok(resD.bluetoothTelemetry.failedIds.includes("bluetooth"));
+  assert.ok(resD.bluetoothTelemetry.failedIds.includes("touch"));
+});
+
+test("Fingerprint scanner login: authenticates Counter Advisor (/desk) and Store Manager (/store) with audit logging", async () => {
+  const { challenge, profiles } = await listFingerprintProfiles();
+  assert.ok(challenge.length > 16);
+  assert.ok(profiles.length >= 2);
+
+  const advLogin = await authenticateByFingerprint({
+    credentialId: "fp_store_advisor_default",
+    scannerType: "usb_optical",
+    minutiaeQuality: 97,
+    setWebCookie: false,
+  });
+  assert.equal(advLogin.ok, true);
+  assert.equal(advLogin.home, "/desk");
+  assert.equal(advLogin.user.role, "advisor");
+  assert.ok(advLogin.token);
+
+  const mgrLogin = await authenticateByFingerprint({
+    credentialId: "fp_store_manager_default",
+    scannerType: "usb_optical",
+    minutiaeQuality: 98,
+    setWebCookie: false,
+  });
+  assert.equal(mgrLogin.ok, true);
+  assert.equal(mgrLogin.home, "/store");
+  assert.equal(mgrLogin.user.role, "store_manager");
+  assert.ok(mgrLogin.token);
+
+  const fpAudit = db()
+    .prepare(`SELECT COUNT(*) AS n FROM audit WHERE action = 'auth.fingerprint.login'`)
+    .get() as { n: number };
+  assert.ok(fpAudit.n >= 2, "fingerprint login attempts are recorded in audit log");
+});
+
+
+
