@@ -11,8 +11,10 @@ import { StoreTablets, type TabletRow } from "./StoreTablets";
 import { StorePhonecheck } from "./StorePhonecheck";
 import { getStorePhonecheck } from "@/lib/server/phonecheck";
 import { listStoreDevices } from "@/lib/server/storeTablet";
-import { requirePage } from "@/lib/server/page";
-import { HttpError, type SessionUser } from "@/lib/server/auth";
+import { getSession, HttpError, type SessionUser } from "@/lib/server/auth";
+import { ensureSeeded } from "@/lib/server/seed";
+import { BrandMark } from "@/components/ui";
+import { StoreBiometricPanel } from "@/components/store/StoreBiometricPanel";
 import { creditSummary, type CreditSummary } from "@/lib/server/credit";
 import { listPickups, openChargebacks } from "@/lib/server/pickups";
 import { programmeReport } from "@/lib/server/reports";
@@ -55,7 +57,29 @@ async function partnerNameFor(orgId: string): Promise<string> {
 }
 
 export default async function StorePage({ searchParams }: { searchParams: SP }) {
-  const u = await requirePage(["store_manager", "org_admin", "platform"], "/store");
+  await ensureSeeded();
+  const u = await getSession();
+  if (!u || !["store_manager", "org_admin", "platform"].includes(u.role)) {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 bg-bg">
+        <div className="w-full max-w-md space-y-5">
+          <div className="flex items-center justify-between">
+            <BrandMark size={18} />
+            <Link href="/login" className="text-[13px] font-semibold text-muted hover:underline">
+              Password sign-in →
+            </Link>
+          </div>
+          <div>
+            <h1 className="text-[24px] font-[760] tracking-tight text-ink">Store Biometric Sign-In</h1>
+            <p className="hint mt-1">
+              Scan your enrolled Store Finger Template or Touch ID passkey to unlock <code>/store</code>.
+            </p>
+          </div>
+          <StoreBiometricPanel next="/store" storeOnlyManagerDefault />
+        </div>
+      </main>
+    );
+  }
   const sp = await searchParams;
   const isManager = u.role === "store_manager";
   const scope = isManager ? [] : await storesForUser(u);
@@ -395,8 +419,9 @@ export default async function StorePage({ searchParams }: { searchParams: SP }) 
           )}
         </Card>
 
-        {/* ── store tablets ───────────────────────────────── */}
+        {/* ── store tablets & biometric scanner ───────────── */}
         <StoreTablets tablets={tablets} canRemove={isManager} />
+        <StoreBiometricPanel next="/store" compact />
 
         {/* ── Phonecheck station (docs/GRADING.md) ─────────── */}
         <StorePhonecheck storeId={cs.store.id} initial={await getStorePhonecheck(u, cs.store.id)} canEdit />

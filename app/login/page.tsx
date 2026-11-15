@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Sign in" };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {
-  await ensureSeeded();
+  void ensureSeeded().catch(() => {});
   const u = await getSession();
   const { next, error: initialError } = await searchParams;
   if (u) redirect(safeNext(next) ?? homeFor(u.role));
