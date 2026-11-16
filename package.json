@@ -11,6 +11,11 @@
     "test": "node --test --experimental-strip-types --no-warnings lib/domain/*.test.ts components/counter/*.test.ts lib/server/*.test.ts deploy/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
+  "prewarm": {
+    "paths": [
+      "/"
+    ]
+  },
   "dependencies": {
     "@zxing/browser": "^0.2.1",
     "@zxing/library": "^0.23.0",

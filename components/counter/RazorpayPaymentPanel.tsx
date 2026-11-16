@@ -7,7 +7,6 @@ import { Banner, ErrorText, Money } from "@/components/ui";
 import { inr } from "@/lib/domain/money";
 import type {
   CaseRazorpaySummary,
-  RazorpayJourney,
   RazorpayPaymentPlan,
   RazorpayPaymentRow,
 } from "@/lib/server/razorpay";
@@ -36,11 +35,11 @@ async function loadRazorpayScript(): Promise<boolean> {
 }
 
 const PLAN_LABELS: Record<RazorpayPaymentPlan, string> = {
-  repair_part_advance: "Repair · Part Advance",
-  repair_remaining: "Repair · Remaining Balance",
+  repair_part_advance: "Repair · Full Payment",
+  repair_remaining: "Repair · Full Payment",
   repair_full: "Repair · Full Payment",
-  swap_direct: "Swap Up · Direct Payment",
-  swap_emi: "Swap Up · Razorpay EMI",
+  swap_direct: "Swap Up · Complete Payment (100%)",
+  swap_emi: "Swap Up · Complete Payment (100%)",
 };
 
 function parseReceiptEmailNote(notes: string | null): { emailedTo?: string; emailedAt?: string } {
@@ -74,13 +73,6 @@ export function RazorpayPaymentPanel({
   onPaid?: (payment: RazorpayPaymentRow, summary: CaseRazorpaySummary) => void;
 }) {
   const [summary, setSummary] = useState<CaseRazorpaySummary | null>(null);
-  const [activeTab, setActiveTab] = useState<RazorpayJourney>(
-    mode === "swap" ? "swap" : "repair"
-  );
-  const [repairOption, setRepairOption] = useState<"part_advance" | "full">("part_advance");
-  const [customAdvance, setCustomAdvance] = useState<string>("");
-  const [swapOption, setSwapOption] = useState<"direct" | "emi">("direct");
-  const [selectedEmiMonths, setSelectedEmiMonths] = useState<number>(6);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [activeOrder, setActiveOrder] = useState<{
@@ -88,7 +80,7 @@ export function RazorpayPaymentPanel({
     keyId: string;
     liveKeysConfigured: boolean;
   } | null>(null);
-  const [selectedSimMethod, setSelectedSimMethod] = useState<"upi" | "card" | "emi" | "netbanking">("upi");
+  const [selectedSimMethod, setSelectedSimMethod] = useState<"upi" | "card" | "netbanking">("upi");
 
   // Email receipt state
   const [emailComposerFor, setEmailComposerFor] = useState<string | "all" | null>(null);
@@ -107,9 +99,6 @@ export function RazorpayPaymentPanel({
     try {
       const s = await api<CaseRazorpaySummary>(`/api/cases/${encodeURIComponent(caseId)}/razorpay`);
       setSummary(s);
-      if (s.repair.suggestedAdvance) {
-        setCustomAdvance((prev) => (prev ? prev : String(s.repair.suggestedAdvance)));
-      }
       setReceiptEmail((prev) => {
         if (prev) return prev;
         for (const p of s.payments) {
@@ -127,34 +116,15 @@ export function RazorpayPaymentPanel({
     void refresh();
   }, [refresh]);
 
-  const effectiveRepairTotal =
-    repairAmount && repairAmount > 0
-      ? repairAmount
-      : summary?.repair.totalPayable && summary.repair.totalPayable > 0
-        ? summary.repair.totalPayable
-        : 5000;
   const effectiveSwapTotal = swapAmount ?? summary?.swap.totalPayable ?? null;
-  const repairPaid = summary?.repair.paidAmount ?? 0;
-  const repairRemaining =
-    effectiveRepairTotal !== null ? Math.max(0, effectiveRepairTotal - repairPaid) : 0;
-  const defaultAdvance =
-    effectiveRepairTotal !== null && effectiveRepairTotal > 0
-      ? Math.max(100, Math.min(effectiveRepairTotal - 10, Math.round((effectiveRepairTotal * 0.3) / 10) * 10))
-      : 0;
-
   const swapPaid = summary?.swap.paidAmount ?? 0;
   const swapRemaining =
     effectiveSwapTotal !== null ? Math.max(0, effectiveSwapTotal - swapPaid) : 0;
 
-  const emiPlans = summary?.swap.emiPlans ?? [];
-  const chosenEmiPlan =
-    emiPlans.find((p) => p.months === selectedEmiMonths) ?? emiPlans[1] ?? emiPlans[0] ?? null;
-
-  async function startCheckout(journey: RazorpayJourney, paymentPlan: RazorpayPaymentPlan) {
+  async function startCheckout() {
     setErr(null);
     setBusy(true);
     try {
-      const advNum = Number(customAdvance || defaultAdvance);
       const res = await api<{
         payment: RazorpayPaymentRow;
         keyId: string;
@@ -163,11 +133,11 @@ export function RazorpayPaymentPanel({
       }>(`/api/cases/${encodeURIComponent(caseId)}/razorpay`, {
         body: {
           action: "create_order",
-          journey,
-          paymentPlan,
-          customAdvanceAmount: paymentPlan === "repair_part_advance" ? advNum : null,
-          overrideTotalAmount: journey === "repair" ? effectiveRepairTotal : effectiveSwapTotal,
-          emiMonths: paymentPlan === "swap_emi" ? selectedEmiMonths : null,
+          journey: "swap",
+          paymentPlan: "swap_direct",
+          customAdvanceAmount: null,
+          overrideTotalAmount: effectiveSwapTotal,
+          emiMonths: null,
           customerName,
           customerPhone,
         },
@@ -183,12 +153,11 @@ export function RazorpayPaymentPanel({
             amount: res.payment.amount * 100,
             currency: "INR",
             name: "SwapUp",
-            description: `${caseRef} · ${PLAN_LABELS[paymentPlan]}`,
+            description: `${caseRef} · Complete Swap Payment`,
             order_id: res.payment.razorpay_order_id,
             prefill: {
               name: customerName || "",
               contact: customerPhone || "",
-              method: paymentPlan === "swap_emi" ? "emi" : undefined,
             },
             theme: { color: "#0f172a" },
             handler: async (response: {
@@ -205,7 +174,7 @@ export function RazorpayPaymentPanel({
                   razorpayOrderId: response.razorpay_order_id,
                   razorpayPaymentId: response.razorpay_payment_id,
                   razorpaySignature: response.razorpay_signature,
-                  paymentMethod: paymentPlan === "swap_emi" ? "emi" : "razorpay",
+                  paymentMethod: "razorpay",
                 },
               });
               setSummary(verified.summary);
@@ -219,7 +188,7 @@ export function RazorpayPaymentPanel({
       }
 
       // Open interactive Razorpay Checkout modal (when testing without live secret or in iframe)
-      setSelectedSimMethod(paymentPlan === "swap_emi" ? "emi" : "upi");
+      setSelectedSimMethod("upi");
       setActiveOrder({
         payment: res.payment,
         keyId: res.keyId,
@@ -296,6 +265,10 @@ export function RazorpayPaymentPanel({
 
   const paidPayments = (summary?.payments ?? []).filter((p) => p.status === "paid");
 
+  if (mode === "repair") {
+    return null;
+  }
+
   return (
     <div className="rounded-[12px] border border-line bg-surface-2 p-4 space-y-4 no-print">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -304,375 +277,78 @@ export function RazorpayPaymentPanel({
             Razorpay
           </span>
           <span className="text-[15px] font-[720] text-ink">
-            {mode === "repair"
-              ? "Pay for Repair via Razorpay"
-              : mode === "swap"
-                ? "Pay for Swap Up via Razorpay"
-                : "Razorpay Payment Options"}
+            Swap Up · Complete Payment (100% Full Payment Only)
           </span>
         </div>
-        {mode === "both" ? (
-          <div className="flex gap-1.5" role="tablist">
-            <button
-              type="button"
-              className="chip !min-h-[32px] !text-[13px]"
-              aria-pressed={activeTab === "repair"}
-              onClick={() => setActiveTab("repair")}
-            >
-              Repair Payment
-            </button>
-            <button
-              type="button"
-              className="chip !min-h-[32px] !text-[13px]"
-              aria-pressed={activeTab === "swap"}
-              onClick={() => setActiveTab("swap")}
-            >
-              Swap Up (EMI / Direct)
-            </button>
-          </div>
-        ) : null}
+        <span className="pill pill-up !text-[11.5px]">No part-payment</span>
       </div>
 
-      {/* ─────────────── REPAIR PAYMENT FLOW ─────────────── */}
-      {(mode === "repair" || (mode === "both" && activeTab === "repair")) && (
-        <div className="space-y-3">
-          {effectiveRepairTotal === null || effectiveRepairTotal <= 0 ? (
-            <p className="text-[13.5px] text-muted">
-              Record a fault or enter a repair quote first to enable Razorpay repair payments.
-            </p>
-          ) : repairRemaining === 0 ? (
-            <Banner tone="up">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <strong>Repair paid in full via Razorpay ({inr(effectiveRepairTotal)}).</strong>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]"
-                    onClick={() => {
-                      setEmailComposerFor("all");
-                      setErr(null);
-                    }}
-                  >
-                    ✉ Email receipt
-                  </button>
-                  <Link
-                    href={`/cases/${caseId}/receipt?autoprint=1`}
-                    className="btn btn-sm !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]"
-                  >
-                    🖨 Print receipt
-                  </Link>
-                </div>
+      {/* ─────────────── SWAP / UPGRADE COMPLETE PAYMENT FLOW ─────────────── */}
+      <div className="space-y-3">
+        {effectiveSwapTotal === null || effectiveSwapTotal <= 0 ? (
+          <p className="text-[13.5px] text-muted">
+            Select a target upgrade phone with a net payable balance to complete full payment via Razorpay.
+          </p>
+        ) : swapRemaining === 0 ? (
+          <Banner tone="up">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <strong>Swap upgrade complete payment ({inr(effectiveSwapTotal)}) paid in full via Razorpay.</strong>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]"
+                  onClick={() => {
+                    setEmailComposerFor("all");
+                    setErr(null);
+                  }}
+                >
+                  ✉ Email receipt
+                </button>
+                <Link
+                  href={`/cases/${caseId}/receipt?autoprint=1`}
+                  className="btn btn-sm !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]"
+                >
+                  🖨 Print receipt
+                </Link>
               </div>
-            </Banner>
-          ) : repairPaid > 0 && repairRemaining > 0 ? (
-            <div className="rounded-[10px] border border-line bg-surface p-3.5 space-y-3">
+            </div>
+          </Banner>
+        ) : (
+          <div className="space-y-3">
+            <div className="rounded-[10px] border border-[color:var(--ink)] bg-surface p-3.5 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <span className="pill pill-up">✓ Part Advance Paid: {inr(repairPaid)}</span>
-                  <div className="text-[14px] text-ink mt-1.5">
-                    Total repair: <strong className="num">{inr(effectiveRepairTotal)}</strong> · Remaining balance due:{" "}
-                    <strong className="num text-fix">{inr(repairRemaining)}</strong>
+                  <div className="text-[14px] font-[720] text-ink">
+                    Complete Swap Payment (100% Full Payable)
                   </div>
+                  <p className="text-[12.5px] text-ink-2 mt-0.5 leading-snug">
+                    Full payment is required to swap the phone. Part-payment is not available — customer either completes the full swap payment or chooses repair and walks out.
+                  </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    onClick={() => {
-                      setEmailComposerFor("all");
-                      setErr(null);
-                    }}
-                  >
-                    ✉ Email Advance Receipt
-                  </button>
-                  <Link
-                    href={`/cases/${caseId}/receipt?autoprint=1`}
-                    className="btn btn-sm"
-                  >
-                    🖨 Print Advance Receipt
-                  </Link>
-                  <button
-                    type="button"
-                    className="btn btn-fix btn-sm"
-                    disabled={busy}
-                    onClick={() => startCheckout("repair", "repair_remaining")}
-                  >
-                    {busy ? "Opening Razorpay…" : `Pay Remaining ${inr(repairRemaining)} via Razorpay`}
-                  </button>
+                <div className="text-right">
+                  <div className="text-[11.5px] uppercase tracking-wider text-muted font-semibold">
+                    Total Payable Now
+                  </div>
+                  <div className="num text-[20px] font-[780] text-ink">{inr(swapRemaining)}</div>
                 </div>
               </div>
             </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="grid sm:grid-cols-2 gap-2.5">
-                {/* Option 1: Part Advance + Remaining */}
-                <label
-                  className={`flex flex-col justify-between rounded-[10px] border p-3 cursor-pointer transition-colors ${
-                    repairOption === "part_advance"
-                      ? "border-[color:var(--ink)] bg-surface"
-                      : "border-line bg-surface/60"
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <input
-                      type="radio"
-                      name={`rzp-repair-${caseId}`}
-                      className="mt-1"
-                      checked={repairOption === "part_advance"}
-                      onChange={() => setRepairOption("part_advance")}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[14px] font-[720] text-ink">
-                        Option 1: Part Advance + Remaining
-                      </div>
-                      <p className="text-[12.5px] text-ink-2 mt-0.5 leading-snug">
-                        Pay advance now to book the repair, and pay the remaining balance via Razorpay after repair completion.
-                      </p>
-                    </div>
-                  </div>
-                  {repairOption === "part_advance" && (
-                    <div className="mt-3 pt-2.5 border-t border-line space-y-2">
-                      <div className="flex items-center justify-between gap-2 text-[13px]">
-                        <span className="text-ink-2 font-medium">Advance now (₹):</span>
-                        <input
-                          type="number"
-                          className="input num !min-h-[34px] !py-1 !px-2.5 max-w-[120px] text-right font-semibold"
-                          min={1}
-                          max={Math.max(1, effectiveRepairTotal - 1)}
-                          value={customAdvance || String(defaultAdvance)}
-                          onChange={(e) => setCustomAdvance(e.target.value)}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between text-[12.5px] text-muted">
-                        <span>Remaining on completion:</span>
-                        <span className="num font-semibold text-ink">
-                          {inr(Math.max(0, effectiveRepairTotal - Number(customAdvance || defaultAdvance)))}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </label>
 
-                {/* Option 2: Full Repair Payment */}
-                <label
-                  className={`flex flex-col justify-between rounded-[10px] border p-3 cursor-pointer transition-colors ${
-                    repairOption === "full"
-                      ? "border-[color:var(--ink)] bg-surface"
-                      : "border-line bg-surface/60"
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <input
-                      type="radio"
-                      name={`rzp-repair-${caseId}`}
-                      className="mt-1"
-                      checked={repairOption === "full"}
-                      onChange={() => setRepairOption("full")}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[14px] font-[720] text-ink">
-                        Option 2: Full Payment (100%)
-                      </div>
-                      <p className="text-[12.5px] text-ink-2 mt-0.5 leading-snug">
-                        Pay the complete repair quote of <strong className="num">{inr(effectiveRepairTotal)}</strong> upfront via Razorpay.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-3 pt-2.5 border-t border-line flex items-center justify-between text-[13px]">
-                    <span className="text-ink-2">Payable now:</span>
-                    <strong className="num text-ink">{inr(effectiveRepairTotal)}</strong>
-                  </div>
-                </label>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  className="btn btn-fix btn-sm"
-                  disabled={busy}
-                  onClick={() =>
-                    startCheckout(
-                      "repair",
-                      repairOption === "part_advance" ? "repair_part_advance" : "repair_full"
-                    )
-                  }
-                >
-                  {busy
-                    ? "Creating Razorpay Order…"
-                    : repairOption === "part_advance"
-                      ? `Pay Part Advance ${inr(Number(customAdvance || defaultAdvance))} via Razorpay`
-                      : `Pay Full Repair ${inr(effectiveRepairTotal)} via Razorpay`}
-                </button>
-              </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="btn btn-up btn-sm"
+                disabled={busy}
+                onClick={() => startCheckout()}
+              >
+                {busy
+                  ? "Creating Razorpay Order…"
+                  : `Pay Complete Amount ${inr(swapRemaining)} via Razorpay`}
+              </button>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* ─────────────── SWAP / UPGRADE PAYMENT FLOW (DIRECT OR EMI) ─────────────── */}
-      {(mode === "swap" || (mode === "both" && activeTab === "swap")) && (
-        <div className="space-y-3">
-          {effectiveSwapTotal === null || effectiveSwapTotal <= 0 ? (
-            <p className="text-[13.5px] text-muted">
-              Select a target upgrade phone with a net payable balance to pay via Razorpay (Direct or EMI).
-            </p>
-          ) : swapRemaining === 0 ? (
-            <Banner tone="up">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <strong>Swap upgrade balance ({inr(effectiveSwapTotal)}) paid in full via Razorpay.</strong>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]"
-                    onClick={() => {
-                      setEmailComposerFor("all");
-                      setErr(null);
-                    }}
-                  >
-                    ✉ Email receipt
-                  </button>
-                  <Link
-                    href={`/cases/${caseId}/receipt?autoprint=1`}
-                    className="btn btn-sm !min-h-[30px] !py-1 !px-2.5 !text-[12.5px]"
-                  >
-                    🖨 Print receipt
-                  </Link>
-                </div>
-              </div>
-            </Banner>
-          ) : (
-            <div className="space-y-3">
-              <div className="grid sm:grid-cols-2 gap-2.5">
-                {/* Option 1: Direct Payment */}
-                <label
-                  className={`flex flex-col justify-between rounded-[10px] border p-3 cursor-pointer transition-colors ${
-                    swapOption === "direct"
-                      ? "border-[color:var(--ink)] bg-surface"
-                      : "border-line bg-surface/60"
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <input
-                      type="radio"
-                      name={`rzp-swap-${caseId}`}
-                      className="mt-1"
-                      checked={swapOption === "direct"}
-                      onChange={() => setSwapOption("direct")}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[14px] font-[720] text-ink">
-                        Option 1: Direct Payment via Razorpay
-                      </div>
-                      <p className="text-[12.5px] text-ink-2 mt-0.5 leading-snug">
-                        Pay the net upgrade difference in one go via UPI, Credit/Debit Card, or NetBanking.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-3 pt-2.5 border-t border-line flex items-center justify-between text-[13px]">
-                    <span className="text-ink-2">Net customer payable:</span>
-                    <strong className="num text-[15px] text-ink">{inr(swapRemaining)}</strong>
-                  </div>
-                </label>
-
-                {/* Option 2: Razorpay EMI */}
-                <label
-                  className={`flex flex-col justify-between rounded-[10px] border p-3 cursor-pointer transition-colors ${
-                    swapOption === "emi"
-                      ? "border-[color:var(--ink)] bg-surface"
-                      : "border-line bg-surface/60"
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <input
-                      type="radio"
-                      name={`rzp-swap-${caseId}`}
-                      className="mt-1"
-                      checked={swapOption === "emi"}
-                      onChange={() => setSwapOption("emi")}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[14px] font-[720] text-ink">
-                          Option 2: EMI via Razorpay
-                        </span>
-                        <span className="pill pill-up !text-[11px]">No-Cost EMI available</span>
-                      </div>
-                      <p className="text-[12.5px] text-ink-2 mt-0.5 leading-snug">
-                        Convert <strong className="num">{inr(swapRemaining)}</strong> into monthly instalments on Credit/Debit cards &amp; Cardless EMI.
-                      </p>
-                    </div>
-                  </div>
-                  {chosenEmiPlan ? (
-                    <div className="mt-3 pt-2.5 border-t border-line flex items-center justify-between text-[13px]">
-                      <span className="text-ink-2">Selected plan:</span>
-                      <strong className="num text-up">
-                        {inr(chosenEmiPlan.monthlyAmount)}/mo × {chosenEmiPlan.months}m
-                      </strong>
-                    </div>
-                  ) : null}
-                </label>
-              </div>
-
-              {swapOption === "emi" && emiPlans.length > 0 && (
-                <div className="rounded-[10px] border border-line bg-surface p-3 space-y-2">
-                  <div className="text-[12.5px] font-bold uppercase tracking-wider text-ink-2">
-                    Choose Razorpay EMI Tenure (on {inr(swapRemaining)})
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {emiPlans.map((plan) => {
-                      const active = selectedEmiMonths === plan.months;
-                      return (
-                        <button
-                          key={plan.months}
-                          type="button"
-                          onClick={() => setSelectedEmiMonths(plan.months)}
-                          className={`rounded-[8px] border px-3 py-2 text-left transition-colors ${
-                            active
-                              ? "border-[color:var(--ink)] bg-surface-2 font-semibold"
-                              : "border-line bg-surface hover:bg-surface-2/60"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="text-[13px] font-bold">{plan.months} Months</span>
-                            {plan.noCost ? (
-                              <span className="text-[10.5px] font-bold text-up">NO COST</span>
-                            ) : (
-                              <span className="text-[10.5px] text-muted">{plan.interestRatePa}% p.a.</span>
-                            )}
-                          </div>
-                          <div className="num text-[14px] font-[740] text-ink mt-0.5">
-                            {inr(plan.monthlyAmount)}/mo
-                          </div>
-                          <div className="num text-[11.5px] text-muted">
-                            Total {inr(plan.totalAmount)}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  className="btn btn-up btn-sm"
-                  disabled={busy}
-                  onClick={() =>
-                    startCheckout("swap", swapOption === "emi" ? "swap_emi" : "swap_direct")
-                  }
-                >
-                  {busy
-                    ? "Creating Razorpay Order…"
-                    : swapOption === "emi" && chosenEmiPlan
-                      ? `Pay with Razorpay EMI (${inr(chosenEmiPlan.monthlyAmount)}/mo × ${chosenEmiPlan.months}M)`
-                      : `Pay Direct ${inr(swapRemaining)} via Razorpay`}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       {/* ─────────────── INTERACTIVE RAZORPAY CHECKOUT MODAL ─────────────── */}
       {activeOrder ? (
@@ -710,23 +386,18 @@ export function RazorpayPaymentPanel({
             <div className="p-5 space-y-4">
               <div className="text-[12.5px] text-muted flex items-center justify-between border-b border-line pb-2.5">
                 <span>Order ID: <code className="num text-ink">{activeOrder.payment.razorpay_order_id}</code></span>
-                {activeOrder.payment.remaining_due > 0 ? (
-                  <span className="num text-fix font-semibold">
-                    Balance after this: {inr(activeOrder.payment.remaining_due)}
-                  </span>
-                ) : null}
+                <span className="num text-up font-semibold">100% Complete Payment</span>
               </div>
 
               <div className="space-y-2">
                 <div className="text-[12.5px] font-bold uppercase tracking-wider text-ink-2">
-                  Select Payment Method
+                  Select Complete Payment Method
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {(
                     [
                       ["upi", "UPI (GPay / PhonePe / Paytm)"],
                       ["card", "Credit / Debit Card"],
-                      ["emi", "Razorpay EMI (Cards / Cardless)"],
                       ["netbanking", "NetBanking"],
                     ] as const
                   ).map(([id, label]) => (

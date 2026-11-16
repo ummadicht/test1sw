@@ -377,7 +377,6 @@ export default async function ReceiptPage({
             {isRepairReceipt ? (
               <>
                 <li>Repair spare parts are priced as per the published OEM service schedule for the model above.</li>
-                <li>If paid via Razorpay Part Advance, the remaining balance is payable upon repair completion and device handover.</li>
                 <li>Only the ID&apos;s last four characters are recorded.</li>
               </>
             ) : (

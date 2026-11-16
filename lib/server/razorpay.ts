@@ -340,27 +340,15 @@ export async function createRazorpayOrder(
       throw new HttpError(400, "Repair amount is already paid in full for this case.");
     }
 
-    if (plan === "repair_part_advance") {
-      stage = "advance";
-      const defaultAdv = Math.max(100, Math.round((balance * 0.3) / 10) * 10);
-      const requestedAdv =
-        typeof input.customAdvanceAmount === "number" && input.customAdvanceAmount > 0
-          ? Math.round(input.customAdvanceAmount)
-          : defaultAdv;
-      if (requestedAdv <= 0 || requestedAdv >= balance) {
-        throw new HttpError(400, `Part advance must be between ₹1 and ₹${balance - 1}.`);
-      }
-      amountToCharge = requestedAdv;
-      remainingDue = balance - amountToCharge;
-    } else if (plan === "repair_remaining") {
-      stage = "remaining";
-      amountToCharge = balance;
-      remainingDue = 0;
-    } else {
-      stage = "full";
-      amountToCharge = balance;
-      remainingDue = 0;
+    if (plan === "repair_part_advance" || (typeof input.customAdvanceAmount === "number" && input.customAdvanceAmount > 0)) {
+      throw new HttpError(
+        400,
+        "Part payment is not supported. Customers must either swap the phone with complete payment or choose repair and walk out."
+      );
     }
+    stage = "full";
+    amountToCharge = balance;
+    remainingDue = 0;
   } else if (journey === "swap") {
     totalCasePayable =
       typeof input.overrideTotalAmount === "number" && input.overrideTotalAmount > 0

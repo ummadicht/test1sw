@@ -249,9 +249,8 @@ export function AnswerCard({
 
   const badge = o.recommendation === "repair" ? "repair" : o.recommendation === "upgrade" ? "swap" : null;
 
-  // Refurb quote — defaults to ₹5,000 when no specific repair quote is set so customer can always opt to repair via Razorpay.
+  // Refurb quote — pure SwapUp repair figure
   const r = o.repair;
-  const effectiveRepairAmount = r.amount !== null && r.amount > 0 ? r.amount : 5000;
   const repairWhy = r.amount === null && !r.nothingToRepair ? r.why : null;
   const repairRefusal = o.actions.repair && o.actions.repair !== repairWhy && !(r.nothingToRepair && o.actions.repair === r.why) ? o.actions.repair : null;
   // The server's lines, and its staff-only words.
@@ -362,16 +361,10 @@ export function AnswerCard({
         {/* Repair | Swap up — the same weight, side by side even on a phone */}
         <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
           <Tile label="Repair" recommended={badge === "repair"}>
-            {repairL && repairL.amount !== null && (repairL.amount > 0 || r.covered) ? (
-              <div className={FIGURE}>{repairL.text}</div>
-            ) : (
-              <div className={FIGURE}>or repair it for {inr(effectiveRepairAmount)}</div>
-            )}
-            {r.amount !== null && r.detail ? (
-              <Small>{r.detail}</Small>
-            ) : (
-              <Small>Standard service estimate ({inr(effectiveRepairAmount)} default)</Small>
-            )}
+            <div className={`${FIGURE} ${repairL ? "" : "text-muted"}`}>
+              {repairL ? repairL.text : "—"}
+            </div>
+            {r.detail ? <Small>{r.detail}</Small> : null}
             {repairWhy ? <Small>{repairWhy}</Small> : null}
             {editable && repairRefusal ? <Small tone="ink">{repairRefusal}</Small> : null}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -411,35 +404,33 @@ export function AnswerCard({
           </Tile>
         </div>
 
-        <RazorpayPaymentPanel
-          caseId={view.id}
-          caseRef={view.ref}
-          mode={w.customerPays !== null && w.customerPays > 0 ? "both" : "repair"}
-          repairAmount={effectiveRepairAmount}
-          swapAmount={w.customerPays}
-          customerName={view.customer?.name}
-          customerPhone={view.customer?.phone}
-        />
+        {w.customerPays !== null && w.customerPays > 0 ? (
+          <RazorpayPaymentPanel
+            caseId={view.id}
+            caseRef={view.ref}
+            mode="swap"
+            repairAmount={r.amount}
+            swapAmount={w.customerPays}
+            customerName={view.customer?.name}
+            customerPhone={view.customer?.phone}
+          />
+        ) : null}
       </div>
 
-      {/* What the customer chose — at the counter only; a closed or read-only case has nothing to choose */}
+      {/* What the customer chose — at the counter only; either Swap Up with Complete Payment or Choose Repair & Walk Out */}
       {editable ? (
       <div className="border-t border-line px-5 py-3 space-y-2 rounded-b-[14px] no-print">
         {confirm === "repair" ? (
-          <div className="rounded-[12px] border border-line p-3 space-y-3">
-            <div className="text-[14px] font-semibold">Closes the case for repair ({inr(effectiveRepairAmount)}). Customer can pay Part Advance or Full amount via Razorpay:</div>
-            <RazorpayPaymentPanel
-              caseId={view.id}
-              caseRef={view.ref}
-              mode="repair"
-              repairAmount={effectiveRepairAmount}
-              swapAmount={w.customerPays}
-              customerName={view.customer?.name}
-              customerPhone={view.customer?.phone}
-            />
+          <div className="rounded-[12px] border border-line p-3 space-y-2.5">
+            <div className="text-[14px] font-semibold">
+              Closes the case — customer chose to repair and walk out.
+            </div>
+            <p className="text-[13px] text-ink-2">
+              No payment or part-payment is collected on SwapUp when the customer chooses repair and walks out.
+            </p>
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn btn-fix btn-sm" disabled={acting} onClick={() => run("choose_repair")}>
-                {acting ? "Closing…" : "Confirm: Customer will repair"}
+                {acting ? "Closing…" : "Confirm: Choose repair & walk out"}
               </button>
               <button type="button" className="btn btn-sm btn-ghost" disabled={acting} onClick={() => setConfirm(null)}>
                 Not yet
@@ -471,16 +462,17 @@ export function AnswerCard({
               <button
                 type="button"
                 className="btn btn-fix !whitespace-normal !px-3 leading-tight"
-                disabled={busy}
+                disabled={o.actions.repair !== null || busy}
+                title={o.actions.repair ?? undefined}
                 onClick={() => {
                   setErr(null);
                   setConfirm("repair");
                 }}
               >
-                Customer will repair ({inr(effectiveRepairAmount)})
+                Choose repair &amp; walk out
               </button>
               <button type="button" className="btn btn-up !whitespace-normal !px-3 leading-tight" disabled={o.actions.swap !== null} title={o.actions.swap ?? undefined} onClick={onSwap}>
-                Swap up
+                Swap up (Complete payment)
               </button>
             </div>
             {o.actions.walkAway === null ? (

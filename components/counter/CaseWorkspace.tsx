@@ -18,7 +18,6 @@ import { CheckByEye } from "./CheckByEye";
 import { PhonecheckPanel } from "./PhonecheckPanel";
 import { BluetoothGradingPanel } from "./BluetoothGradingPanel";
 import { RefurbDecision } from "./RefurbDecision";
-import { RazorpayPaymentPanel } from "./RazorpayPaymentPanel";
 import { StepHeader, StepDock } from "./StepNav";
 import { STEP_ANCHOR, canShow, landingStep, stepDone, stepFromAnchor, stepOrder, testedCase, type StepId } from "./caseSteps";
 import { fmtWhen } from "./shared";
@@ -316,37 +315,10 @@ export function CaseWorkspace({
       </div>
 
       {view.status === "repair_chosen" ? (
-        <div className="mb-4 space-y-3">
+        <div className="mb-4">
           <Banner tone="info">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span>Closed {fmtWhen(view.closedAt)} — the customer is repairing it.</span>
-              <div className="flex items-center gap-2 no-print">
-                <Link href={`/cases/${view.id}/receipt?autoprint=1`} className="btn btn-sm !min-h-[28px] !py-0.5 !px-2.5 !text-[12px]">
-                  🖨 Print repair receipt
-                </Link>
-                <Link href={`/cases/${view.id}/receipt?email=1`} className="btn btn-sm btn-ghost !min-h-[28px] !py-0.5 !px-2.5 !text-[12px]">
-                  ✉ Email repair receipt
-                </Link>
-              </div>
-            </div>
+            Closed {fmtWhen(view.closedAt)} — the customer chose to repair and walked out.
           </Banner>
-          {!isPartner ? (
-            <RazorpayPaymentPanel
-              caseId={view.id}
-              caseRef={view.ref}
-              mode="repair"
-              repairAmount={
-                (view.offer?.repair.amount && view.offer.repair.amount > 0
-                  ? view.offer.repair.amount
-                  : view.repair?.customerPays && view.repair.customerPays > 0
-                    ? view.repair.customerPays
-                    : 5000)
-              }
-              swapAmount={null}
-              customerName={view.customer?.name}
-              customerPhone={view.customer?.phone}
-            />
-          ) : null}
         </div>
       ) : null}
       {view.status === "walked_away" ? (
