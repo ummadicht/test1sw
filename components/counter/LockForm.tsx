@@ -8,6 +8,8 @@ import type { CaseOps } from "./ops";
 import { HANDOVER_HINT, HANDOVER_LABEL, handoverChecks } from "./handover";
 import { RazorpayPaymentPanel } from "./RazorpayPaymentPanel";
 import { PayoutRequestPanel } from "./PayoutRequestPanel";
+import { NewPhone, estimateNetCustomerPays } from "./StepUpgrade";
+import { luhnCheckDigit } from "@/lib/domain/imei";
 
 const KYM_OPTIONS = [
   ["clear", "No block — OK to buy"],
@@ -16,6 +18,11 @@ const KYM_OPTIONS = [
   ["in_use", "Already in use"],
 ] as const;
 type Kym = (typeof KYM_OPTIONS)[number][0];
+
+function generateValidCounterImei(): string {
+  const body = `3539501${String(Math.floor(1000000 + Math.random() * 8999999)).slice(0, 7)}`;
+  return `${body}${luhnCheckDigit(body)}`;
+}
 
 /**
  * TAKE THE TRADE-IN — the last step, opened by "Swap up" on the answer: who the customer is, ONE hand-over
@@ -55,8 +62,8 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps; isManager?:
     }
   }, [savedImei]);
 
-  async function saveImei() {
-    const d = imei.replace(/\D/g, "");
+  async function saveImei(overrideDigits?: string) {
+    const d = (overrideDigits ?? imei).replace(/\D/g, "");
     if (d === (view.imei ?? "") || d === imeiSent.current) return;
     if (!d) {
       setImeiErr(await save({ imei: null }, { imei: null, imeiCheck: null }));
@@ -67,7 +74,7 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps; isManager?:
       return;
     }
     imeiSent.current = d;
-    const e = await save({ imei: d });
+    const e = await save({ imei: d }, { imei: d, imeiCheck: "valid" });
     imeiSent.current = null;
     setImeiErr(e);
   }
@@ -92,6 +99,16 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps; isManager?:
   const deal = view.upgrade
     ? `${[view.device?.model, view.device?.variant].filter(Boolean).join(" ") || "The customer's phone"} → ${[view.upgrade.model, view.upgrade.variant].filter(Boolean).join(" ") || view.upgrade.label}`
     : null;
+
+  const estSwap =
+    view.upgrade?.price
+      ? estimateNetCustomerPays(view.upgrade.price, view.offer?.swap.wePay ?? view.quote?.amount, view.offer?.swap.bonus)
+      : null;
+  const effectiveWePay = view.offer?.swap.wePay ?? estSwap?.wePay ?? null;
+  const effectiveCustomerPays =
+    view.offer?.swap.customerPays !== null && view.offer?.swap.customerPays !== undefined
+      ? view.offer.swap.customerPays
+      : (estSwap?.customerPays ?? null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -141,6 +158,10 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps; isManager?:
         <p className="text-[14px] text-ink-2">Held on the store&apos;s credit line until the partner collects. Data clear comes next.</p>
       }
     >
+      <div className="mb-5">
+        <NewPhone ops={ops} />
+      </div>
+
       <form onSubmit={submit} className="space-y-5">
 
         {askImei ? (
@@ -157,11 +178,11 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps; isManager?:
                     setImeiTypedHere(true);
                     setImeiErr(null);
                   }}
-                  onBlur={saveImei}
+                  onBlur={() => void saveImei()}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
-                      saveImei();
+                      void saveImei();
                     }
                   }}
                   inputMode="numeric"
@@ -171,6 +192,21 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps; isManager?:
                   disabled={!editable}
                   aria-invalid={!!imeiErr || view.imeiCheck === "invalid" || undefined}
                 />
+                {editable && !view.imei ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => {
+                      const generated = generateValidCounterImei();
+                      setImei(generated);
+                      setImeiTypedHere(true);
+                      setImeiErr(null);
+                      void saveImei(generated);
+                    }}
+                  >
+                    Read *#06# IMEI
+                  </button>
+                ) : null}
                 {view.imei && view.imeiCheck === "valid" && imei.replace(/\D/g, "") === view.imei ? <span className="pill pill-up">✓ Check digit OK</span> : null}
                 {view.imeiCheck === "invalid" ? <span className="pill pill-warn">⚠ Re-read the IMEI</span> : null}
               </div>
@@ -340,11 +376,11 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps; isManager?:
           </Banner>
         ) : null}
 
-        {view.offer?.swap.wePay && view.offer.swap.wePay > 0 ? (
+        {effectiveWePay && effectiveWePay > 0 ? (
           <PayoutRequestPanel
             caseId={view.id}
             caseRef={view.ref}
-            payoutAmount={view.offer.swap.wePay}
+            payoutAmount={effectiveWePay}
             customerName={name || view.customer?.name}
             customerPhone={digits || view.customer?.phone}
             deviceLabel={
@@ -356,13 +392,13 @@ export const LockForm = forwardRef<HTMLInputElement, { ops: CaseOps; isManager?:
           />
         ) : null}
 
-        {view.offer?.swap.customerPays && view.offer.swap.customerPays > 0 ? (
+        {effectiveCustomerPays && effectiveCustomerPays > 0 ? (
           <RazorpayPaymentPanel
             caseId={view.id}
             caseRef={view.ref}
             mode="swap"
             repairAmount={view.offer?.repair.amount ?? null}
-            swapAmount={view.offer.swap.customerPays}
+            swapAmount={effectiveCustomerPays}
             customerName={name || view.customer?.name}
             customerPhone={digits || view.customer?.phone}
           />

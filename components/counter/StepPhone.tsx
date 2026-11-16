@@ -94,15 +94,20 @@ export function StepPhone({ ops, brands, initialModel }: { ops: CaseOps; brands:
     setModel(m);
     setPicking(false);
     setQ("");
+    const defaultVariant = m.variants[0] ?? null;
     const e = await save(
-      { modelId: m.id },
+      {
+        modelId: m.id,
+        ...(defaultVariant ? { variant: defaultVariant } : {}),
+        ...(view.condition === null ? { conditionFromFaults: true } : {}),
+      },
       {
         device: {
           modelId: m.id,
           brand: m.brand,
           model: m.model,
           series: m.series,
-          variant: null,
+          variant: defaultVariant,
           releaseYear: m.releaseYear,
           supportEndYear: m.supportEndYear,
           ageYears: m.releaseYear ? Math.max(0, new Date().getFullYear() - m.releaseYear) : null,

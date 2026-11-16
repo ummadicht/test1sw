@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ErrorText } from "@/components/ui";
+import { ErrorText, Money } from "@/components/ui";
 import { inr } from "@/lib/domain/money";
 import type { Offer } from "@/lib/domain/offer";
 import type { AnswerLine, AnswerLineKey } from "@/lib/domain/answer";
@@ -10,37 +10,7 @@ import { CHOOSE_NEW_PHONE_LINK, askControl, autoRequoteKey, requotable, staleDec
 import { IdentityOverride } from "./AnswerAskForms";
 import { GradeRow } from "./GradeRow";
 import { RazorpayPaymentPanel } from "./RazorpayPaymentPanel";
-
-/**
- * THE ANSWER, first, once the test is on the case (owner, 2026-10-17: "Why asking
- * questions when we have all tested data ... just refurb quote vs bonus + trade in price";
- * 2026-10-18: "Current grade C. Market price for grade C is ₹25000 … We pay you ₹27000 +
- * ₹10000 bonus if you exchange with a new device"):
- *
- *     Current grade C · screen cracked
- *     Market price for grade C ₹25,000
- *     Repair                        Swap up
- *     or repair it for ₹34,096      We pay you ₹26,000
- *                                   + ₹6,199 bonus if you exchange with a new device
- *
- * The LINES are the server's, word for word (CaseView.offer.answer, lib/domain/answer.ts) —
- * the same lines SwapUp Store and the customer's phone print; this card adds only the staff
- * extras under the line they belong to, and every figure and reason is the server's
- * (CaseView.offer, lib/domain/offer.ts). The repair and what we pay carry the same weight,
- * side by side, the recommended side marked. Whatever the test couldn't fill is one tap here (storage
- * chips with each size's trade-in) or a jump to the step that fills it — never a
- * guessed size, never a typed price. Where no step can fill it (the camera's identity
- * check) it is answered here (answerAsks.ts says which); where nothing can (no price, a
- * size not on file) it is said once, as text. An expired or unpriced quote is re-quoted
- * once on open, as the store app does, so "re-quoting" is true and a rate card uploaded
- * since shows. The verdict is decide()'s headline; the bonus is shown, never a reason.
- *
- * ONE ANSWER on the page — the case page's "The answer" step (caseSteps.ts): the headline,
- * its sentence, "Why this answer" (the server's signals and caveats, as the store app's "?"
- * sheet), the asks, the lines with their staff extras (the grade's report links, how the
- * market price was reached, the premium, the bonus, the new phone) and the buttons. Each
- * number once. Each ask and each "Change" goes to the step that answers it.
- */
+import { NewPhone, estimateNetCustomerPays } from "./StepUpgrade";
 
 /** "Cover: None · change" — the store app's short names. */
 const COVER_SHORT: Record<Offer["repair"]["coverage"], string> = { none: "None", warranty: "Warranty", care_plus: "Care+" };
@@ -64,11 +34,12 @@ function LineText({ l }: { l: AnswerLine }) {
 }
 
 /** "Galaxy S26 Ultra 256GB ₹1,54,999 · customer pays ₹1,30,000" (the offer names the phone without the brand). */
-function newPhoneLine(o: Offer): string | null {
+function newPhoneLine(o: Offer, fallbackPayable: number | null): string | null {
   const p = o.swap.newPhone;
   if (!p) return null;
   const head = `${p.label} ${inr(p.price)}`;
-  return o.swap.customerPays === null ? head : `${head} · customer pays ${inr(o.swap.customerPays)}`;
+  const payable = o.swap.customerPays ?? fallbackPayable;
+  return payable === null ? head : `${head} · customer pays ${inr(payable)}`;
 }
 
 /** The swap against the repair, in what the customer pays today (+ = the swap costs more). */
@@ -117,7 +88,6 @@ function Tile({ label, recommended, children }: { label: string; recommended: bo
  * "?" sheet lays them out. Closed by default; not there when the server gives none.
  */
 function WhyThisAnswer({ o }: { o: Offer }) {
-  // The headline's own sentence is already on the card: not said twice.
   const signals = o.signals.filter((x) => x.text !== o.reason);
   if (!signals.length && !o.caveats.length) return null;
   return (
@@ -150,9 +120,7 @@ function WhyThisAnswer({ o }: { o: Offer }) {
 }
 
 /**
- * How the market price was reached, in the server's words (Offer.swap.tradeInDetail) — closed
- * behind "Show details", as the store app's: its one line ("Refurbished market price ₹51,399 (Good)
- * − 2% − 2 defects · PriceIQ") and each step with its % and rupees. Nothing for a single figure.
+ * How the market price was reached, in the server's words (Offer.swap.tradeInDetail).
  */
 function TradeInHow({ d }: { d: NonNullable<Offer["swap"]["tradeInDetail"]> }) {
   if (!d.line && !d.lines.length && !d.note) return null;
@@ -206,12 +174,8 @@ export function AnswerCard({
   const [acting, setActing] = useState(false);
   const [requoting, setRequoting] = useState(false);
   const [requoteErr, setRequoteErr] = useState<string | null>(null);
+  const [showInlineUpgradePicker, setShowInlineUpgradePicker] = useState(false);
 
-  // An expired or unpriced quote is re-quoted once, quietly, the moment the answer shows it (the
-  // store app's answer screen does the same): ONCE per page open, whatever comes back — a quote
-  // already out of date, or still unpriced, is not asked for again and again with the IMEI. The
-  // tile's "Re-quote" is the way to ask again (autoRequoteKey).
-  // An open case decided under an older ruleset is re-decided the same quiet way, without asking the partner.
   const autoKey = autoRequoteKey(view) ?? staleDecisionKey(view);
   const autoTried = useRef(false);
   useEffect(() => {
@@ -259,11 +223,29 @@ export function AnswerCard({
   const notes = o.answer.staffNotes;
   // Swap up
   const w = o.swap;
-  const phoneLine = newPhoneLine(o);
-  const vs = vsRepairLine(w.vsRepair);
-  // Said once: not again when the headline's sentence already says it (a phone not on the card).
+  const activeUpgradePrice = w.newPhone?.price ?? view.upgrade?.price ?? null;
+  const estSwap =
+    activeUpgradePrice !== null
+      ? estimateNetCustomerPays(activeUpgradePrice, w.wePay ?? view.quote?.amount, w.bonus)
+      : null;
+  const effectiveWePay = w.wePay ?? estSwap?.wePay ?? null;
+  const effectiveBonus = w.bonus ?? estSwap?.bonus ?? 0;
+  const effectiveCustomerPays =
+    w.customerPays !== null && w.customerPays !== undefined
+      ? w.customerPays
+      : (estSwap?.customerPays ?? null);
+
+  const phoneLine = newPhoneLine(o, effectiveCustomerPays);
+  const vs = vsRepairLine(
+    w.vsRepair !== null
+      ? w.vsRepair
+      : effectiveCustomerPays !== null && r.amount !== null
+        ? effectiveCustomerPays - r.amount
+        : null
+  );
   const swapNoPrice = swapWhy(o);
-  const swapNo = swapRefusal(o);
+  const swapNo = effectiveCustomerPays !== null ? null : swapRefusal(o);
+  const canSwapNow = editable && (o.actions.swap === null || (!!view.upgrade && effectiveCustomerPays !== null));
 
   return (
     <section className="card" id="answer" aria-label="The answer">
@@ -279,13 +261,12 @@ export function AnswerCard({
           </div>
           <h2 className="text-[24px] sm:text-[28px] font-[760] leading-tight tracking-tight mt-1">{o.headline}</h2>
           {o.reason ? <p className="text-[15px] text-ink-2 leading-snug mt-1">{o.reason}</p> : null}
-          {/* A safety warning is never behind "Why this answer". */}
           {o.safety ? <p className="text-[14px] text-warn font-semibold leading-snug mt-1.5" role="alert">{o.safety}</p> : null}
           {o.storage.note ? <p className="text-[13.5px] text-warn font-semibold leading-snug mt-1.5">{o.storage.note}</p> : null}
           <WhyThisAnswer o={o} />
         </div>
 
-        {/* What the answer still needs — one tap each. Title and text are dropped where the headline and the sentence already say them. */}
+        {/* What the answer still needs — one tap each. */}
         {o.asks.map((a) => {
           const c = askControl(a, view, isManager);
           const control =
@@ -298,7 +279,6 @@ export function AnswerCard({
                     </button>
                   ))}
                 </div>
-                {/* The market data's age, or "PriceIQ unreachable, last answer …", while those chip prices are on screen. */}
                 {c.note ? <Small tone="warn">{c.note}</Small> : null}
               </>
             ) : c.kind === "identity_override" ? (
@@ -306,7 +286,17 @@ export function AnswerCard({
             ) : c.kind === "ask_manager" ? (
               <Small tone="ink">{c.text}</Small>
             ) : c.kind === "step" ? (
-              <button type="button" className="btn btn-sm" onClick={() => onStep(c.step)}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  if (a.kind === "new_phone") {
+                    setShowInlineUpgradePicker(true);
+                  } else {
+                    onStep(c.step);
+                  }
+                }}
+              >
                 {c.button}
               </button>
             ) : null;
@@ -322,7 +312,7 @@ export function AnswerCard({
           );
         })}
 
-        {/* The grade and the market price — the server's lines; the grade's report and how the price was reached under them. */}
+        {/* The grade and the market price */}
         {gradeL || marketL || view.grading ? (
           <div className="rounded-[12px] border border-line px-4 py-3 space-y-3">
             {gradeL || view.grading ? (
@@ -332,7 +322,6 @@ export function AnswerCard({
                     <LineText l={gradeL} />
                   </p>
                 ) : null}
-                {/* The grade never moves a price (docs/GRADING.md): its report and why sit under the line, never in the money. */}
                 {view.grading ? <GradeRow view={view} hideLabel={!!gradeL} /> : null}
               </div>
             ) : null}
@@ -344,7 +333,6 @@ export function AnswerCard({
                 {notes.market ? <Small tone="warn">{notes.market}</Small> : null}
                 {w.tradeInNote ? <Small tone="warn">{w.tradeInNote}</Small> : null}
                 {w.tradeInDetail ? <TradeInHow d={w.tradeInDetail} /> : null}
-                {/* The quiet re-quote is the usual way out; this is for when it failed or the advisor wants it now. */}
                 {editable && requotable(view) ? (
                   <>
                     <TileLink onClick={requote} disabled={requoting}>
@@ -358,7 +346,7 @@ export function AnswerCard({
           </div>
         ) : null}
 
-        {/* Repair | Swap up — the same weight, side by side even on a phone */}
+        {/* Repair | Swap up — side by side */}
         <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
           <Tile label="Repair" recommended={badge === "repair"}>
             <div className={`${FIGURE} ${repairL ? "" : "text-muted"}`}>
@@ -377,40 +365,92 @@ export function AnswerCard({
           </Tile>
 
           <Tile label="Swap up" recommended={badge === "swap"}>
-            <div className={`${FIGURE} ${wePayL ? "" : "text-muted"}`}>{wePayL ? wePayL.text : "—"}</div>
+            <div className={`${FIGURE} ${wePayL || effectiveWePay ? "" : "text-muted"}`}>
+              {wePayL ? wePayL.text : effectiveWePay !== null ? `We pay you ${inr(effectiveWePay)}` : "—"}
+            </div>
             {bonusL ? (
               <p className="text-[15px] text-ink leading-snug">
                 <LineText l={bonusL} />
               </p>
+            ) : effectiveBonus > 0 ? (
+              <p className="text-[15px] text-ink leading-snug">
+                + {inr(effectiveBonus)} upgrade bonus
+              </p>
             ) : null}
-            {swapNoPrice ? <Small>{swapNoPrice}</Small> : null}
+            {swapNoPrice && effectiveWePay === null ? <Small>{swapNoPrice}</Small> : null}
             {notes.we_pay ? <Small>{notes.we_pay}</Small> : null}
             {wePayL && notes.bonus ? <Small>{notes.bonus}</Small> : null}
             {phoneLine ? (
-              <div className="flex flex-col gap-1 mt-0.5">
+              <div className="flex flex-col gap-1.5 mt-0.5">
                 {w.newPhone?.suggested ? (
                   <span className="pill pill-fix self-start" title={w.newPhone.why ?? undefined}>
                     Suggested
                   </span>
                 ) : null}
                 <Small tone="ink">{phoneLine}</Small>
-                <TileLink onClick={() => onStep("step-upgrade")}>Change</TileLink>
+                {effectiveCustomerPays !== null && activeUpgradePrice !== null ? (
+                  <div className="rounded-[9px] border border-[color:var(--up)] bg-up-bg px-2.5 py-2 text-[12.5px] space-y-0.5">
+                    <div className="flex items-center justify-between gap-2 text-ink-2">
+                      <span>New phone price</span>
+                      <Money value={activeUpgradePrice} className="font-semibold text-ink" />
+                    </div>
+                    {effectiveWePay !== null ? (
+                      <div className="flex items-center justify-between gap-2 text-up">
+                        <span>Less trade-in + bonus</span>
+                        <span className="num font-semibold">− <Money value={effectiveWePay + effectiveBonus} /></span>
+                      </div>
+                    ) : null}
+                    <div className="flex items-center justify-between gap-2 border-t border-line pt-1 font-[760] text-[13.5px] text-ink">
+                      <span>Customer pays</span>
+                      <Money value={effectiveCustomerPays} className="text-up" />
+                    </div>
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-3">
+                  <TileLink onClick={() => setShowInlineUpgradePicker((v) => !v)}>
+                    {showInlineUpgradePicker ? "Close model list" : "Change"}
+                  </TileLink>
+                  <TileLink onClick={() => onStep("step-upgrade")}>Full trade-in details</TileLink>
+                </div>
               </div>
             ) : (
-              <TileLink onClick={() => onStep("step-upgrade")}>{CHOOSE_NEW_PHONE_LINK}</TileLink>
+              <div className="flex flex-wrap items-center gap-3">
+                <TileLink onClick={() => setShowInlineUpgradePicker(true)}>{CHOOSE_NEW_PHONE_LINK}</TileLink>
+              </div>
             )}
             {vs ? <Small>{vs}</Small> : null}
             {editable && swapNo ? <Small tone="ink">{swapNo}</Small> : null}
           </Tile>
         </div>
 
-        {w.customerPays !== null && w.customerPays > 0 ? (
+        {/* Inline New Phone Model Selector right on the Answer / Payment Screen */}
+        {editable && (showInlineUpgradePicker || !view.upgrade) ? (
+          <div className="rounded-[12px] border border-line bg-surface-2 p-4 space-y-2 no-print">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[14px] font-[720] text-ink">
+                Select or change upgrade phone model (live price updates immediately)
+              </div>
+              {view.upgrade ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost !min-h-[28px] !py-0.5 !px-2 !text-[12px]"
+                  onClick={() => setShowInlineUpgradePicker(false)}
+                >
+                  Hide model selector
+                </button>
+              ) : null}
+            </div>
+            <NewPhone ops={ops} onSwap={onSwap} />
+          </div>
+        ) : null}
+
+        {effectiveCustomerPays !== null && effectiveCustomerPays > 0 ? (
           <RazorpayPaymentPanel
             caseId={view.id}
             caseRef={view.ref}
             mode="swap"
             repairAmount={r.amount}
-            swapAmount={w.customerPays}
+            swapAmount={effectiveCustomerPays}
             customerName={view.customer?.name}
             customerPhone={view.customer?.phone}
           />
@@ -419,79 +459,93 @@ export function AnswerCard({
 
       {/* What the customer chose — at the counter only; either Swap Up with Complete Payment or Choose Repair & Walk Out */}
       {editable ? (
-      <div className="border-t border-line px-5 py-3 space-y-2 rounded-b-[14px] no-print">
-        {confirm === "repair" ? (
-          <div className="rounded-[12px] border border-line p-3 space-y-2.5">
-            <div className="text-[14px] font-semibold">
-              Closes the case — customer chose to repair and walk out.
-            </div>
-            <p className="text-[13px] text-ink-2">
-              No payment or part-payment is collected on SwapUp when the customer chooses repair and walks out.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn btn-fix btn-sm" disabled={acting} onClick={() => run("choose_repair")}>
-                {acting ? "Closing…" : "Confirm: Choose repair & walk out"}
-              </button>
-              <button type="button" className="btn btn-sm btn-ghost" disabled={acting} onClick={() => setConfirm(null)}>
-                Not yet
-              </button>
-            </div>
-          </div>
-        ) : confirm === "walk" ? (
-          <div className="rounded-[12px] border border-line p-3 space-y-2">
-            <div className="text-[14px] font-semibold">Closes the case. Why? (optional)</div>
-            <div className="flex flex-wrap gap-2" role="group" aria-label="Why they left (optional)">
-              {WALK_AWAY_REASONS.map((x) => (
-                <button key={x} type="button" className="chip" aria-pressed={reason === x} onClick={() => setReason((cur) => (cur === x ? "" : x))}>
-                  {x}
+        <div className="border-t border-line px-5 py-3 space-y-2 rounded-b-[14px] no-print">
+          {confirm === "repair" ? (
+            <div className="rounded-[12px] border border-line p-3 space-y-2.5">
+              <div className="text-[14px] font-semibold">
+                Closes the case — customer chose to repair and walk out.
+              </div>
+              <p className="text-[13px] text-ink-2">
+                No payment or part-payment is collected on SwapUp when the customer chooses repair and walks out.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn btn-fix btn-sm" disabled={acting} onClick={() => run("choose_repair")}>
+                  {acting ? "Closing…" : "Confirm: Choose repair & walk out"}
                 </button>
-              ))}
+                <button type="button" className="btn btn-sm btn-ghost" disabled={acting} onClick={() => setConfirm(null)}>
+                  Not yet
+                </button>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn btn-sm btn-primary" disabled={acting} onClick={() => run("walk_away", reason ? { reason } : {})}>
-                {acting ? "Closing…" : "Customer walked away"}
-              </button>
-              <button type="button" className="btn btn-sm btn-ghost" disabled={acting} onClick={() => setConfirm(null)}>
-                Not yet
-              </button>
+          ) : confirm === "walk" ? (
+            <div className="rounded-[12px] border border-line p-3 space-y-2">
+              <div className="text-[14px] font-semibold">Closes the case. Why? (optional)</div>
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Why they left (optional)">
+                {WALK_AWAY_REASONS.map((x) => (
+                  <button key={x} type="button" className="chip" aria-pressed={reason === x} onClick={() => setReason((cur) => (cur === x ? "" : x))}>
+                    {x}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn btn-sm btn-primary" disabled={acting} onClick={() => run("walk_away", reason ? { reason } : {})}>
+                  {acting ? "Closing…" : "Customer walked away"}
+                </button>
+                <button type="button" className="btn btn-sm btn-ghost" disabled={acting} onClick={() => setConfirm(null)}>
+                  Not yet
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className="btn btn-fix !whitespace-normal !px-3 leading-tight"
-                disabled={o.actions.repair !== null || busy}
-                title={o.actions.repair ?? undefined}
-                onClick={() => {
-                  setErr(null);
-                  setConfirm("repair");
-                }}
-              >
-                Choose repair &amp; walk out
-              </button>
-              <button type="button" className="btn btn-up !whitespace-normal !px-3 leading-tight" disabled={o.actions.swap !== null} title={o.actions.swap ?? undefined} onClick={onSwap}>
-                Swap up (Complete payment)
-              </button>
-            </div>
-            {o.actions.walkAway === null ? (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm w-full"
-                onClick={() => {
-                  setErr(null);
-                  setReason("");
-                  setConfirm("walk");
-                }}
-              >
-                Customer walked away
-              </button>
-            ) : null}
-          </>
-        )}
-        <ErrorText error={err} />
-      </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="btn btn-fix !whitespace-normal !px-3 leading-tight"
+                  disabled={o.actions.repair !== null || busy}
+                  title={o.actions.repair ?? undefined}
+                  onClick={() => {
+                    setErr(null);
+                    setConfirm("repair");
+                  }}
+                >
+                  Choose repair &amp; walk out
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-up !whitespace-normal !px-3 leading-tight"
+                  disabled={!editable || busy}
+                  title={canSwapNow ? undefined : (o.actions.swap ?? undefined)}
+                  onClick={() => {
+                    if (!view.upgrade) {
+                      setShowInlineUpgradePicker(true);
+                      return;
+                    }
+                    onSwap();
+                  }}
+                >
+                  {effectiveCustomerPays !== null && view.upgrade
+                    ? `Swap up (Complete payment · ${inr(effectiveCustomerPays)})`
+                    : "Swap up (Complete payment)"}
+                </button>
+              </div>
+              {o.actions.walkAway === null ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm w-full"
+                  onClick={() => {
+                    setErr(null);
+                    setReason("");
+                    setConfirm("walk");
+                  }}
+                >
+                  Customer walked away
+                </button>
+              ) : null}
+            </>
+          )}
+          <ErrorText error={err} />
+        </div>
       ) : null}
     </section>
   );

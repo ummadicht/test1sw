@@ -367,7 +367,14 @@ export function CaseWorkspace({
             <StepRepair ops={ops} />
           </div>
           <div hidden={current !== "tradein"} data-step="tradein">
-            <StepTradeIn ops={ops} isPartner={isPartner} isManager={isManager} bands={bands} />
+            <StepTradeIn
+              ops={ops}
+              isPartner={isPartner}
+              isManager={isManager}
+              bands={bands}
+              onSwap={swapUp}
+              onAnswer={hasAnswer ? () => goTo("answer") : undefined}
+            />
           </div>
           {hasAnswer ? (
             <div hidden={current !== "answer"} data-step="answer" className="space-y-5">

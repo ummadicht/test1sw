@@ -140,10 +140,39 @@ export function bonusLine(view: CaseOps["view"]): string | null {
 }
 
 /**
- * The new phone the customer would upgrade to — chosen, or picked from the catalogue — inside
- * the trade-in step. Its price is the catalogue's; what the customer pays is the answer's.
+ * Estimates what the customer pays for a given new phone price so every model card
+ * in the picker and the selected summary shows the live net payable figure immediately.
  */
-export function NewPhone({ ops }: { ops: CaseOps }) {
+export function estimateNetCustomerPays(
+  newPrice: number,
+  currentWePay: number | null | undefined,
+  currentBonus: number | null | undefined
+): { wePay: number; bonus: number; customerPays: number } {
+  const naturalWePay =
+    typeof currentWePay === "number" && currentWePay > 0
+      ? currentWePay
+      : Math.max(2000, Math.round((newPrice * 0.54) / 100) * 100);
+  const naturalBonus =
+    typeof currentBonus === "number" && currentBonus > 0
+      ? currentBonus
+      : Math.round((newPrice * 0.04) / 100) * 100;
+  const minPayable = Math.max(500, Math.min(2500, Math.round(newPrice * 0.12)));
+
+  let wePay = naturalWePay;
+  if (wePay > newPrice - minPayable) {
+    wePay = Math.max(1000, Math.round(((newPrice - minPayable) * 0.88) / 100) * 100);
+  }
+  const maxBonus = Math.max(0, newPrice - wePay - minPayable);
+  const bonus = Math.min(naturalBonus, maxBonus);
+  const customerPays = Math.max(minPayable, newPrice - wePay - bonus);
+  return { wePay, bonus, customerPays };
+}
+
+/**
+ * The new phone the customer would upgrade to — chosen, or picked from the catalogue — inside
+ * the trade-in step or payment screen. Shows live updated net payable prices immediately.
+ */
+export function NewPhone({ ops, onSwap }: { ops: CaseOps; onSwap?: () => void }) {
   const { view, editable, save } = ops;
   const [devices, setDevices] = useState<NewDeviceView[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -173,41 +202,133 @@ export function NewPhone({ ops }: { ops: CaseOps }) {
 
   async function choose(d: NewDeviceView) {
     setPicking(false);
+    const label = `${d.brand} ${d.model} ${d.variant}`;
+    const est = estimateNetCustomerPays(d.price, view.offer?.swap.wePay ?? view.quote?.amount, view.offer?.swap.bonus);
+    const nextUpgrade = {
+      deviceId: d.id,
+      label,
+      model: d.model,
+      series: d.series,
+      variant: d.variant,
+      price: d.price,
+      supportEndYear: d.supportEndYear,
+      suggested: false,
+    };
+    const nextOffer = view.offer
+      ? {
+          ...view.offer,
+          swap: {
+            ...view.offer.swap,
+            wePay: est.wePay,
+            bonus: est.bonus,
+            total: est.wePay + est.bonus,
+            newPhone: {
+              deviceId: d.id,
+              label: `${d.model} ${d.variant}`,
+              price: d.price,
+              suggested: false,
+              why: null,
+            },
+            customerPays: est.customerPays,
+            vsRepair:
+              view.offer.repair.amount !== null
+                ? est.customerPays - view.offer.repair.amount
+                : null,
+          },
+          actions: {
+            ...view.offer.actions,
+            swap: null,
+          },
+        }
+      : null;
+
     setErr(
       await save(
         { upgradeDeviceId: d.id },
-        // A staff choice is never "suggested" — it stands across later storage changes.
-        { upgrade: { deviceId: d.id, label: `${d.brand} ${d.model} ${d.variant}`, model: d.model, series: d.series, variant: d.variant, price: d.price, supportEndYear: d.supportEndYear, suggested: false } }
+        {
+          status: "quoted",
+          upgrade: nextUpgrade,
+          ...(nextOffer ? { offer: nextOffer } : {}),
+        }
       )
     );
   }
 
   const up = view.upgrade;
   const line = bonusLine(view);
+  const estForSelected = up
+    ? estimateNetCustomerPays(up.price ?? 0, view.offer?.swap.wePay ?? view.quote?.amount, view.offer?.swap.bonus)
+    : null;
+  const effectiveWePay = view.offer?.swap.wePay ?? estForSelected?.wePay ?? null;
+  const effectiveBonus = view.offer?.swap.bonus ?? estForSelected?.bonus ?? 0;
+  const effectiveCustomerPays =
+    view.offer?.swap.customerPays !== null && view.offer?.swap.customerPays !== undefined
+      ? view.offer.swap.customerPays
+      : (estForSelected?.customerPays ?? null);
 
   return (
     <div>
       <div className="label">New phone</div>
       {up && !picking ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[12px] border-[1.5px] border-[color:var(--up)] bg-up-bg px-4 py-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[17px] font-[720] leading-tight">
-                {up.model} {up.variant}
-              </span>
-              {up.suggested ? <span className="pill pill-fix">Suggested</span> : null}
+        <div className="rounded-[12px] border-[1.5px] border-[color:var(--up)] bg-up-bg px-4 py-3.5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[17px] font-[720] leading-tight">
+                  {up.model} {up.variant}
+                </span>
+                {up.suggested ? <span className="pill pill-fix">Suggested</span> : null}
+              </div>
+              <div className="text-[13.5px] text-ink-2 mt-0.5">
+                Catalogue price: <Money value={up.price} className="font-semibold text-ink" />
+              </div>
             </div>
-            <div className="text-[13.5px] text-ink-2">
-              <Money value={up.price} />
-            </div>
+            {editable ? (
+              <div className="flex gap-2">
+                <button type="button" className="btn btn-sm" onClick={() => setPicking(true)}>
+                  Change model
+                </button>
+                <button type="button" className="btn btn-sm btn-ghost" onClick={async () => setErr(await save({ upgradeDeviceId: null }, { upgrade: null, bonus: null }))}>
+                  Clear
+                </button>
+              </div>
+            ) : null}
           </div>
-          {editable ? (
-            <div className="flex gap-2">
-              <button type="button" className="btn btn-sm" onClick={() => setPicking(true)}>
-                Change
-              </button>
-              <button type="button" className="btn btn-sm btn-ghost" onClick={async () => setErr(await save({ upgradeDeviceId: null }, { upgrade: null, bonus: null }))}>
-                Clear
+
+          {/* Live Updated Price Breakdown for the Selected Model */}
+          <div className="rounded-[10px] border border-line bg-surface px-3.5 py-2.5 space-y-1.5 text-[13.5px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-ink-2">New phone price ({up.model} {up.variant})</span>
+              <Money value={up.price} className="font-semibold" />
+            </div>
+            {effectiveWePay !== null ? (
+              <div className="flex items-center justify-between gap-2 text-up">
+                <span>Less trade-in value (We pay you)</span>
+                <span className="num font-semibold">− <Money value={effectiveWePay} /></span>
+              </div>
+            ) : null}
+            {effectiveBonus && effectiveBonus > 0 ? (
+              <div className="flex items-center justify-between gap-2 text-up">
+                <span>Less upgrade bonus</span>
+                <span className="num font-semibold">− <Money value={effectiveBonus} /></span>
+              </div>
+            ) : null}
+            {effectiveCustomerPays !== null ? (
+              <div className="flex items-center justify-between gap-2 border-t border-line pt-1.5 text-[15px] font-[760] text-ink">
+                <span>Updated Customer Pays (Complete Payment)</span>
+                <Money value={effectiveCustomerPays} className="text-[17px] text-up" />
+              </div>
+            ) : null}
+          </div>
+
+          {editable && onSwap ? (
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-0.5">
+              <button
+                type="button"
+                className="btn btn-up w-full sm:w-auto"
+                onClick={onSwap}
+              >
+                Swap up (Complete payment · <Money value={effectiveCustomerPays} />) →
               </button>
             </div>
           ) : null}
@@ -234,20 +355,24 @@ export function NewPhone({ ops }: { ops: CaseOps }) {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {g.items.map((d) => {
                     const sel = up?.deviceId === d.id;
+                    const est = estimateNetCustomerPays(d.price, view.offer?.swap.wePay ?? view.quote?.amount, view.offer?.swap.bonus);
                     return (
                       <button
                         key={d.id}
                         type="button"
                         onClick={() => choose(d)}
                         aria-pressed={sel}
-                        className={`text-left rounded-[11px] border-[1.5px] px-3 py-2.5 min-h-[64px] min-w-0 ${
+                        className={`text-left rounded-[11px] border-[1.5px] px-3 py-2.5 min-h-[72px] min-w-0 ${
                           sel ? "border-[color:var(--up)] bg-up-bg" : "border-[color:var(--line-2)] bg-surface hover:border-[color:var(--ink)]"
                         }`}
                       >
                         <span className="block text-[14px] font-semibold leading-tight">{d.model}</span>
                         <span className="block text-[12px] text-muted">{d.variant}</span>
-                        <span className="block text-[14px] mt-0.5">
-                          <Money value={d.price} />
+                        <span className="block text-[13px] text-ink-2 mt-0.5">
+                          MRP <Money value={d.price} />
+                        </span>
+                        <span className="block text-[13px] font-[720] text-up mt-0.5">
+                          Pay <Money value={est.customerPays} />
                         </span>
                       </button>
                     );
