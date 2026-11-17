@@ -54,7 +54,7 @@ export async function tradeModels(q?: string | null, brand?: string | null): Pro
 
 export async function tradeBrands(): Promise<string[]> {
   const rows = await query<{ brand: string }>(
-    `SELECT DISTINCT brand FROM trade_models ORDER BY brand = 'Samsung' DESC, brand`
+    `SELECT brand FROM trade_models GROUP BY brand ORDER BY brand = 'Samsung' DESC, brand`
   );
   return rows.map((r) => r.brand);
 }
