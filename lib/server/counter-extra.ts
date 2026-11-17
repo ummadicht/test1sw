@@ -3,7 +3,6 @@ import { getCase, forViewer, reprice, type CaseView, type CasePatch } from "./ca
 import { execute, queryOne, parseJson, nowIso } from "./db";
 import { premiumOn } from "../domain/premium";
 import { decide } from "../domain/decision";
-import { syncIqEnvFromDb } from "./iqEngines";
 
 /**
  * Ensures that when an advisor or store manager selects a phone model or upgrade model
@@ -11,7 +10,6 @@ import { syncIqEnvFromDb } from "./iqEngines";
  * so the case immediately transitions to 'quoted' with live prices.
  */
 export async function prepareCounterCasePatch(id: string, patch: CasePatch): Promise<CasePatch> {
-  await syncIqEnvFromDb();
   const next: CasePatch = { ...patch };
 
   const c = await queryOne<{
@@ -227,7 +225,6 @@ export function redactCaseForCounter(u: SessionUser, view: CaseView): CaseView {
 }
 
 export async function getCaseForViewer(u: SessionUser, id: string): Promise<CaseView> {
-  await syncIqEnvFromDb();
   let v = forViewer(u, await getCase(u, id));
   v = await ensureCounterCaseSwappable(u, id, v, false);
   return redactCaseForCounter(u, v);

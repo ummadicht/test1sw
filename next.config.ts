@@ -5,6 +5,11 @@ const nextConfig: NextConfig = {
   // Database driver configuration
   serverExternalPackages: ["pg"],
   poweredByHeader: false,
+  allowedDevOrigins: [
+    "*.run.app",
+    "ais-dev-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app",
+    "ais-pre-egeiwczs7kiexah24wg34c-992872337627.asia-east1.run.app",
+  ],
   async rewrites() {
     return [
       { source: "/app/check", destination: "/app/check/index.html" },

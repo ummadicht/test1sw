@@ -12,6 +12,10 @@ export type PriceiqConfig = { ok: true; base: string; key: string } | { ok: fals
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
+function isAllowedHttpHost(hostname: string): boolean {
+  return LOOPBACK.has(hostname) || (!hostname.includes(".") && /^[a-z0-9-]+$/i.test(hostname));
+}
+
 export function priceiqConfig(env: Record<string, string | undefined> = process.env): PriceiqConfig {
   const base = (env.PRICEIQ_BASE_URL ?? "").trim().replace(/\/+$/, "");
   const key = (env.PRICEIQ_API_KEY ?? "").trim();
@@ -22,7 +26,7 @@ export function priceiqConfig(env: Record<string, string | undefined> = process.
   } catch {
     return { ok: false, why: NOT_CONNECTED };
   }
-  if (!(url.protocol === "https:" || (url.protocol === "http:" && LOOPBACK.has(url.hostname)))) return { ok: false, why: NOT_CONNECTED };
+  if (!(url.protocol === "https:" || (url.protocol === "http:" && isAllowedHttpHost(url.hostname)))) return { ok: false, why: NOT_CONNECTED };
   return { ok: true, base, key };
 }
 

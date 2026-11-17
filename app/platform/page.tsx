@@ -3,14 +3,12 @@ import type { ReactNode } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Stat } from "@/components/ui";
 import { BandEditor, OnboardClient, AddPartner } from "@/components/platform/OrgConsole";
-import { IqConnectionConsole } from "@/components/platform/IqConnectionConsole";
 import { clientTypeLabel } from "@/components/platform/labels";
 import { requirePage } from "@/lib/server/page";
 import { listOrgs, type OrgView } from "@/lib/server/admin";
 import { orgSettingsDefaults } from "@/lib/server/auth";
 import { partnerMode, type PartnerMode } from "@/lib/server/buyback";
 import { campaigns } from "@/lib/server/catalog";
-import { getIqConnectionStatus } from "@/lib/server/iqEngines";
 import { fmtBp } from "@/lib/domain/money";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +30,6 @@ function Meta({ label, children }: { label: string; children: ReactNode }) {
 
 export default async function PlatformPage() {
   const u = await requirePage(["platform"], "/platform");
-  const iqStatus = await getIqConnectionStatus();
   const orgs = await listOrgs(u);
   const clients = orgs.filter((o) => o.kind === "client");
   const partners = orgs.filter((o) => o.kind === "partner");
@@ -71,8 +68,6 @@ export default async function PlatformPage() {
         <Stat label="People" value={totals.people} sub="all organisations" />
         <Stat label="Buyback partners" value={partners.length} />
       </div>
-
-      <IqConnectionConsole initial={iqStatus} />
 
       <h2 className="section-title mb-3">Clients</h2>
       {clients.length === 0 ? (

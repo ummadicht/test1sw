@@ -89,3 +89,73 @@ export async function caseIdsByRef(u: SessionUser, refs: string[]): Promise<Reco
   }
   return out;
 }
+
+export async function saveTradeModel(
+  u: SessionUser,
+  input: {
+    id?: string | null;
+    brand?: string;
+    model: string;
+    series?: string | null;
+    variants: string[] | string;
+    releaseYear?: number | null;
+    supportEndYear?: number | null;
+    serviceTier?: string | null;
+    carePlusFee?: number | null;
+    maxTradePrice?: number | null;
+    modelCodes?: string[] | string;
+    sourceLabel?: string;
+  }
+): Promise<TradeModelAdminView[]> {
+  const brand = String(input.brand || "Samsung").trim();
+  const model = String(input.model || "").trim();
+  if (!model) throw new HttpError(400, "Enter the model name.");
+  const id = (input.id ? String(input.id).trim() : `${brand}-${model}`)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const variants = (Array.isArray(input.variants) ? input.variants : String(input.variants || "").split(","))
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+  if (!variants.length) throw new HttpError(400, "List at least one storage variant.");
+  const modelCodes = input.modelCodes
+    ? (Array.isArray(input.modelCodes) ? input.modelCodes : String(input.modelCodes).split(","))
+        .map((c) => String(c).trim().toUpperCase())
+        .filter(Boolean)
+    : [];
+  const source: SourceRef = {
+    kind: "oem_public",
+    label: input.sourceLabel?.trim() || `${brand} public spec`,
+  };
+  await execute(
+    `INSERT INTO trade_models (id, brand, model, series, release_year, support_end_year, variants, service_tier, care_plus_fee, model_codes, source)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     ON CONFLICT (id) DO UPDATE SET
+       brand = EXCLUDED.brand,
+       model = EXCLUDED.model,
+       series = EXCLUDED.series,
+       release_year = EXCLUDED.release_year,
+       support_end_year = EXCLUDED.support_end_year,
+       variants = EXCLUDED.variants,
+       service_tier = EXCLUDED.service_tier,
+       care_plus_fee = EXCLUDED.care_plus_fee,
+       model_codes = EXCLUDED.model_codes,
+       source = EXCLUDED.source`,
+    [
+      id,
+      brand,
+      model,
+      input.series?.trim() || null,
+      input.releaseYear ?? null,
+      input.supportEndYear ?? null,
+      JSON.stringify(variants),
+      input.serviceTier?.trim() || "other",
+      input.carePlusFee ?? null,
+      JSON.stringify(modelCodes),
+      JSON.stringify(source),
+    ]
+  );
+  await audit({ userId: u.id, orgId: u.orgId, action: "catalog.trade_model.save", entity: "trade_model", entityId: id, detail: { brand, model, variants } });
+  return tradeModelsDetailed();
+}
+

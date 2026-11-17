@@ -1,7 +1,6 @@
 import { handle, body } from "@/lib/server/http";
 import { requireUser, HttpError } from "@/lib/server/auth";
 import { redactCaseForCounter, ensureCounterCaseSwappable } from "@/lib/server/counter-extra";
-import { syncIqEnvFromDb } from "@/lib/server/iqEngines";
 import {
   reprice,
   chooseRepair,
@@ -58,7 +57,6 @@ const legacyStoreBuild = (req: Request): boolean => /^Bearer\s+\S+$/i.test(req.h
 /** One door for every case action: reprice, choose_repair, walk_away, lock, cancel, data_clear, bonus_override, certify. */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   return handle(async () => {
-    await syncIqEnvFromDb();
     const u = await requireUser();
     const { id } = await ctx.params;
     const b = await body<ActionBody>(req);
